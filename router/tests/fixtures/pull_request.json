@@ -1,0 +1,14 @@
+{
+  "action": "opened",
+  "number": 3,
+  "pull_request": {
+    "number": 3,
+    "merged": false,
+    "merged_by": null,
+    "head": {"ref": "feature/customer-search", "sha": "a1b2c3d4e5f6"},
+    "base": {"ref": "main", "sha": "0f0e0d0c0b0a"}
+  },
+  "repository": {"name": "temporal-agentic-review-demo", "owner": {"login": "octocat"}},
+  "sender": {"login": "octocat", "type": "User"},
+  "installation": {"id": 90210}
+}
