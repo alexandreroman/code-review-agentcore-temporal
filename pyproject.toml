@@ -1,0 +1,17 @@
+[tool.uv.workspace]
+members = ["shared", "router", "worker"]
+
+[dependency-groups]
+dev = ["pytest==9.1.1", "pytest-asyncio==1.4.0", "ruff==0.16.9", "watchfiles==1.3.0"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["shared/tests", "router/tests", "worker/tests"]
+addopts = "--import-mode=importlib"
+asyncio_mode = "auto"
