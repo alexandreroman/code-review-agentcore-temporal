@@ -1,0 +1,28 @@
+# Planted defects of the "Add customer search & order history" scenario in
+# the agentcore-review-demo-app repository (tag scenario/customer-search).
+#
+# E2E-04 passes when every defect below is matched by at least one open
+# finding after the first review round of a pull request opened from
+# scenario_branch: same category, same path, and a finding span
+# [line, end_line or line] that overlaps one of the defect's line ranges
+# (inclusive). Line numbers refer to the file at the scenario tag (RIGHT
+# side of the diff). The missing tests of the new endpoints are part of the
+# maintainability defect but have no line to anchor, so they are not matched.
+scenario_tag: scenario/customer-search
+scenario_branch: feature/customer-search
+defects:
+  - id: sql-injection
+    category: security
+    file: app/routers/customers.py
+    line_ranges: [[18, 23]]
+    summary: Customer search SQL built with an f-string and run through text()
+  - id: n-plus-one
+    category: performance
+    file: app/routers/customers.py
+    line_ranges: [[41, 50]]
+    summary: Order history loads each order's lines with one query per order
+  - id: duplicated-validation
+    category: maintainability
+    file: app/routers/customers.py
+    line_ranges: [[14, 17], [29, 32]]
+    summary: Identical limit/offset checks in both endpoints, and no tests
