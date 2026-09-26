@@ -90,6 +90,18 @@ dev: infra-init ## Run the local worker (dev task queue on Temporal Cloud) with 
 	$(call require_namespace)
 	@GITHUB_OWNER=$(GITHUB_OWNER) scripts/dev.sh
 
+# Manual driver, as the router does from webhooks: make review-pr PR=3 [ACTION=fix] [QUEUE=review]
+PR ?=
+ACTION ?= update
+QUEUE ?= $(DEV_TASK_QUEUE)
+
+.PHONY: review-pr
+review-pr: ## Drive a pull request's workflow by hand: PR=<n> [ACTION=update|fix|close] [QUEUE=<queue>]
+	$(call require_namespace)
+	$(call require,PR,pass the pull request number: make review-pr PR=<n>)
+	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
+	scripts/review-pr.sh "$(GITHUB_OWNER)" "$(DEMO_REPO)" "$(PR)" "$(ACTION)" "$(QUEUE)"
+
 # Casper gives each worktree a band of ports starting at CASPER_PORT; the
 # local port is derived from it once, here, and .env stays the only source.
 .PHONY: worktree-init

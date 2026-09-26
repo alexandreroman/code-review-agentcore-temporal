@@ -1,4 +1,4 @@
-"""GitHub App manifest flow (make github-app) and installation check (make up)."""
+"""GitHub App manifest flow (make github-app), installation check (make up) and ID (make review-pr)."""
 
 import argparse
 import html
@@ -96,15 +96,15 @@ def is_organization(http: httpx.Client, owner: str) -> bool:
     return response.json().get("type") == "Organization"
 
 
-def installed_on(http: httpx.Client, app: GitHubAppSecret, owner: str, repo: str) -> bool:
+def installation_id(http: httpx.Client, app: GitHubAppSecret, owner: str, repo: str) -> int | None:
     token = GitHubApp(app.client_id, app.private_key).jwt()
     response = http.get(
         f"{API_URL}/repos/{owner}/{repo}/installation", headers={**ACCEPT, "Authorization": f"Bearer {token}"}
     )
     if response.status_code == 404:
-        return False
+        return None
     response.raise_for_status()
-    return True
+    return response.json()["id"]
 
 
 def serve_once(port: int, page: str, expected_state: str, on_code: Callable[[str], str], on_ready: Callable) -> None:
@@ -197,10 +197,23 @@ def check_install(args: argparse.Namespace) -> None:
     if app is None:
         sys.exit("The GitHub App is not registered yet: run make github-app")
     with httpx.Client(timeout=20) as http:
-        if installed_on(http, app, args.owner, args.repo):
+        if installation_id(http, app, args.owner, args.repo) is not None:
             print(f"GitHub App {app.slug} is installed on {args.owner}/{args.repo}.")
         else:
             print(f"Action needed: install GitHub App {app.slug} on {args.owner}/{args.repo}: {install_url(app)}")
+
+
+def print_installation_id(args: argparse.Namespace) -> None:
+    import boto3
+
+    app = _registered_app(boto3.client("secretsmanager"))
+    if app is None:
+        sys.exit("The GitHub App is not registered yet: run make github-app")
+    with httpx.Client(timeout=20) as http:
+        found = installation_id(http, app, args.owner, args.repo)
+    if found is None:
+        sys.exit(f"GitHub App {app.slug} is not installed on {args.owner}/{args.repo}: {install_url(app)}")
+    print(found)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -215,12 +228,13 @@ def main(argv: list[str] | None = None) -> None:
     check = commands.add_parser("check-install", help="tell whether the app is installed on the demo repository")
     check.add_argument("--owner", required=True)
     check.add_argument("--repo", required=True)
+    installation = commands.add_parser("installation-id", help="print the app's installation ID on a repository")
+    installation.add_argument("--owner", required=True)
+    installation.add_argument("--repo", required=True)
     args = parser.parse_args(argv)
+    handlers = {"register": register, "check-install": check_install, "installation-id": print_installation_id}
     try:
-        if args.command == "register":
-            register(args)
-        else:
-            check_install(args)
+        handlers[args.command](args)
     except KeyboardInterrupt:
         sys.exit("aborted")
 
