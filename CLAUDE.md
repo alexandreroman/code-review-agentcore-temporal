@@ -16,8 +16,9 @@ See [README.md](README.md) for full documentation.
 
 ```bash
 make install   # uv sync --all-packages
-make check     # unit tests + ruff format/lint
+make check     # unit tests, ruff, OpenTofu fmt/validate
 make dev       # local worker with hot reload
+make up        # deploy everything (AWS, worker, GitHub)
 ```
 
 ## Modules
@@ -25,6 +26,8 @@ make dev       # local worker with hot reload
 - `shared/` — contract shared by the router and the worker
 - `router/` — GitHub webhook handler (AWS Lambda)
 - `worker/` — Temporal workflows, review agents, activities
+- `tools/` — deployment tooling called by the Makefile
+- `infra/` — OpenTofu stacks (`bootstrap`, `aws`, `github`)
 
 ## Agents
 

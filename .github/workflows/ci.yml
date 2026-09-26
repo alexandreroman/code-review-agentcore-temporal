@@ -10,15 +10,17 @@ permissions:
   contents: read
 
 jobs:
-  python:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - uses: astral-sh/setup-uv@v10
         with:
           version: "0.12.19"
+      - uses: opentofu/setup-opentofu@v2
+        with:
+          tofu_version: "1.12.6"
+          tofu_wrapper: false
       - run: uv python install 3.14
       - run: uv sync --all-packages --locked
-      - run: uv run ruff check .
-      - run: uv run ruff format --check .
-      - run: uv run pytest -q
+      - run: make check
