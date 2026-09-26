@@ -32,3 +32,4 @@
 - [Amend unpushed commits](references/feedback_amend_unpushed.md) — fold fixes into the unpushed commit they correct
 - [Placeholders for account identifiers](references/feedback_no_real_identifiers.md) — real namespace/account/app IDs only in .env, never tracked
 - [Casper stays out of user-facing files](references/feedback_no_casper_in_docs.md) — README and .env.example never mention Casper
+- [Tests cover business logic only](references/feedback_tests_business_only.md) — no tests for infra, tooling or runtime plumbing
