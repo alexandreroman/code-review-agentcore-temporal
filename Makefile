@@ -184,10 +184,31 @@ deploy: router-build infra-init ## Build and push the worker image, then make it
 	$(call require_namespace)
 	scripts/deploy.sh
 
+.PHONY: up
+up: ## Deploy everything: state, AWS, secrets, worker, GitHub (idempotent, stops at a missing prerequisite)
+	$(call require_namespace)
+	$(MAKE) --no-print-directory bootstrap
+	$(MAKE) --no-print-directory infra
+	$(MAKE) --no-print-directory secrets
+	$(MAKE) --no-print-directory deploy
+	$(MAKE) --no-print-directory github
+	$(TOOLS).github_app check-install --owner $(GITHUB_OWNER) --repo $(DEMO_REPO)
+	$(MAKE) --no-print-directory info-publish
+
 .PHONY: kill-sessions
 kill-sessions: infra-init ## Stop every AgentCore session polling the production task queue
 	$(call require_namespace)
 	scripts/kill-sessions.sh
+
+.PHONY: prune
+prune: router-build infra-init ## Remove the endpoints and versions of builds no workflow is pinned to any more
+	$(call require_namespace)
+	scripts/prune.sh
+
+.PHONY: destroy
+destroy: router-build infra-init ## Destroy the AWS resources (asks for confirmation; GitHub and the state bucket stay)
+	$(call require_namespace)
+	scripts/destroy.sh
 
 .PHONY: ping
 ping: ## Run the Ping workflow on the production task queue (scale-from-zero check)
