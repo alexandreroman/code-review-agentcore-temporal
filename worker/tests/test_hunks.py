@@ -47,6 +47,13 @@ def test_missing_patch():
     assert commentable_lines(None) == set() and commentable_lines("") == set()
 
 
+def test_form_feed_in_a_context_line_does_not_add_an_extra_line():
+    # str.splitlines() also breaks on "\x0c"; git only breaks on "\n", so
+    # " a\x0cb" is one context line, not two.
+    patch = "@@ -1,2 +1,2 @@\n a\x0cb\n TARGET"
+    assert commentable_lines(patch) == {1, 2}
+
+
 def test_is_commentable_single_and_range():
     lines = commentable_lines(PATCH)
     assert is_commentable(lines, 3)

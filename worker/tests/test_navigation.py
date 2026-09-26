@@ -138,6 +138,23 @@ def test_symlink_pointing_outside_is_refused(repo, tmp_path):
     assert "outside" not in grep_files(repo, "outside")
 
 
+def test_grep_and_read_number_lines_like_git_splitting_on_newlines_only(tmp_path):
+    # str.splitlines() also breaks on "\x0c"; git only breaks on "\n", so
+    # "a\x0cb" is one line and TARGET is line 2, not line 3.
+    root = tmp_path / "ff"
+    root.mkdir()
+    (root / "form_feed.txt").write_bytes(b"a\x0cb\nTARGET")
+    assert grep_files(root, "TARGET") == "form_feed.txt:2: TARGET"
+    assert read_file(root, "form_feed.txt") == "     1\ta\x0cb\n     2\tTARGET"
+
+
+def test_read_strips_trailing_cr_from_crlf_files(tmp_path):
+    root = tmp_path / "crlf"
+    root.mkdir()
+    (root / "win.txt").write_bytes(b"line1\r\nline2\r\n")
+    assert read_file(root, "win.txt") == "     1\tline1\n     2\tline2"
+
+
 def test_empty_file(tmp_path):
     root = tmp_path / "e"
     root.mkdir()

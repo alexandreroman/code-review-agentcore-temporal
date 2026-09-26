@@ -64,6 +64,20 @@ def _read_text(path: Path) -> str | None:
     return data.decode("utf-8", errors="replace")
 
 
+def _git_lines(text: str) -> list[str]:
+    """Split text into lines the way git does: on "\\n" only.
+
+    str.splitlines() also breaks on "\\x0c", "\\v", "\\x1c"-"\\x1e", "\\x85" and
+    a lone "\\r", which would miscount lines relative to GitHub. A trailing
+    "\\r" (CRLF) is stripped from each line, and the empty element produced by
+    a trailing newline is dropped.
+    """
+    split = text.split("\n")
+    if split and split[-1] == "":
+        split.pop()
+    return [line.removesuffix("\r") for line in split]
+
+
 def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
@@ -124,7 +138,7 @@ def grep_files(root: Path, pattern: str, path: str | None = None, glob: str | No
         text = _read_text(candidate)
         if text is None:
             continue
-        for number, line in enumerate(text.splitlines(), start=1):
+        for number, line in enumerate(_git_lines(text), start=1):
             if regex.search(line):
                 total += 1
                 if len(hits) < MAX_GREP_RESULTS:
@@ -151,7 +165,7 @@ def read_file(root: Path, file_path: str, offset: int | str | None = None, limit
     text = _read_text(target)
     if text is None:
         return f"Error: {file_path!r} is a binary file."
-    lines = text.splitlines()
+    lines = _git_lines(text)
     if not lines:
         return "(empty file)"
     start = max(1, offset or 1)
