@@ -108,10 +108,29 @@ lint: ## Check formatting and lint rules
 format: ## Format the code
 	uv run ruff format .
 
+STACKS := bootstrap
+
+.PHONY: infra-check
+infra-check: ## Check OpenTofu formatting and validate every stack (no AWS access needed)
+	tofu fmt -check -recursive infra
+	@for stack in $(STACKS); do \
+		tofu -chdir=infra/$$stack init -backend=false -input=false >/dev/null && \
+		tofu -chdir=infra/$$stack validate -no-color || exit 1; \
+	done
+
 .PHONY: check
 check: test lint infra-check ## Run tests and static checks
 
 ##@ Deploy
+
+.PHONY: bootstrap
+bootstrap: ## Create the OpenTofu state bucket and KMS key (once per AWS account)
+	@bucket=$(STATE_BUCKET) && \
+	if aws s3api head-bucket --bucket "$$bucket" >/dev/null 2>&1; then \
+		echo "State bucket $$bucket already exists"; \
+	else \
+		$(TOFU_BOOTSTRAP) init -input=false && $(TOFU_BOOTSTRAP) apply -input=false -auto-approve; \
+	fi
 
 .PHONY: secrets
 secrets: ## Push the Anthropic key and the mTLS certificates from .env to Secrets Manager
