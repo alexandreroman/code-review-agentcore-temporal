@@ -4,7 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.14"
 dependencies = [
     "agentcore-review-shared",
-    "temporalio[pydantic]==1.33.0",
+    "temporalio[pydantic,strands-agents]==1.33.0",
+    "strands-agents==1.57.0",
+    "anthropic==1.8.0",
     "bedrock-agentcore==1.23.1",
     "boto3==1.43.103",
     "regex==2026.9.10",
