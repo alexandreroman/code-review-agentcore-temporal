@@ -1,11 +1,14 @@
 """Glob, Grep and Read over a local repository snapshot, bounded and confined to the snapshot.
 
 These functions return text meant for the agent: invalid input produces an "Error: ..." message
-instead of an exception, so a bad tool call never fails the activity.
+instead of an exception, so a bad tool call never fails the activity. Every read is bounded in
+size and every search in time, so a tool call always answers well within its activity timeout.
 """
 
-import re
+import time
 from pathlib import Path, PurePosixPath
+
+import regex
 
 MAX_GLOB_RESULTS = 500
 MAX_GREP_RESULTS = 50
@@ -13,6 +16,8 @@ MAX_READ_LINES = 400
 MAX_READ_BYTES = 40_000
 MAX_GREP_LINE_CHARS = 300
 MAX_READ_LINE_CHARS = 2_000
+MAX_FILE_BYTES = 2_000_000
+GREP_TIME_BUDGET = 10.0
 _BINARY_SNIFF_BYTES = 8_192
 
 
@@ -63,9 +68,12 @@ def _inside(root: Path, candidate: Path) -> bool:
 
 
 def _read_text(path: Path) -> str | None:
-    data = path.read_bytes()
-    if b"\x00" in data[:_BINARY_SNIFF_BYTES]:
-        return None
+    """The file as text, or None for a binary file; the binary test reads only the first bytes."""
+    with path.open("rb") as handle:
+        head = handle.read(_BINARY_SNIFF_BYTES)
+        if b"\x00" in head:
+            return None
+        data = head + handle.read()
     return data.decode("utf-8", errors="replace")
 
 
@@ -87,6 +95,15 @@ def _clip(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[:limit] + "…"
 
 
+def _glob_output(matches: list[str]) -> str:
+    if not matches:
+        return "No files found."
+    shown = matches[:MAX_GLOB_RESULTS]
+    if len(matches) > len(shown):
+        shown.append(f"... truncated: {len(matches) - MAX_GLOB_RESULTS} more files")
+    return "\n".join(shown)
+
+
 def glob_files(root: Path, pattern: str, path: str | None = None) -> str:
     base_root = root.resolve()
     try:
@@ -95,17 +112,47 @@ def glob_files(root: Path, pattern: str, path: str | None = None) -> str:
         return f"Error: path {path!r} is outside the repository."
     except ValueError as exc:
         return f"Error: invalid path {path!r}: {exc}"
+    if not base.exists():
+        return f"Error: path {path!r} not found."
+    if not base.is_dir():
+        return f"Error: path {path!r} is not a directory."
     try:
         candidates = list(base.glob(pattern))
     except (ValueError, NotImplementedError) as exc:
         return f"Error: invalid glob pattern {pattern!r}: {exc}"
-    matches = sorted(str(p.relative_to(base_root)) for p in candidates if p.is_file() and _inside(base_root, p))
-    if not matches:
-        return "No files found."
-    shown = matches[:MAX_GLOB_RESULTS]
-    if len(matches) > len(shown):
-        shown.append(f"... truncated: {len(matches) - MAX_GLOB_RESULTS} more files")
-    return "\n".join(shown)
+    return _glob_output(
+        sorted(str(p.relative_to(base_root)) for p in candidates if p.is_file() and _inside(base_root, p))
+    )
+
+
+def _validate_glob_pattern(pattern: str) -> None:
+    """Raise the error Path.glob raises for a malformed pattern, without touching the filesystem.
+
+    Path.glob validates its pattern as soon as it is called, before any directory is read, so
+    calling it on a path that need not exist reproduces glob_files' errors (e.g. an empty or an
+    absolute pattern) for glob_paths, which has no directory to glob against.
+    """
+    Path(".").glob(pattern)
+
+
+def glob_paths(paths: list[str], pattern: str, path: str | None = None) -> str:
+    """Glob over a list of repository paths (the GitHub tree fallback), answering like glob_files."""
+    raw = path or ""
+    if raw.startswith("/") or ".." in PurePosixPath(raw).parts:
+        return f"Error: path {path!r} is outside the repository."
+    if raw and raw in paths:
+        return f"Error: path {path!r} is not a directory."
+    base = PurePosixPath(raw)
+    at_root = base == PurePosixPath(".")
+    inside = [p for p in map(PurePosixPath, paths) if at_root or base in p.parents]
+    if not inside and not at_root:
+        return f"Error: path {path!r} not found."
+    try:
+        _validate_glob_pattern(pattern)
+    except (ValueError, NotImplementedError) as exc:
+        return f"Error: invalid glob pattern {pattern!r}: {exc}"
+    matches = sorted(str(p) for p in inside if (p if at_root else p.relative_to(base)).full_match(pattern))
+    return _glob_output(matches)
 
 
 def _matches_glob(relative: PurePosixPath, glob: str) -> bool:
@@ -124,10 +171,12 @@ def _matches_glob(relative: PurePosixPath, glob: str) -> bool:
     return trimmed != glob and relative.full_match(trimmed)
 
 
-def grep_files(root: Path, pattern: str, path: str | None = None, glob: str | None = None) -> str:
+def grep_files(
+    root: Path, pattern: str, path: str | None = None, glob: str | None = None, time_budget: float = GREP_TIME_BUDGET
+) -> str:
     try:
-        regex = re.compile(pattern)
-    except re.error as exc:
+        compiled = regex.compile(pattern)
+    except (regex.error, ValueError) as exc:
         return f"Error: invalid regular expression {pattern!r}: {exc}"
     base_root = root.resolve()
     try:
@@ -136,48 +185,84 @@ def grep_files(root: Path, pattern: str, path: str | None = None, glob: str | No
         return f"Error: path {path!r} is outside the repository."
     except ValueError as exc:
         return f"Error: invalid path {path!r}: {exc}"
+    if not base.exists():
+        return f"Error: path {path!r} not found."
     candidates = [base] if base.is_file() else sorted(base.rglob("*"))
+    deadline = time.monotonic() + time_budget
     hits: list[str] = []
-    total = 0
+    total = too_large = 0
+    stopped = False
     for candidate in candidates:
         if not candidate.is_file() or not _inside(base_root, candidate):
             continue
         relative = candidate.relative_to(base_root)
         if glob and not _matches_glob(PurePosixPath(relative.as_posix()), glob):
             continue
+        if candidate.stat().st_size > MAX_FILE_BYTES:
+            too_large += 1
+            continue
         text = _read_text(candidate)
         if text is None:
             continue
         for number, line in enumerate(_git_lines(text), start=1):
-            if regex.search(line):
+            remaining = deadline - time.monotonic()
+            try:
+                if remaining <= 0:
+                    raise TimeoutError
+                # concurrent=True releases the GIL, so the activity keeps heartbeating meanwhile.
+                found = compiled.search(line, timeout=remaining, concurrent=True)
+            except TimeoutError:
+                stopped = True
+                break
+            if found:
                 total += 1
                 if len(hits) < MAX_GREP_RESULTS:
                     hits.append(f"{relative.as_posix()}:{number}: {_clip(line.strip(), MAX_GREP_LINE_CHARS)}")
-    if not hits:
-        return "No matches found."
+        if stopped:
+            break
+    notes = []
     if total > len(hits):
-        hits.append(f"... truncated: {total - len(hits)} more matches")
-    return "\n".join(hits)
+        notes.append(f"... truncated: {total - len(hits)} more matches")
+    if too_large:
+        notes.append(f"... skipped {too_large} files larger than {MAX_FILE_BYTES} bytes")
+    if stopped:
+        notes.append(
+            f"... search stopped after {time_budget:g} s: narrow the path or glob, or simplify the regular expression"
+        )
+    return "\n".join([*(hits or ["No matches found."]), *notes])
 
 
 def read_file(root: Path, file_path: str, offset: int | str | None = None, limit: int | str | None = None) -> str:
-    try:
-        offset = _coerce_int(offset, "offset")
-        limit = _coerce_int(limit, "limit")
-    except _InvalidArgument as exc:
-        return f"Error: {exc}"
     try:
         target = _resolve(root, file_path)
     except _OutsideRepository:
         return f"Error: path {file_path!r} is outside the repository."
     except ValueError as exc:
         return f"Error: invalid path {file_path!r}: {exc}"
+    if target.is_dir():
+        return f"Error: {file_path!r} is a directory: use Glob to list its files."
     if not target.is_file():
         return f"Error: file {file_path!r} not found."
-    text = _read_text(target)
-    if text is None:
+    size = target.stat().st_size
+    if size > MAX_FILE_BYTES:
+        return f"Error: {file_path!r} is too large to read ({size} bytes; limit {MAX_FILE_BYTES})."
+    return render_file(file_path, target.read_bytes(), offset, limit)
+
+
+def render_file(file_path: str, data: bytes, offset: int | str | None = None, limit: int | str | None = None) -> str:
+    """A window of a file's lines for the agent; shared by the snapshot and the GitHub API fallback."""
+    try:
+        offset = _coerce_int(offset, "offset")
+        limit = _coerce_int(limit, "limit")
+    except _InvalidArgument as exc:
+        return f"Error: {exc}"
+    if limit is not None and limit < 1:
+        return "Error: limit must be at least 1."
+    if b"\x00" in data[:_BINARY_SNIFF_BYTES]:
         return f"Error: {file_path!r} is a binary file."
-    lines = _git_lines(text)
+    if len(data) > MAX_FILE_BYTES:
+        return f"Error: {file_path!r} is too large to read ({len(data)} bytes; limit {MAX_FILE_BYTES})."
+    lines = _git_lines(data.decode("utf-8", errors="replace"))
     if not lines:
         return "(empty file)"
     start = max(1, offset or 1)
@@ -196,7 +281,7 @@ def read_file(root: Path, file_path: str, offset: int | str | None = None, limit
     if start == 1 and end == len(lines):
         return "\n".join(window)
     header = (
-        f"[{file_path}: {len(lines)} lines, {target.stat().st_size} bytes; showing lines {start}-{end}. "
+        f"[{file_path}: {len(lines)} lines, {len(data)} bytes; showing lines {start}-{end}. "
         "Use offset and limit to read other ranges.]"
     )
     return "\n".join([header, *window])

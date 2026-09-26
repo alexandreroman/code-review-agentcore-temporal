@@ -1,14 +1,18 @@
 import os
+import time
 from pathlib import Path
 
 import pytest
 from agentcore_review_worker.navigation import (
+    MAX_FILE_BYTES,
     MAX_GLOB_RESULTS,
     MAX_GREP_RESULTS,
     MAX_READ_LINES,
     glob_files,
+    glob_paths,
     grep_files,
     read_file,
+    render_file,
 )
 
 
@@ -192,3 +196,68 @@ def test_read_rejects_non_integer_offset_and_limit(repo):
     assert read_file(repo, "app/db.py", limit="ten").startswith("Error:")
     assert read_file(repo, "app/db.py", limit=1.5).startswith("Error:")
     assert read_file(repo, "app/db.py", offset=True).startswith("Error:")
+
+
+def test_grep_stops_a_catastrophic_regular_expression(tmp_path):
+    root = tmp_path / "slow"
+    root.mkdir()
+    (root / "a.txt").write_text("a" * 60 + "b\n")
+    started = time.monotonic()
+    out = grep_files(root, r"(a|aa)+$", time_budget=0.5)
+    assert time.monotonic() - started < 5
+    assert out.splitlines()[0] == "No matches found." and "search stopped after 0.5 s" in out
+
+
+def test_grep_skips_files_larger_than_the_bound(tmp_path):
+    root = tmp_path / "large"
+    root.mkdir()
+    (root / "big.txt").write_text("needle\n" * (MAX_FILE_BYTES // 7 + 10))
+    (root / "small.txt").write_text("needle\n")
+    out = grep_files(root, "needle").splitlines()
+    assert out == ["small.txt:1: needle", f"... skipped 1 files larger than {MAX_FILE_BYTES} bytes"]
+
+
+def test_missing_paths_and_non_directories_are_reported(repo):
+    assert glob_files(repo, "*", path="nope") == "Error: path 'nope' not found."
+    assert grep_files(repo, "x", path="nope") == "Error: path 'nope' not found."
+    assert glob_files(repo, "*", path="README.md") == "Error: path 'README.md' is not a directory."
+
+
+def test_read_explains_directories_small_limits_and_large_files(repo, tmp_path):
+    assert read_file(repo, "app") == "Error: 'app' is a directory: use Glob to list its files."
+    assert read_file(repo, "app/db.py", limit=0) == "Error: limit must be at least 1."
+    assert read_file(repo, "app/db.py", limit="-3") == "Error: limit must be at least 1."
+    (repo / "huge.txt").write_bytes(b"x" * (MAX_FILE_BYTES + 1))
+    assert read_file(repo, "huge.txt").startswith("Error: 'huge.txt' is too large to read")
+
+
+@pytest.mark.parametrize(
+    ("pattern", "path"), [("**/*.py", None), ("*.py", None), ("*.py", "app"), ("**/*.py", "app/sub"), ("*.go", None)]
+)
+def test_glob_paths_answers_like_glob_files(nested_repo, pattern, path):
+    paths = [p.relative_to(nested_repo).as_posix() for p in nested_repo.rglob("*") if p.is_file()]
+    assert glob_paths(paths, pattern, path) == glob_files(nested_repo, pattern, path)
+
+
+def test_glob_paths_errors():
+    assert glob_paths(["app/a.py"], "*", "../x").startswith("Error: path '../x' is outside the repository")
+    assert glob_paths(["app/a.py"], "*", "/etc").startswith("Error:")
+    assert glob_paths(["app/a.py"], "*", "nope") == "Error: path 'nope' not found."
+
+
+def test_glob_paths_reports_a_file_as_not_a_directory():
+    assert glob_paths(["app/a.py"], "*", "app/a.py") == "Error: path 'app/a.py' is not a directory."
+
+
+@pytest.mark.parametrize("pattern", ["", "/etc/passwd"])
+def test_glob_paths_rejects_invalid_patterns(pattern):
+    assert glob_paths(["app/a.py"], pattern).startswith("Error: invalid glob pattern")
+
+
+def test_render_file_matches_read_file(tmp_path):
+    root = tmp_path / "rf"
+    root.mkdir()
+    data = "\n".join(f"line {i}" for i in range(1, 1001)).encode()
+    (root / "big.py").write_bytes(data)
+    assert render_file("big.py", data, 950, 100) == read_file(root, "big.py", offset=950, limit=100)
+    assert render_file("logo.bin", b"\x89PNG\x00") == "Error: 'logo.bin' is a binary file."
