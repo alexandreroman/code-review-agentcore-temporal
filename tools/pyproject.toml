@@ -1,0 +1,15 @@
+[project]
+name = "agentic-review-tools"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "agentic-review-shared",
+    "boto3==1.43.103",
+]
+
+[tool.uv.sources]
+agentic-review-shared = { workspace = true }
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13"]
+build-backend = "uv_build"

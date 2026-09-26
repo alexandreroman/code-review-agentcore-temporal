@@ -109,7 +109,13 @@ format: ## Format the code
 	uv run ruff format .
 
 .PHONY: check
-check: test lint ## Run tests and static checks
+check: test lint infra-check ## Run tests and static checks
+
+##@ Deploy
+
+.PHONY: secrets
+secrets: ## Push the Anthropic key and the mTLS certificates from .env to Secrets Manager
+	$(TOOLS).secrets_sync
 
 ##@ Helpers
 
