@@ -119,6 +119,38 @@ resource "github_repository_ruleset" "main" {
   }
 }
 
+# The scenario tags anchor the review batches (plan 5): once pushed, they must
+# stay in place, so a reset can't silently drift the demo.
+resource "github_repository_ruleset" "tags" {
+  name        = "tags"
+  repository  = github_repository.demo.name
+  target      = "tag"
+  enforcement = "active"
+
+  conditions {
+    ref_name {
+      include = ["refs/tags/baseline", "refs/tags/scenario/*"]
+      exclude = []
+    }
+  }
+
+  rules {
+    update   = true
+    deletion = true
+  }
+
+  bypass_actors {
+    actor_id    = 5
+    actor_type  = "RepositoryRole"
+    bypass_mode = "always"
+  }
+  bypass_actors {
+    actor_id    = local.app.app_id
+    actor_type  = "Integration"
+    bypass_mode = "always"
+  }
+}
+
 resource "github_actions_secret" "app_client_id" {
   repository  = github_repository.demo.name
   secret_name = "APP_CLIENT_ID"
