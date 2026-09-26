@@ -83,6 +83,13 @@ def github_app_secret() -> GitHubAppSecret:
     return GitHubAppSecret.model_validate_json(_secret(settings().github_app_secret_arn))
 
 
+def clear_github_app_secret() -> None:
+    """Drops the cached secret and the config derived from it, so a warm container picks up a
+    freshly registered app's webhook secret instead of answering 401 for the rest of its life."""
+    github_app_secret.cache_clear()
+    router_config.cache_clear()
+
+
 @cache
 def router_config() -> RouterConfig:
     current, app = settings(), github_app_secret()
