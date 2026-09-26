@@ -3,7 +3,8 @@
 Conference demo: AI agents review GitHub pull requests, orchestrated by
 Temporal and run as Serverless Workers on Amazon Bedrock AgentCore.
 
-See [README.md](README.md) for full documentation.
+See [README.md](README.md) for full documentation, [SETUP.md](SETUP.md)
+for the installation and [DEMO.md](DEMO.md) for the talk run-through.
 
 ## Tech stack
 
@@ -17,7 +18,7 @@ See [README.md](README.md) for full documentation.
 ```bash
 make install   # uv sync --all-packages
 make check     # unit tests, ruff, OpenTofu fmt/validate
-make dev       # local worker with hot reload
+make dev       # local worker with hot reload (dev task queue)
 make up        # deploy everything (AWS, worker, GitHub)
 ```
 
@@ -26,8 +27,19 @@ make up        # deploy everything (AWS, worker, GitHub)
 - `shared/` — contract shared by the router and the worker
 - `router/` — GitHub webhook handler (AWS Lambda)
 - `worker/` — Temporal workflows, review agents, activities
-- `tools/` — deployment tooling called by the Makefile
+- `tools/` — GitHub App registration tooling called by the Makefile
 - `infra/` — OpenTofu stacks (`bootstrap`, `aws`, `github`)
+- `scripts/` — bash scripts behind the Make targets
+
+## E2E validation
+
+The `e2e-validation` project skill
+(`.claude/skills/e2e-validation/`) validates the deployed demo end to end:
+`/e2e-validation` (smoke, 6 to 8 minutes) after a change to the worker,
+the router or the infrastructure, `/e2e-validation full` (about 30
+minutes) before a conference. It uses real resources, opens pull requests
+in the demo repository and spends Anthropic tokens: run it only when asked.
+The planted defects it expects live in `expected-findings.yaml` next to it.
 
 ## Agents
 
