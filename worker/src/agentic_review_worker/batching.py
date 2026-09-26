@@ -3,7 +3,7 @@
 from fnmatch import fnmatch
 from pathlib import PurePosixPath
 
-from tar_worker.models import ChangedFile
+from agentic_review_worker.models import ChangedFile
 
 EXCLUDED_NAME_PATTERNS = ("*.lock", "uv.lock", "package-lock.json", "*.min.js")
 MAX_BATCH_FILES = 15

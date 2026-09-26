@@ -1,4 +1,4 @@
-from tar_shared.ids import (
+from agentic_review_shared.ids import (
     fixer_workflow_id,
     pr_workflow_id,
     reviewer_workflow_id,

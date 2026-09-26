@@ -4,9 +4,9 @@ requires-python = ">=3.14"
 
 [manifest]
 members = [
-    "tar-router",
-    "tar-shared",
-    "tar-worker",
+    "agentic-review-router",
+    "agentic-review-shared",
+    "agentic-review-worker",
 ]
 
 [manifest.dependency-groups]
@@ -16,6 +16,45 @@ dev = [
     { name = "ruff", specifier = "==0.16.9" },
     { name = "watchfiles", specifier = "==1.3.0" },
 ]
+
+[[package]]
+name = "agentic-review-router"
+version = "0.1.0"
+source = { editable = "router" }
+dependencies = [
+    { name = "agentic-review-shared" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "agentic-review-shared", editable = "shared" }]
+
+[[package]]
+name = "agentic-review-shared"
+version = "0.1.0"
+source = { editable = "shared" }
+dependencies = [
+    { name = "httpx2" },
+    { name = "pydantic" },
+    { name = "pyjwt", extra = ["crypto"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "httpx2", specifier = "==2.13.1" },
+    { name = "pydantic", specifier = "==2.13.5" },
+    { name = "pyjwt", extras = ["crypto"], specifier = "==2.15.0" },
+]
+
+[[package]]
+name = "agentic-review-worker"
+version = "0.1.0"
+source = { editable = "worker" }
+dependencies = [
+    { name = "agentic-review-shared" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "agentic-review-shared", editable = "shared" }]
 
 [[package]]
 name = "annotated-types"
@@ -380,45 +419,6 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/14/21/26e4643629b3ebb44f0a06f9c9a53058d63d989415f63a9a3c28e2ee7f22/ruff-0.16.9-py3-none-win_amd64.whl", hash = "sha256:6bd40fec8cd4c8a3d4dd589bd8ad4e6320c13c29234159bfd959a40d529d597b", size = 10592965, upload-time = "2026-09-24T20:37:44.944Z" },
     { url = "https://files.pythonhosted.org/packages/51/60/5fb1a39dbb5ae314d5f59bc7348a63c1d5c20f3cd83914c4b5cb0be31d2d/ruff-0.16.9-py3-none-win_arm64.whl", hash = "sha256:ed1a252039200f57a59eebc063b54beabea67bfbaaca0eeaa7f54b5fbcda2284", size = 10458649, upload-time = "2026-09-24T20:37:46.882Z" },
 ]
-
-[[package]]
-name = "tar-router"
-version = "0.1.0"
-source = { editable = "router" }
-dependencies = [
-    { name = "tar-shared" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "tar-shared", editable = "shared" }]
-
-[[package]]
-name = "tar-shared"
-version = "0.1.0"
-source = { editable = "shared" }
-dependencies = [
-    { name = "httpx2" },
-    { name = "pydantic" },
-    { name = "pyjwt", extra = ["crypto"] },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "httpx2", specifier = "==2.13.1" },
-    { name = "pydantic", specifier = "==2.13.5" },
-    { name = "pyjwt", extras = ["crypto"], specifier = "==2.15.0" },
-]
-
-[[package]]
-name = "tar-worker"
-version = "0.1.0"
-source = { editable = "worker" }
-dependencies = [
-    { name = "tar-shared" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "tar-shared", editable = "shared" }]
 
 [[package]]
 name = "truststore"

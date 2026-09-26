@@ -1,4 +1,4 @@
-"""Starter entry point of the worker: `python -m tar_worker`."""
+"""Starter entry point of the worker: `python -m agentic_review_worker`."""
 
 import logging
 import os
@@ -12,7 +12,8 @@ def main() -> None:
     namespace = os.environ.get("TEMPORAL_NAMESPACE")
     task_queue = os.environ.get("DEV_TASK_QUEUE", "review-dev")
     logger.info(
-        "tar-worker starter: namespace=%s task_queue=%s; the Temporal worker itself is implemented in plan 3",
+        "agentic-review-worker starter: namespace=%s task_queue=%s; "
+        "the Temporal worker itself is implemented in plan 3",
         namespace,
         task_queue,
     )

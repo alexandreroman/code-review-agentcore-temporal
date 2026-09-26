@@ -1,11 +1,11 @@
 [project]
-name = "tar-router"
+name = "agentic-review-router"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = ["tar-shared"]
+dependencies = ["agentic-review-shared"]
 
 [tool.uv.sources]
-tar-shared = { workspace = true }
+agentic-review-shared = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13"]

@@ -1,6 +1,6 @@
 import pytest
-from tar_worker.batching import MAX_BATCH_FILES, MAX_BATCH_PATCH_BYTES, is_excluded, make_batches, partition
-from tar_worker.models import ChangedFile
+from agentic_review_worker.batching import MAX_BATCH_FILES, MAX_BATCH_PATCH_BYTES, is_excluded, make_batches, partition
+from agentic_review_worker.models import ChangedFile
 
 
 def cf(path: str, patch_bytes: int | None = 100, status: str = "modified") -> ChangedFile:

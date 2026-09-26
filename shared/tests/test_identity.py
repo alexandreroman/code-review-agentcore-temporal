@@ -1,5 +1,5 @@
 import pytest
-from tar_shared.identity import AgentCoreSession, agentcore_identity, dev_identity, parse_agentcore_identity
+from agentic_review_shared.identity import AgentCoreSession, agentcore_identity, dev_identity, parse_agentcore_identity
 
 
 def test_agentcore_identity_round_trip():

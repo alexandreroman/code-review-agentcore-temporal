@@ -3,8 +3,8 @@ import json
 from pathlib import Path
 
 import pytest
-from tar_router.routing import Ignore, RouterConfig, RunCommand, SendSignal, StartOrSignal, route
-from tar_shared.contract import SIGNAL_PR_CLOSED, PrClosed
+from agentic_review_router.routing import Ignore, RouterConfig, RunCommand, SendSignal, StartOrSignal, route
+from agentic_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CONFIG = RouterConfig(

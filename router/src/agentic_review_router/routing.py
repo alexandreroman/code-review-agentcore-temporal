@@ -3,9 +3,9 @@
 from dataclasses import dataclass
 from typing import Literal
 
+from agentic_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, PrUpdated
+from agentic_review_shared.ids import pr_workflow_id
 from pydantic import BaseModel
-from tar_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, PrUpdated
-from tar_shared.ids import pr_workflow_id
 
 ReusePolicy = Literal["allow_duplicate", "allow_duplicate_failed_only"]
 COMMANDS: dict[str, Literal["fix", "kill"]] = {"/fix": "fix", "/kill": "kill"}

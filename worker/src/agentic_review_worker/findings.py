@@ -2,9 +2,9 @@
 
 from typing import Literal
 
-from tar_shared.contract import Finding, FindingDraft
+from agentic_review_shared.contract import Finding, FindingDraft
 
-from tar_worker.hunks import is_commentable
+from agentic_review_worker.hunks import is_commentable
 
 
 def format_finding_id(number: int) -> str:

@@ -21,7 +21,7 @@ dev: ## Run the local worker (review-dev queue on Temporal Cloud) with hot reloa
 	# Trap reaps the whole process group (kill 0) on exit or signal, so no
 	# orphaned processes survive Ctrl-C or a child crash.
 	@trap 'kill 0' EXIT INT TERM; \
-		uv run watchfiles 'python -m tar_worker' worker/src shared/src & \
+		uv run watchfiles 'python -m agentic_review_worker' worker/src shared/src & \
 		wait
 
 ##@ Quality

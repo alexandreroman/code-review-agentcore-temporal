@@ -1,6 +1,6 @@
 import logging
 
-from tar_worker.__main__ import main
+from agentic_review_worker.__main__ import main
 
 
 def test_main_logs_namespace_and_task_queue(monkeypatch, caplog):

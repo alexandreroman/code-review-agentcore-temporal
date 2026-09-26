@@ -1,6 +1,5 @@
 import pytest
-from pydantic import ValidationError
-from tar_shared.contract import (
+from agentic_review_shared.contract import (
     CHECK_NAME,
     QUERY_GET_FINDINGS,
     SIGNAL_FIX_REQUESTED,
@@ -15,6 +14,7 @@ from tar_shared.contract import (
     ReviewerReport,
     Severity,
 )
+from pydantic import ValidationError
 
 
 def draft(**overrides) -> FindingDraft:
