@@ -46,7 +46,12 @@ def _coerce_int(value: object, name: str) -> int | None:
 
 def _resolve(root: Path, relative: str | None) -> Path:
     base = root.resolve()
-    target = (base / (relative or ".")).resolve()
+    text = relative or "."
+    # A lone surrogate (e.g. from malformed agent input) cannot round-trip
+    # through the filesystem; fail here with a plain ValueError rather than
+    # deeper inside path resolution, where a NUL byte also raises ValueError.
+    text.encode()
+    target = (base / text).resolve()
     if target != base and base not in target.parents:
         raise _OutsideRepository(relative)
     return target
@@ -86,9 +91,12 @@ def glob_files(root: Path, pattern: str, path: str | None = None) -> str:
     base_root = root.resolve()
     try:
         base = _resolve(root, path)
-        candidates = list(base.glob(pattern))
     except _OutsideRepository:
         return f"Error: path {path!r} is outside the repository."
+    except ValueError as exc:
+        return f"Error: invalid path {path!r}: {exc}"
+    try:
+        candidates = list(base.glob(pattern))
     except (ValueError, NotImplementedError) as exc:
         return f"Error: invalid glob pattern {pattern!r}: {exc}"
     matches = sorted(str(p.relative_to(base_root)) for p in candidates if p.is_file() and _inside(base_root, p))
@@ -126,6 +134,8 @@ def grep_files(root: Path, pattern: str, path: str | None = None, glob: str | No
         base = _resolve(root, path)
     except _OutsideRepository:
         return f"Error: path {path!r} is outside the repository."
+    except ValueError as exc:
+        return f"Error: invalid path {path!r}: {exc}"
     candidates = [base] if base.is_file() else sorted(base.rglob("*"))
     hits: list[str] = []
     total = 0
@@ -160,6 +170,8 @@ def read_file(root: Path, file_path: str, offset: int | str | None = None, limit
         target = _resolve(root, file_path)
     except _OutsideRepository:
         return f"Error: path {file_path!r} is outside the repository."
+    except ValueError as exc:
+        return f"Error: invalid path {file_path!r}: {exc}"
     if not target.is_file():
         return f"Error: file {file_path!r} not found."
     text = _read_text(target)

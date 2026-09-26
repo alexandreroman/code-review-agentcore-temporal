@@ -155,6 +155,24 @@ def test_read_strips_trailing_cr_from_crlf_files(tmp_path):
     assert read_file(root, "win.txt") == "     1\tline1\n     2\tline2"
 
 
+@pytest.mark.parametrize("bad_path", ["a\x00b", "\udcff"])
+def test_read_reports_malformed_paths_instead_of_raising(repo, bad_path):
+    result = read_file(repo, bad_path)
+    assert result.startswith("Error:") and repr(bad_path) in result
+
+
+@pytest.mark.parametrize("bad_path", ["a\x00b", "\udcff"])
+def test_grep_reports_malformed_paths_instead_of_raising(repo, bad_path):
+    result = grep_files(repo, "x", path=bad_path)
+    assert result.startswith("Error:") and repr(bad_path) in result
+
+
+@pytest.mark.parametrize("bad_path", ["a\x00b", "\udcff"])
+def test_glob_reports_malformed_paths_instead_of_raising(repo, bad_path):
+    result = glob_files(repo, "*", path=bad_path)
+    assert result.startswith("Error:") and repr(bad_path) in result
+
+
 def test_empty_file(tmp_path):
     root = tmp_path / "e"
     root.mkdir()
