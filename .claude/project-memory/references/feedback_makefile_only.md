@@ -1,17 +1,21 @@
 ---
-name: "Makefile only"
-description: "Operational automation goes through Makefile targets, never shell scripts"
+name: "Makefile as the single entry point"
+description: "Every operational step is a make target; targets delegate to shell scripts in scripts/"
 type: feedback
 ---
 
-# Makefile only
+# Makefile as the single entry point
 
 Every operational step (deploy, secrets, session kill, info panel, worktree
-init) is a Makefile target. The repository contains no `.sh` scripts. A small
-Python module run with `uv run` from a target is acceptable when a recipe
-cannot reasonably do the job (for example the GitHub App manifest server).
-`.casper.json` scripts only call `make`.
+init) is a Makefile target. A target runs one command or delegates to a bash
+script in `scripts/` (`set -euo pipefail`); logic never grows inside a recipe,
+since macOS ships GNU Make 3.81, where each recipe line runs in its own shell.
+Python is used only where a script cannot reasonably do the job (for example
+the GitHub App manifest flow, which serves a localhost page). `.casper.json`
+scripts only call `make`.
 
-**Why:** a single, self-documenting entry point for developers and demos.
+**Why:** one self-documenting entry point for developers and demos, with the
+deployment logic kept in plain, readable scripts.
 
-**How to apply:** add a Makefile target instead of a script.
+**How to apply:** add a Makefile target; put anything beyond one command in a
+`scripts/*.sh` file that the target calls.
