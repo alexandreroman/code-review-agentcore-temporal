@@ -160,6 +160,13 @@ infra: router-build infra-init ## Apply the aws stack (keeps the deployed build 
 secrets: ## Push the Anthropic key and the mTLS certificates from .env to Secrets Manager
 	$(TOOLS).secrets_sync
 
+.PHONY: github-app
+github-app: infra-init ## Register the GitHub App through the manifest flow (interactive, once)
+	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
+	$(TOOLS).github_app register --owner $(GITHUB_OWNER) --name $(GITHUB_APP_NAME) \
+		--port $(GITHUB_APP_CALLBACK_PORT) --webhook-url "$$($(TOFU_AWS) output -raw router_url)" \
+		$(if $(FORCE),--force)
+
 LAMBDA_PLATFORM := aarch64-manylinux2014
 ROUTER_BUILD := build/router
 
