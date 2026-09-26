@@ -35,6 +35,7 @@ def test_valid_signature():
         "sha1=" + GOOD.removeprefix("sha256="),
         "sha256=deadbeef",
         "sha256=" + "0" * 64,
+        "sha256=é…",
     ],
 )
 def test_invalid_or_malformed_signatures_are_rejected(header):
@@ -43,3 +44,7 @@ def test_invalid_or_malformed_signatures_are_rejected(header):
 
 def test_signature_depends_on_the_exact_bytes():
     assert not verify_signature(SECRET, BODY + b" ", GOOD)
+
+
+def test_malformed_base64_body_decodes_to_empty():
+    assert decode_body({"body": "not base64!", "isBase64Encoded": True}) == b""
