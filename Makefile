@@ -86,15 +86,9 @@ install: ## Install every workspace package and the dev tools
 	uv sync --all-packages
 
 .PHONY: dev
-dev: ## Run the local worker (dev task queue on Temporal Cloud) with hot reload
+dev: infra-init ## Run the local worker (dev task queue on Temporal Cloud) with hot reload
 	$(call require_namespace)
-	-@GITHUB_OWNER=$(GITHUB_OWNER) scripts/info-panel.sh --local-worker
-	@# The trap republishes the panel, then reaps the whole process group (kill 0),
-	@# so no orphaned processes survive Ctrl-C or a child crash.
-	@trap 'trap - EXIT INT TERM; GITHUB_OWNER=$(GITHUB_OWNER) scripts/info-panel.sh >/dev/null 2>&1; kill 0' \
-		EXIT INT TERM; \
-		uv run watchfiles 'python -m agentcore_review_worker' worker/src shared/src & \
-		wait
+	@GITHUB_OWNER=$(GITHUB_OWNER) scripts/dev.sh
 
 # Casper gives each worktree a band of ports starting at CASPER_PORT; the
 # local port is derived from it once, here, and .env stays the only source.

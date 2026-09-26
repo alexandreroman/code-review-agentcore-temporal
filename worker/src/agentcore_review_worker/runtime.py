@@ -5,9 +5,8 @@ from datetime import timedelta
 from pathlib import Path
 
 from agentcore_review_shared.secrets import TemporalCertSecret
-from temporalio.client import Client
+from temporalio.client import Client, Plugin
 from temporalio.common import VersioningBehavior
-from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.service import TLSConfig
 from temporalio.worker import Interceptor, Worker, WorkerDeploymentConfig, WorkerDeploymentVersion
 
@@ -23,13 +22,11 @@ def tls_from_secret(secret: TemporalCertSecret) -> TLSConfig:
     return TLSConfig(client_cert=secret.cert.encode(), client_private_key=secret.key.encode())
 
 
-async def connect(settings: WorkerSettings, tls: TLSConfig, identity: str) -> Client:
+async def connect(settings: WorkerSettings, tls: TLSConfig, identity: str, plugins: Sequence[Plugin] = ()) -> Client:
+    # No explicit data converter: StrandsPlugin installs the Pydantic converter with its failure converter
+    # (Strands errors stay typed and non-retryable), and only does so over the default converter.
     return await Client.connect(
-        settings.address,
-        namespace=settings.namespace,
-        tls=tls,
-        identity=identity,
-        data_converter=pydantic_data_converter,
+        settings.address, namespace=settings.namespace, tls=tls, identity=identity, plugins=list(plugins)
     )
 
 
@@ -43,13 +40,17 @@ def build_worker(
             use_worker_versioning=True,
             default_versioning_behavior=VersioningBehavior.PINNED,
         )
+    # The dev worker's Ctrl-C stands in for AgentCore's /kill: it must cancel activities at once,
+    # like a crash, so the same run resumes at attempt 2 when a worker comes back. The AgentCore
+    # worker keeps a full drain instead: its idle-session teardown (ActivityTracker) depends on it.
+    graceful_shutdown_timeout = timedelta(seconds=120) if settings.versioned else timedelta(0)
     return Worker(
         client,
         task_queue=settings.task_queue,
         workflows=WORKFLOWS,
-        activities=activities(identity),
+        activities=activities(settings.app, identity),
         interceptors=list(interceptors),
         identity=identity,
         deployment_config=deployment,
-        graceful_shutdown_timeout=timedelta(seconds=120),
+        graceful_shutdown_timeout=graceful_shutdown_timeout,
     )

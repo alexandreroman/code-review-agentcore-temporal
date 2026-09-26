@@ -7,7 +7,9 @@ from agentcore_review_shared.identity import agentcore_identity
 from agentcore_review_shared.secrets import TemporalCertSecret
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
+from .aws import read_secret
 from .drain import ActivityTracker
+from .registry import plugins
 from .runtime import build_worker, connect, tls_from_secret
 from .settings import agentcore_settings
 
@@ -16,18 +18,12 @@ log = app.logger
 _worker_task: asyncio.Task[None] | None = None
 
 
-def _read_secret(arn: str) -> str:
-    import boto3
-
-    return boto3.client("secretsmanager").get_secret_value(SecretId=arn)["SecretString"]
-
-
 async def _run(session_id: str) -> None:
     settings = agentcore_settings(os.environ)
     # The endpoint is named after the build, so the identity gives /kill its StopRuntimeSession qualifier.
     identity = agentcore_identity(settings.build_id, session_id)
-    cert = TemporalCertSecret.model_validate_json(_read_secret(os.environ["TEMPORAL_CERT_SECRET_ARN"]))
-    client = await connect(settings, tls_from_secret(cert), identity)
+    cert = TemporalCertSecret.model_validate_json(read_secret(os.environ["TEMPORAL_CERT_SECRET_ARN"]))
+    client = await connect(settings, tls_from_secret(cert), identity, plugins(settings.app))
     tracker = ActivityTracker()
     worker = build_worker(client, settings, identity, interceptors=[tracker])
     log.info("polling %s as %s", settings.task_queue, identity)

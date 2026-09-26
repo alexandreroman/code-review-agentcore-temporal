@@ -7,9 +7,21 @@ crash also prevents the task queue from attaching to the version, so it must be 
 import asyncio
 
 import temporalio.workflow
+from temporalio.worker import WorkerConfig
 from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner
 
-from .registry import WORKFLOWS, activities
+from .registry import WORKFLOWS, activities, plugins
+from .settings import AppSettings
+
+# Placeholder settings: everything is built without reading a secret or calling AWS.
+SELFCHECK = AppSettings(
+    snapshots_bucket="selfcheck",
+    github_app_secret="selfcheck",
+    anthropic_secret="selfcheck",
+    anthropic_model="selfcheck",
+    anthropic_effort="high",
+    max_parallel_agents=1,
+)
 
 
 def validate_workflows() -> list[str]:
@@ -19,7 +31,11 @@ def validate_workflows() -> list[str]:
 
 
 async def _validate_workflows() -> list[str]:
-    runner = SandboxedWorkflowRunner()
+    # The Worker applies its plugins' sandbox settings (Strands passthrough); validate with the same ones.
+    config = WorkerConfig(workflow_runner=SandboxedWorkflowRunner())
+    for plugin in plugins(SELFCHECK):
+        config = plugin.configure_worker(config)
+    runner = config["workflow_runner"]
     names = []
     for cls in WORKFLOWS:
         # The same (private) definition lookup and validation the Worker runs at startup.
@@ -31,7 +47,7 @@ async def _validate_workflows() -> list[str]:
 
 def main() -> None:
     names = validate_workflows()
-    activities("selfcheck")
+    activities(SELFCHECK, "selfcheck")
     print(f"selfcheck ok: {', '.join(names)}")
 
 
