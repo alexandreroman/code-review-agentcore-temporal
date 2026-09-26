@@ -1,0 +1,10 @@
+.env
+.env.*
+certs/
+.venv/
+.git/
+docs/
+build/
+infra/
+**/__pycache__/
+**/.pytest_cache/

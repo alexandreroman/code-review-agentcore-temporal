@@ -2,7 +2,12 @@
 name = "agentic-review-worker"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = ["agentic-review-shared"]
+dependencies = [
+    "agentic-review-shared",
+    "temporalio[pydantic]==1.33.0",
+    "bedrock-agentcore==1.23.1",
+    "boto3==1.43.103",
+]
 
 [tool.uv.sources]
 agentic-review-shared = { workspace = true }

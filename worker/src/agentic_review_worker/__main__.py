@@ -1,22 +1,40 @@
-"""Starter entry point of the worker: `python -m agentic_review_worker`."""
+"""Local dev worker: `python -m agentic_review_worker` (make dev). Unversioned, on the dev task queue."""
 
+import asyncio
 import logging
 import os
+import socket
+import sys
+
+from agentic_review_shared.identity import dev_identity
+
+from .runtime import build_worker, connect, tls_from_files
+from .settings import SettingsError, dev_settings
 
 logger = logging.getLogger(__name__)
 
 
-def main() -> None:
-    """Log the Temporal settings the worker will use, then exit."""
-    logging.basicConfig(level=logging.INFO)
-    namespace = os.environ.get("TEMPORAL_NAMESPACE")
-    task_queue = os.environ.get("DEV_TASK_QUEUE", "review-dev")
-    logger.info(
-        "agentic-review-worker starter: namespace=%s task_queue=%s; "
-        "the Temporal worker itself is implemented in plan 3",
-        namespace,
-        task_queue,
+async def run() -> None:
+    settings = dev_settings(os.environ)
+    identity = dev_identity(socket.gethostname())
+    tls = tls_from_files(
+        os.environ.get("TEMPORAL_TLS_CERT_PATH") or "certs/client.pem",
+        os.environ.get("TEMPORAL_TLS_KEY_PATH") or "certs/client.key",
     )
+    client = await connect(settings, tls, identity)
+    worker = build_worker(client, settings, identity)
+    logger.info("polling %s on %s as %s", settings.task_queue, settings.namespace, identity)
+    await worker.run()
+
+
+def main() -> None:
+    logging.basicConfig(level=logging.INFO)
+    try:
+        asyncio.run(run())
+    except SettingsError as error:
+        sys.exit(f"dev worker: {error}")
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
