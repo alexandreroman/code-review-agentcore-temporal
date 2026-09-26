@@ -123,3 +123,17 @@ def test_empty_file(tmp_path):
     root.mkdir()
     (root / "empty.py").write_text("")
     assert read_file(root, "empty.py") == "(empty file)"
+
+
+def test_read_accepts_numeric_strings_for_offset_and_limit(tmp_path):
+    root = tmp_path / "r2"
+    root.mkdir()
+    (root / "big.py").write_text("\n".join(f"line {i}" for i in range(1, 1001)))
+    assert read_file(root, "big.py", offset="950", limit="100") == read_file(root, "big.py", offset=950, limit=100)
+
+
+def test_read_rejects_non_integer_offset_and_limit(repo):
+    assert read_file(repo, "app/db.py", offset="abc").startswith("Error:")
+    assert read_file(repo, "app/db.py", limit="ten").startswith("Error:")
+    assert read_file(repo, "app/db.py", limit=1.5).startswith("Error:")
+    assert read_file(repo, "app/db.py", offset=True).startswith("Error:")

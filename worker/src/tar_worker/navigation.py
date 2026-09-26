@@ -20,6 +20,30 @@ class _OutsideRepository(ValueError):
     pass
 
 
+class _InvalidArgument(ValueError):
+    pass
+
+
+def _coerce_int(value: object, name: str) -> int | None:
+    """Coerce an offset/limit argument to an int, or None if it was not given.
+
+    Accepts int, None, or a string holding a base-10 integer (an LLM may quote a
+    numeral). Anything else — including bool and float — is invalid.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise _InvalidArgument(f"{name} must be an integer, got {value!r}.")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str):
+        try:
+            return int(value)
+        except ValueError:
+            raise _InvalidArgument(f"{name} must be an integer, got {value!r}.") from None
+    raise _InvalidArgument(f"{name} must be an integer, got {value!r}.")
+
+
 def _resolve(root: Path, relative: str | None) -> Path:
     base = root.resolve()
     target = (base / (relative or ".")).resolve()
@@ -96,7 +120,12 @@ def grep_files(root: Path, pattern: str, path: str | None = None, glob: str | No
     return "\n".join(hits)
 
 
-def read_file(root: Path, file_path: str, offset: int | None = None, limit: int | None = None) -> str:
+def read_file(root: Path, file_path: str, offset: int | str | None = None, limit: int | str | None = None) -> str:
+    try:
+        offset = _coerce_int(offset, "offset")
+        limit = _coerce_int(limit, "limit")
+    except _InvalidArgument as exc:
+        return f"Error: {exc}"
     try:
         target = _resolve(root, file_path)
     except _OutsideRepository:
