@@ -182,6 +182,11 @@ deploy: router-build infra-init ## Build and push the worker image, then make it
 	$(call require_namespace)
 	scripts/deploy.sh
 
+.PHONY: kill-sessions
+kill-sessions: infra-init ## Stop every AgentCore session polling the production task queue
+	$(call require_namespace)
+	scripts/kill-sessions.sh
+
 .PHONY: ping
 ping: ## Run the Ping workflow on the production task queue (scale-from-zero check)
 	$(call require_namespace)
