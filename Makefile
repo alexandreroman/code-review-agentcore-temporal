@@ -46,9 +46,6 @@ export AWS_REGION TEMPORAL_NAMESPACE TEMPORAL_ADDRESS TEMPORAL_TLS_CERT_PATH TEM
 	TEMPORAL_DEPLOYMENT_NAME TASK_QUEUE DEV_TASK_QUEUE DEV_BRANCH_PREFIX ANTHROPIC_API_KEY ANTHROPIC_MODEL \
 	ANTHROPIC_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO
 export AWS_DEFAULT_REGION = $(AWS_REGION)
-# Connection settings of the temporal CLI (mTLS).
-export TEMPORAL_TLS_CLIENT_CERT_PATH = $(abspath $(TEMPORAL_TLS_CERT_PATH))
-export TEMPORAL_TLS_CLIENT_KEY_PATH = $(abspath $(TEMPORAL_TLS_KEY_PATH))
 
 # OpenTofu input variables (no secret among them).
 export TF_VAR_region = $(AWS_REGION)
@@ -154,11 +151,11 @@ infra-init: ## Initialise the OpenTofu backends (S3 state, per worktree)
 .PHONY: infra
 infra: router-build infra-init ## Apply the aws stack (keeps the deployed build and its endpoints)
 	$(call require_namespace)
-	$(TOOLS).infra apply
+	scripts/infra.sh
 
 .PHONY: secrets
 secrets: ## Push the Anthropic key and the mTLS certificates from .env to Secrets Manager
-	$(TOOLS).secrets_sync
+	scripts/secrets.sh
 
 .PHONY: github-app
 github-app: infra-init ## Register the GitHub App through the manifest flow (interactive, once)
