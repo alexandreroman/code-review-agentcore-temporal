@@ -2,7 +2,8 @@
 name = "agentcore-review-router"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = ["agentcore-review-shared", "boto3==1.43.103"]
+# boto3 comes from the Lambda runtime at run time (make router-build leaves it out); it is pinned here for local runs.
+dependencies = ["agentcore-review-shared", "temporalio[pydantic]==1.33.0", "boto3==1.43.103"]
 
 [tool.uv.sources]
 agentcore-review-shared = { workspace = true }

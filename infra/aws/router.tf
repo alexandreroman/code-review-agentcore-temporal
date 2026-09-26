@@ -4,6 +4,22 @@ data "archive_file" "router" {
   output_path = "${path.module}/../../build/router.zip"
 }
 
+data "archive_file" "router_deps" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../build/router-deps"
+  output_path = "${path.module}/../../build/router-deps.zip"
+}
+
+# Third-party dependencies change only with uv.lock: as a layer they are uploaded once,
+# and a router code change uploads only the small function zip.
+resource "aws_lambda_layer_version" "router_deps" {
+  layer_name               = "${local.router_name}-deps"
+  filename                 = data.archive_file.router_deps.output_path
+  source_code_hash         = data.archive_file.router_deps.output_base64sha256
+  compatible_runtimes      = ["python3.14"]
+  compatible_architectures = ["arm64"]
+}
+
 locals {
   router_name = "${local.component_prefix}-router"
 }
@@ -37,7 +53,7 @@ resource "aws_iam_role_policy" "router" {
         Resource = [aws_secretsmanager_secret.github_app.arn, aws_secretsmanager_secret.router_cert.arn]
       },
       { Effect = "Allow", Action = ["bedrock-agentcore:StopRuntimeSession"], Resource = [local.runtime_arn_pattern] },
-      # Asynchronous self-invocation for /kill (plan 4).
+      # Asynchronous self-invocation that finishes a /kill.
       {
         Effect   = "Allow"
         Action   = ["lambda:InvokeFunction"]
@@ -55,6 +71,7 @@ resource "aws_lambda_function" "router" {
   handler          = "agentcore_review_router.handler.handler"
   filename         = data.archive_file.router.output_path
   source_code_hash = data.archive_file.router.output_base64sha256
+  layers           = [aws_lambda_layer_version.router_deps.arn]
   memory_size      = 512
   timeout          = 10
 
@@ -99,4 +116,11 @@ resource "aws_lambda_permission" "invoke" {
   function_name            = aws_lambda_function.router.function_name
   principal                = "*"
   invoked_via_function_url = true
+}
+
+# The asynchronous self-invocation that finishes a /kill posts a comment: a retry would post it twice.
+resource "aws_lambda_function_event_invoke_config" "router" {
+  function_name                = aws_lambda_function.router.function_name
+  maximum_retry_attempts       = 0
+  maximum_event_age_in_seconds = 60
 }

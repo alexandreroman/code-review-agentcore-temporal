@@ -222,19 +222,9 @@ ping: ## Run the Ping workflow on the production task queue (scale-from-zero che
 	temporal workflow execute --type Ping --task-queue $(TASK_QUEUE) --workflow-id ping-$$(date +%s) \
 		--input '"hello"' --tls-cert-path $(TEMPORAL_TLS_CERT_PATH) --tls-key-path $(TEMPORAL_TLS_KEY_PATH)
 
-LAMBDA_PLATFORM := aarch64-manylinux2014
-ROUTER_BUILD := build/router
-
 .PHONY: router-build
-router-build: ## Build the router Lambda package (python3.14, arm64) into build/router
-	rm -rf $(ROUTER_BUILD) && mkdir -p $(ROUTER_BUILD)
-	uv export --quiet --frozen --package agentcore-review-router --no-dev --no-hashes --no-emit-workspace \
-		--no-emit-package boto3 --no-emit-package botocore --no-emit-package s3transfer --no-emit-package jmespath \
-		-o build/router-requirements.txt
-	uv pip install --quiet --target $(ROUTER_BUILD) --python-platform $(LAMBDA_PLATFORM) --python-version 3.14 \
-		--only-binary :all: --no-installer-metadata --no-compile-bytecode -r build/router-requirements.txt
-	uv pip install --quiet --target $(ROUTER_BUILD) --python-platform $(LAMBDA_PLATFORM) --python-version 3.14 \
-		--no-deps --no-installer-metadata --no-compile-bytecode ./shared ./router
+router-build: ## Build the router Lambda: code into build/router, dependency layer into build/router-deps
+	scripts/router-build.sh
 
 ##@ Workspace
 

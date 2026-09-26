@@ -25,12 +25,14 @@ source = { editable = "router" }
 dependencies = [
     { name = "agentcore-review-shared" },
     { name = "boto3" },
+    { name = "temporalio", extra = ["pydantic"] },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "agentcore-review-shared", editable = "shared" },
     { name = "boto3", specifier = "==1.43.103" },
+    { name = "temporalio", extras = ["pydantic"], specifier = "==1.33.0" },
 ]
 
 [[package]]
@@ -609,6 +611,7 @@ dependencies = [
     { name = "opentelemetry-instrumentation" },
     { name = "wrapt" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/03/ee/968d70b3c80c6f3bbdb168a3018cf18c78fbeadd330f6f4851fe029f8410/opentelemetry_instrumentation_threading-0.66b0.tar.gz", hash = "sha256:4c1c9adf42b83b6f44ca4bb99799e066ccfb1869c2029bc73d862c40a8ef932e", size = 9033, upload-time = "2026-09-25T12:36:17.626Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/37/24/0667079f02a507952baa6e14df90d3da870650fb029b6e1860a9e2dde3a9/opentelemetry_instrumentation_threading-0.66b0-py3-none-any.whl", hash = "sha256:4aaf38b96b47a04319b8d96bee4f1daa04e0d6c697525595746aeb61618c002d", size = 8491, upload-time = "2026-09-25T12:35:34.555Z" },
 ]
