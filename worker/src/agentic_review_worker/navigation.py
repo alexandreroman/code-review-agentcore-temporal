@@ -86,6 +86,22 @@ def glob_files(root: Path, pattern: str, path: str | None = None) -> str:
     return "\n".join(shown)
 
 
+def _matches_glob(relative: PurePosixPath, glob: str) -> bool:
+    """Match a relative path the way Glob does, including "**" segments.
+
+    PurePosixPath.match treats "**" like "*" and anchors on the right, so it
+    misses top-level files and over-restricts patterns like "app/**/*.py".
+    full_match does not have that problem, but as a safety net we also try
+    the pattern with a leading "**/" removed, which allows zero directories.
+    """
+    if "/" not in glob:
+        return PurePosixPath(relative.name).full_match(glob)
+    if relative.full_match(glob):
+        return True
+    trimmed = glob.removeprefix("**/")
+    return trimmed != glob and relative.full_match(trimmed)
+
+
 def grep_files(root: Path, pattern: str, path: str | None = None, glob: str | None = None) -> str:
     try:
         regex = re.compile(pattern)
@@ -103,7 +119,7 @@ def grep_files(root: Path, pattern: str, path: str | None = None, glob: str | No
         if not candidate.is_file() or not _inside(base_root, candidate):
             continue
         relative = candidate.relative_to(base_root)
-        if glob and not PurePosixPath(relative.as_posix()).match(glob):
+        if glob and not _matches_glob(PurePosixPath(relative.as_posix()), glob):
             continue
         text = _read_text(candidate)
         if text is None:

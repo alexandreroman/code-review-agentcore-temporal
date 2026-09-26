@@ -54,6 +54,26 @@ def test_grep_finds_matches_with_line_numbers(repo):
     assert "app/search.py:4: return run(f'{name}')" in out and "app/db.py:2" not in out
 
 
+@pytest.fixture
+def nested_repo(tmp_path: Path) -> Path:
+    root = tmp_path / "nested"
+    (root / "app" / "sub" / "deep").mkdir(parents=True)
+    (root / "top.py").write_text("top\n")
+    (root / "app" / "a.py").write_text("a\n")
+    (root / "app" / "sub" / "b.py").write_text("b\n")
+    (root / "app" / "sub" / "deep" / "c.py").write_text("c\n")
+    return root
+
+
+def test_grep_glob_filter_matches_recursive_patterns_like_glob(nested_repo):
+    def files_matched(glob):
+        return {line.split(":", 1)[0] for line in grep_files(nested_repo, ".", glob=glob).splitlines()}
+
+    assert files_matched("**/*.py") == {"top.py", "app/a.py", "app/sub/b.py", "app/sub/deep/c.py"}
+    assert files_matched("app/**/*.py") == {"app/a.py", "app/sub/b.py", "app/sub/deep/c.py"}
+    assert files_matched("*.py") == {"top.py", "app/a.py", "app/sub/b.py", "app/sub/deep/c.py"}
+
+
 def test_grep_filters_by_glob_and_path(repo):
     assert grep_files(repo, "demo", glob="*.md") == "README.md:1: # demo"
     assert grep_files(repo, "demo", glob="*.py") == "No matches found."
