@@ -50,6 +50,20 @@ export AWS_DEFAULT_REGION = $(AWS_REGION)
 export TEMPORAL_TLS_CLIENT_CERT_PATH = $(abspath $(TEMPORAL_TLS_CERT_PATH))
 export TEMPORAL_TLS_CLIENT_KEY_PATH = $(abspath $(TEMPORAL_TLS_KEY_PATH))
 
+# OpenTofu input variables (no secret among them).
+export TF_VAR_region = $(AWS_REGION)
+export TF_VAR_temporal_address = $(TEMPORAL_ADDRESS)
+export TF_VAR_temporal_namespace = $(TEMPORAL_NAMESPACE)
+export TF_VAR_task_queue = $(TASK_QUEUE)
+export TF_VAR_dev_task_queue = $(DEV_TASK_QUEUE)
+export TF_VAR_dev_branch_prefix = $(DEV_BRANCH_PREFIX)
+export TF_VAR_deployment_name = $(TEMPORAL_DEPLOYMENT_NAME)
+export TF_VAR_anthropic_model = $(ANTHROPIC_MODEL)
+export TF_VAR_anthropic_effort = $(ANTHROPIC_EFFORT)
+export TF_VAR_max_parallel_agents = $(MAX_PARALLEL_AGENTS)
+export TF_VAR_idle_timeout = $(AGENTCORE_IDLE_TIMEOUT)
+export TF_VAR_demo_repo = $(DEMO_REPO)
+
 PROJECT := temporal-agentic-review
 NAMESPACE_PLACEHOLDER := your-namespace.a1b2c
 TOOLS := uv run --quiet python -m agentic_review_tools
@@ -108,14 +122,14 @@ lint: ## Check formatting and lint rules
 format: ## Format the code
 	uv run ruff format .
 
-STACKS := bootstrap
+STACKS := bootstrap aws
 
 .PHONY: infra-check
 infra-check: ## Check OpenTofu formatting and validate every stack (no AWS access needed)
 	tofu fmt -check -recursive infra
 	@for stack in $(STACKS); do \
-		tofu -chdir=infra/$$stack init -backend=false -input=false >/dev/null && \
-		tofu -chdir=infra/$$stack validate -no-color || exit 1; \
+		TF_DATA_DIR=.terraform-validate tofu -chdir=infra/$$stack init -backend=false -input=false >/dev/null && \
+		TF_DATA_DIR=.terraform-validate tofu -chdir=infra/$$stack validate -no-color || exit 1; \
 	done
 
 .PHONY: check
@@ -132,6 +146,16 @@ bootstrap: ## Create the OpenTofu state bucket and KMS key (once per AWS account
 		$(TOFU_BOOTSTRAP) init -input=false && $(TOFU_BOOTSTRAP) apply -input=false -auto-approve; \
 	fi
 
+.PHONY: infra-init
+infra-init: ## Initialise the OpenTofu backends (S3 state, per worktree)
+	$(TOFU_AWS) init -input=false -backend-config="bucket=$(STATE_BUCKET)" \
+		-backend-config="region=$(AWS_REGION)" >/dev/null
+
+.PHONY: infra
+infra: router-build infra-init ## Apply the aws stack (keeps the deployed build and its endpoints)
+	$(call require_namespace)
+	$(TOOLS).infra apply
+
 .PHONY: secrets
 secrets: ## Push the Anthropic key and the mTLS certificates from .env to Secrets Manager
 	$(TOOLS).secrets_sync
@@ -143,6 +167,7 @@ ROUTER_BUILD := build/router
 router-build: ## Build the router Lambda package (python3.14, arm64) into build/router
 	rm -rf $(ROUTER_BUILD) && mkdir -p $(ROUTER_BUILD)
 	uv export --quiet --frozen --package agentic-review-router --no-dev --no-hashes --no-emit-workspace \
+		--no-emit-package boto3 --no-emit-package botocore --no-emit-package s3transfer --no-emit-package jmespath \
 		-o build/router-requirements.txt
 	uv pip install --quiet --target $(ROUTER_BUILD) --python-platform $(LAMBDA_PLATFORM) --python-version 3.14 \
 		--only-binary :all: --no-installer-metadata --no-compile-bytecode -r build/router-requirements.txt

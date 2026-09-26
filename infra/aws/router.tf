@@ -1,0 +1,102 @@
+data "archive_file" "router" {
+  type        = "zip"
+  source_dir  = "${path.module}/../../build/router"
+  output_path = "${path.module}/../../build/router.zip"
+}
+
+locals {
+  router_name = "${local.name}-router"
+}
+
+resource "aws_cloudwatch_log_group" "router" {
+  name              = "/aws/lambda/${local.router_name}"
+  retention_in_days = 7
+}
+
+resource "aws_iam_role" "router" {
+  name = local.router_name
+  assume_role_policy = jsonencode({
+    Version   = "2012-10-17"
+    Statement = [{ Effect = "Allow", Principal = { Service = "lambda.amazonaws.com" }, Action = "sts:AssumeRole" }]
+  })
+}
+
+resource "aws_iam_role_policy" "router" {
+  role = aws_iam_role.router.id
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${aws_cloudwatch_log_group.router.arn}:*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [aws_secretsmanager_secret.github_app.arn, aws_secretsmanager_secret.router_cert.arn]
+      },
+      { Effect = "Allow", Action = ["bedrock-agentcore:StopRuntimeSession"], Resource = [local.runtime_arn_pattern] },
+      # Asynchronous self-invocation for /kill (plan 4).
+      {
+        Effect   = "Allow"
+        Action   = ["lambda:InvokeFunction"]
+        Resource = "arn:aws:lambda:${var.region}:${local.account_id}:function:${local.router_name}"
+      },
+    ]
+  })
+}
+
+resource "aws_lambda_function" "router" {
+  function_name    = local.router_name
+  role             = aws_iam_role.router.arn
+  runtime          = "python3.14"
+  architectures    = ["arm64"]
+  handler          = "agentic_review_router.handler.handler"
+  filename         = data.archive_file.router.output_path
+  source_code_hash = data.archive_file.router.output_base64sha256
+  memory_size      = 512
+  timeout          = 10
+
+  logging_config {
+    log_format = "JSON"
+    log_group  = aws_cloudwatch_log_group.router.name
+  }
+
+  environment {
+    variables = {
+      GITHUB_APP_SECRET_ARN    = aws_secretsmanager_secret.github_app.arn
+      TEMPORAL_CERT_SECRET_ARN = aws_secretsmanager_secret.router_cert.arn
+      TEMPORAL_ADDRESS         = var.temporal_address
+      TEMPORAL_NAMESPACE       = var.temporal_namespace
+      TASK_QUEUE               = var.task_queue
+      DEV_TASK_QUEUE           = var.dev_task_queue
+      DEV_BRANCH_PREFIX        = var.dev_branch_prefix
+      AGENTCORE_RUNTIME_ARN    = local.deployed ? aws_bedrockagentcore_agent_runtime.worker[0].agent_runtime_arn : ""
+    }
+  }
+
+  depends_on = [aws_iam_role_policy.router]
+}
+
+resource "aws_lambda_function_url" "router" {
+  function_name      = aws_lambda_function.router.function_name
+  authorization_type = "NONE"
+}
+
+# A public Function URL needs both permissions.
+resource "aws_lambda_permission" "url" {
+  statement_id           = "FunctionUrlPublic"
+  action                 = "lambda:InvokeFunctionUrl"
+  function_name          = aws_lambda_function.router.function_name
+  principal              = "*"
+  function_url_auth_type = "NONE"
+}
+
+resource "aws_lambda_permission" "invoke" {
+  statement_id             = "FunctionUrlInvoke"
+  action                   = "lambda:InvokeFunction"
+  function_name            = aws_lambda_function.router.function_name
+  principal                = "*"
+  invoked_via_function_url = true
+}
