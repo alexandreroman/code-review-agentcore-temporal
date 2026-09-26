@@ -88,9 +88,11 @@ install: ## Install every workspace package and the dev tools
 .PHONY: dev
 dev: ## Run the local worker (dev task queue on Temporal Cloud) with hot reload
 	$(call require_namespace)
-	@# The trap reaps the whole process group (kill 0) on exit or signal, so no
-	@# orphaned processes survive Ctrl-C or a child crash.
-	@trap 'kill 0' EXIT INT TERM; \
+	-@GITHUB_OWNER=$(GITHUB_OWNER) scripts/info-panel.sh --local-worker
+	@# The trap republishes the panel, then reaps the whole process group (kill 0),
+	@# so no orphaned processes survive Ctrl-C or a child crash.
+	@trap 'trap - EXIT INT TERM; GITHUB_OWNER=$(GITHUB_OWNER) scripts/info-panel.sh >/dev/null 2>&1; kill 0' \
+		EXIT INT TERM; \
 		uv run watchfiles 'python -m agentcore_review_worker' worker/src shared/src & \
 		wait
 
@@ -206,6 +208,12 @@ router-build: ## Build the router Lambda package (python3.14, arm64) into build/
 		--only-binary :all: --no-installer-metadata --no-compile-bytecode -r build/router-requirements.txt
 	uv pip install --quiet --target $(ROUTER_BUILD) --python-platform $(LAMBDA_PLATFORM) --python-version 3.14 \
 		--no-deps --no-installer-metadata --no-compile-bytecode ./shared ./router
+
+##@ Workspace
+
+.PHONY: info-publish
+info-publish: ## Publish endpoints and links to the workspace info panel
+	-@GITHUB_OWNER=$(GITHUB_OWNER) scripts/info-panel.sh
 
 ##@ Helpers
 
