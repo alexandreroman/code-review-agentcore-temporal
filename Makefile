@@ -164,6 +164,17 @@ github-app: infra-init ## Register the GitHub App through the manifest flow (int
 		--port $(GITHUB_APP_CALLBACK_PORT) --webhook-url "$$($(TOFU_AWS) output -raw router_url)" \
 		$(if $(FORCE),--force)
 
+.PHONY: deploy
+deploy: router-build infra-init ## Build and push the worker image, then make it the current Worker Deployment Version
+	$(call require_namespace)
+	scripts/deploy.sh
+
+.PHONY: ping
+ping: ## Run the Ping workflow on the production task queue (scale-from-zero check)
+	$(call require_namespace)
+	temporal workflow execute --type Ping --task-queue $(TASK_QUEUE) --workflow-id ping-$$(date +%s) \
+		--input '"hello"' --tls-cert-path $(TEMPORAL_TLS_CERT_PATH) --tls-key-path $(TEMPORAL_TLS_KEY_PATH)
+
 LAMBDA_PLATFORM := aarch64-manylinux2014
 ROUTER_BUILD := build/router
 

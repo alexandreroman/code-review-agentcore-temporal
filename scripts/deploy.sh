@@ -1,0 +1,213 @@
+#!/usr/bin/env bash
+# Builds and pushes the worker image, applies the aws stack, and makes the
+# build the current Temporal Worker Deployment Version (make deploy).
+#
+# A Worker Deployment Version only learns its task queues when a worker of
+# that version first polls, and Temporal Cloud never scales out an
+# unattached version. This script therefore waits for the attachment,
+# invoking the endpoint once if needed, before making the version current.
+# Re-running it on the same commit changes nothing: the image is already in
+# ECR, the apply is a no-op, and the version is already current.
+set -euo pipefail
+
+source scripts/lib.sh
+
+# Paths the worker image is built from: exactly worker/Dockerfile's COPY
+# lines (every workspace member pyproject.toml, then the two source trees),
+# plus the Dockerfile itself. The build ID is derived from their content,
+# not from the commit SHA, so a commit that leaves these untouched (docs,
+# or the tests directories the image never copies) does not redeploy: same
+# image, same AgentCore endpoint, same Worker Deployment Version.
+IMAGE_INPUTS=(
+  pyproject.toml
+  uv.lock
+  shared/pyproject.toml
+  router/pyproject.toml
+  worker/pyproject.toml
+  tools/pyproject.toml
+  shared/src
+  worker/src
+  worker/Dockerfile
+)
+ATTACH_TIMEOUT=180
+INVOKE_AFTER=30
+POLL_EVERY=5
+
+# image_inputs_hash prints the sha256 of the committed object IDs (blob or
+# tree SHAs) of the image inputs, in a fixed order, so it changes only when
+# their committed content changes.
+image_inputs_hash() {
+  local path object_ids=()
+  for path in "${IMAGE_INPUTS[@]}"; do
+    object_ids+=("$(git rev-parse "HEAD:${path}")")
+  done
+  printf '%s\n' "${object_ids[@]}" | shasum -a 256 | cut -d' ' -f1
+}
+
+build_id() {
+  local hash dirty build_id
+  hash=$(image_inputs_hash)
+  build_id="b_${hash:0:12}"
+  dirty=$(git status --porcelain -- "${IMAGE_INPUTS[@]}")
+  if [[ -n "$dirty" ]]; then
+    build_id="${build_id}_$(date -u +%Y%m%d%H%M%S)"
+  fi
+  echo "$build_id"
+}
+
+# ensure_image REPOSITORY_URL BUILD_ID: builds, self-checks and pushes the
+# image, unless ECR already has this tag (tags are immutable).
+ensure_image() {
+  local repository_url="$1" build_id="$2"
+  local repository="${repository_url#*/}"
+
+  if aws ecr describe-images --repository-name "$repository" --image-ids "imageTag=$build_id" >/dev/null 2>&1; then
+    echo "Image $build_id already in ECR"
+    return
+  fi
+
+  docker info >/dev/null 2>&1 || die "Docker is not running: start it, then re-run make deploy"
+
+  local image="${repository_url}:${build_id}"
+  docker build --platform linux/arm64 -f worker/Dockerfile -t "$image" .
+  docker run --rm --platform linux/arm64 "$image" python -m agentic_review_worker.selfcheck
+  aws ecr get-login-password | docker login --username AWS --password-stdin "${repository_url%%/*}"
+
+  local attempt
+  for attempt in 1 2 3; do
+    docker push "$image" && return
+    [[ "$attempt" -lt 3 ]] || die "docker push $image failed after 3 attempts"
+    echo "docker push failed (attempt $attempt/3), retrying" >&2
+  done
+}
+
+# describe_version DEPLOYMENT BUILD_ID: prints the version's JSON, or nothing
+# if it does not exist yet.
+describe_version() {
+  tcli worker deployment describe-version --deployment-name "$1" --build-id "$2" -o json 2>/dev/null || true
+}
+
+queue_attached() {
+  jq -e --arg queue "$TASK_QUEUE" '[.taskQueuesInfos[]?.name] | index($queue) != null' <<<"$1" >/dev/null
+}
+
+# create_version DEPLOYMENT BUILD_ID: creates the version against the current aws stack outputs.
+create_version() {
+  local deployment="$1" build_id="$2" outputs endpoint_arn role_arn external_id
+  outputs=$(aws_outputs)
+  endpoint_arn=$(jq -r '.current_endpoint_arn.value' <<<"$outputs")
+  role_arn=$(jq -r '.temporal_invoke_role_arn.value' <<<"$outputs")
+  external_id=$(jq -r '.temporal_external_id.value' <<<"$outputs")
+  tcli worker deployment create-version --deployment-name "$deployment" --build-id "$build_id" \
+    --aws-agentcore-endpoint-arn "$endpoint_arn" \
+    --aws-agentcore-assume-role-arn "$role_arn" \
+    --aws-agentcore-assume-role-external-id "$external_id"
+}
+
+# reconcile_compute_config DEPLOYMENT BUILD_ID: a destroy + up leaves an existing version pointing at
+# a gone AgentCore endpoint and role (same build ID, stale compute config). describe-version's JSON
+# never shows them back to confirm it by diffing (only computeConfig.scalingGroups.default.provider.type
+# comes through), so this re-applies the current outputs unconditionally instead, falling back to
+# deleting and recreating the version if Temporal refuses the update.
+reconcile_compute_config() {
+  local deployment="$1" build_id="$2" outputs endpoint_arn role_arn external_id
+  outputs=$(aws_outputs)
+  endpoint_arn=$(jq -r '.current_endpoint_arn.value' <<<"$outputs")
+  role_arn=$(jq -r '.temporal_invoke_role_arn.value' <<<"$outputs")
+  external_id=$(jq -r '.temporal_external_id.value' <<<"$outputs")
+  echo "Reconciling the compute config of existing version $build_id"
+  if tcli worker deployment update-version-compute-config --deployment-name "$deployment" --build-id "$build_id" \
+    --aws-agentcore-endpoint-arn "$endpoint_arn" \
+    --aws-agentcore-assume-role-arn "$role_arn" \
+    --aws-agentcore-assume-role-external-id "$external_id" >/dev/null 2>&1; then
+    return
+  fi
+  echo "Compute config update refused: deleting the stale version and recreating it"
+  if ! tcli worker deployment delete-version --deployment-name "$deployment" --build-id "$build_id" \
+    --skip-drainage; then
+    die "delete-version failed for $build_id (pollers from the destroyed worker are likely still listed)." \
+      "Wait about 5 minutes, then re-run make deploy."
+  fi
+  create_version "$deployment" "$build_id"
+}
+
+# register DEPLOYMENT BUILD_ID: creates the Worker Deployment Version if it
+# does not exist, waits for its task queue to attach, then makes it current.
+register() {
+  local deployment="$1" build_id="$2"
+
+  # A flaky connection can make `describe` fail even though the deployment
+  # already exists; treat that specific "create" error the same as success
+  # instead of aborting on a false negative.
+  if ! tcli worker deployment describe --name "$deployment" >/dev/null 2>&1; then
+    local create_output
+    if ! create_output=$(tcli worker deployment create --name "$deployment" 2>&1); then
+      [[ "$create_output" == *"already exists"* ]] || die "$create_output"
+    else
+      echo "$create_output"
+    fi
+  fi
+
+  local version existed=true
+  version=$(describe_version "$deployment" "$build_id")
+  if [[ -z "$version" ]]; then
+    existed=false
+    create_version "$deployment" "$build_id"
+    version=$(describe_version "$deployment" "$build_id")
+  else
+    # A version that already existed before this run may be stale (a destroy + up still lists
+    # $TASK_QUEUE in taskQueuesInfos from before the destroy), so its compute config is reconciled
+    # up front instead of waiting for the attach loop below to time out. A version just created
+    # above already carries the current endpoint and role and needs no reconciliation.
+    reconcile_compute_config "$deployment" "$build_id"
+    version=$(describe_version "$deployment" "$build_id")
+  fi
+
+  local elapsed=0 invoked=false
+  while ! queue_attached "$version"; do
+    if [[ "$elapsed" -ge "$ATTACH_TIMEOUT" ]]; then
+      local outputs runtime_id
+      outputs=$(aws_outputs)
+      runtime_id=$(jq -r '.runtime_id.value' <<<"$outputs")
+      die "task queue $TASK_QUEUE never attached to $build_id: check the CloudWatch log group" \
+        "/aws/bedrock-agentcore/runtimes/${runtime_id}-${build_id}"
+    fi
+    if [[ "$invoked" == false && "$elapsed" -ge "$INVOKE_AFTER" ]]; then
+      echo "Task queue not attached after ${INVOKE_AFTER}s: invoking the endpoint"
+      invoke_endpoint "$build_id"
+      invoked=true
+    fi
+    sleep "$POLL_EVERY"
+    elapsed=$((elapsed + POLL_EVERY))
+    version=$(describe_version "$deployment" "$build_id")
+  done
+  echo "Task queue $TASK_QUEUE attached to $build_id"
+
+  if jq -e '(.currentSinceTime // "") as $t | ($t != "" and ($t | startswith("1970-01-01") | not))' <<<"$version" >/dev/null; then
+    echo "$build_id is already the current version"
+    return
+  fi
+  tcli worker deployment set-current-version --deployment-name "$deployment" --build-id "$build_id" --yes
+}
+
+# invoke_endpoint BUILD_ID: starts one session of this build, so its worker
+# polls and attaches the task queue.
+invoke_endpoint() {
+  local build_id="$1" outputs runtime_arn
+  outputs=$(aws_outputs)
+  runtime_arn=$(jq -r '.runtime_arn.value' <<<"$outputs")
+  aws bedrock-agentcore invoke-agent-runtime \
+    --agent-runtime-arn "$runtime_arn" \
+    --qualifier "$build_id" \
+    --runtime-session-id "deploy-$(uuidgen | tr '[:upper:]' '[:lower:]')" \
+    --payload "$(printf '{}' | base64)" \
+    /dev/null >/dev/null
+}
+
+BUILD_ID=$(build_id)
+echo "Deploying build $BUILD_ID"
+OUTPUTS=$(aws_outputs)
+ECR_REPOSITORY_URL=$(jq -r '.ecr_repository_url.value' <<<"$OUTPUTS")
+ensure_image "$ECR_REPOSITORY_URL" "$BUILD_ID"
+aws_apply "$BUILD_ID"
+register "$TEMPORAL_DEPLOYMENT_NAME" "$BUILD_ID"
