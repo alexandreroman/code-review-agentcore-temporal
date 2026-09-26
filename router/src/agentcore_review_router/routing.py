@@ -1,5 +1,6 @@
 """Pure mapping from a GitHub webhook event to the action the router must perform."""
 
+import json
 from dataclasses import dataclass
 from typing import Literal
 
@@ -60,6 +61,15 @@ def route(event: str, payload: dict, delivery_id: str, config: RouterConfig) -> 
     if event == "issue_comment":
         return _route_comment(payload, delivery_id, config)
     return Ignore(f"event {event} is not handled")
+
+
+def load_payload(body: bytes) -> dict | None:
+    """The webhook's JSON object, or None when a correctly signed body is not one (unexpected content type)."""
+    try:
+        payload = json.loads(body)
+    except ValueError:  # JSONDecodeError and UnicodeDecodeError
+        return None
+    return payload if isinstance(payload, dict) else None
 
 
 def _pr_ref(payload: dict, number: int) -> PrRef:

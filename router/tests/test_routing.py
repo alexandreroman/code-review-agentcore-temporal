@@ -3,7 +3,15 @@ import json
 from pathlib import Path
 
 import pytest
-from agentcore_review_router.routing import Ignore, RouterConfig, RunCommand, SendSignal, StartOrSignal, route
+from agentcore_review_router.routing import (
+    Ignore,
+    RouterConfig,
+    RunCommand,
+    SendSignal,
+    StartOrSignal,
+    load_payload,
+    route,
+)
 from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -130,3 +138,18 @@ def test_edited_or_deleted_comments_are_ignored(action):
 @pytest.mark.parametrize("event", ["ping", "installation", "push", "check_run"])
 def test_other_events_are_ignored(event):
     assert isinstance(route(event, {}, "d", CONFIG), Ignore)
+
+
+@pytest.mark.parametrize("body", [b"", b"not json", b"[1, 2]", b'"text"', b"null", b"\xff\xfe\x00"])
+def test_bodies_that_are_not_json_objects_are_rejected(body):
+    assert load_payload(body) is None
+
+
+def test_json_object_body_is_loaded():
+    assert load_payload(b'{"action": "opened"}') == {"action": "opened"}
+
+
+def test_comment_without_body_is_ignored():
+    payload = load("issue_comment")
+    payload["comment"]["body"] = None
+    assert isinstance(route("issue_comment", payload, "d", CONFIG), Ignore)
