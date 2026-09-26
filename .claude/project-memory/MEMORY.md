@@ -28,3 +28,5 @@
 - [Makefile only](references/feedback_makefile_only.md) — automation goes through Makefile targets, never .sh scripts
 - [Ask before implementing](references/feedback_ask_before_implementing.md) — confirm with the user before starting a plan or app code
 - [English only](references/feedback_english_only.md) — all generated text (code, docs, commits, memory) is in English
+- [Title and code name](references/project_naming.md) — title in human-facing docs, temporal-agentic-review in code
+- [Amend unpushed commits](references/feedback_amend_unpushed.md) — fold fixes into the unpushed commit they correct

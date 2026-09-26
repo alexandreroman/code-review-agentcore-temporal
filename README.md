@@ -1,4 +1,4 @@
-# temporal-agentic-review
+# Agentic Review with Temporal
 
 AI agents review GitHub pull requests, orchestrated by Temporal and run as
 Serverless Workers on Amazon Bedrock AgentCore. Built as a 15-minute
