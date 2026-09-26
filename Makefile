@@ -119,7 +119,7 @@ lint: ## Check formatting and lint rules
 format: ## Format the code
 	uv run ruff format .
 
-STACKS := bootstrap aws
+STACKS := bootstrap aws github
 
 .PHONY: infra-check
 infra-check: ## Check OpenTofu formatting and validate every stack (no AWS access needed)
@@ -147,6 +147,8 @@ bootstrap: ## Create the OpenTofu state bucket and KMS key (once per AWS account
 infra-init: ## Initialise the OpenTofu backends (S3 state, per worktree)
 	$(TOFU_AWS) init -input=false -backend-config="bucket=$(STATE_BUCKET)" \
 		-backend-config="region=$(AWS_REGION)" >/dev/null
+	$(TOFU_GITHUB) init -input=false -backend-config="bucket=$(STATE_BUCKET)" \
+		-backend-config="region=$(AWS_REGION)" >/dev/null
 
 .PHONY: infra
 infra: router-build infra-init ## Apply the aws stack (keeps the deployed build and its endpoints)
@@ -163,6 +165,17 @@ github-app: infra-init ## Register the GitHub App through the manifest flow (int
 	$(TOOLS).github_app register --owner $(GITHUB_OWNER) --name $(GITHUB_APP_NAME) \
 		--port $(GITHUB_APP_CALLBACK_PORT) --webhook-url "$$($(TOFU_AWS) output -raw router_url)" \
 		$(if $(FORCE),--force)
+
+.PHONY: require-github-app
+require-github-app:
+	@aws secretsmanager get-secret-value --secret-id $(PROJECT)/github-app --query ARN --output text >/dev/null 2>&1 \
+		|| { echo "The GitHub App is not registered yet: run make github-app, then make up again."; exit 1; }
+
+.PHONY: github
+github: infra-init require-github-app ## Apply the github stack (demo repository, ruleset, Actions secrets)
+	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
+	GITHUB_TOKEN=$$(gh auth token) TF_VAR_github_owner=$(GITHUB_OWNER) \
+		$(TOFU_GITHUB) apply -input=false -auto-approve
 
 .PHONY: deploy
 deploy: router-build infra-init ## Build and push the worker image, then make it the current Worker Deployment Version
