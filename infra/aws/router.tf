@@ -5,7 +5,7 @@ data "archive_file" "router" {
 }
 
 locals {
-  router_name = "${local.name}-router"
+  router_name = "${local.component_prefix}-router"
 }
 
 resource "aws_cloudwatch_log_group" "router" {
@@ -52,7 +52,7 @@ resource "aws_lambda_function" "router" {
   role             = aws_iam_role.router.arn
   runtime          = "python3.14"
   architectures    = ["arm64"]
-  handler          = "agentic_review_router.handler.handler"
+  handler          = "agentcore_review_router.handler.handler"
   filename         = data.archive_file.router.output_path
   source_code_hash = data.archive_file.router.output_base64sha256
   memory_size      = 512

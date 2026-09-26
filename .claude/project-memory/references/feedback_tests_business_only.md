@@ -9,7 +9,7 @@ type: feedback
 Unit tests cover the core business logic of the app: the shared contract,
 the review logic (hunks, findings, batching, navigation tools), the webhook
 routing, and later the workflows and agents. Infrastructure (OpenTofu), the
-Makefile, the deployment tooling (`agentic_review_tools`) and the runtime
+Makefile, the deployment tooling (`agentcore_review_tools`) and the runtime
 plumbing (entry points, settings, drain) have no unit tests; they are checked
 by running them for real.
 

@@ -2,7 +2,7 @@ import os
 from pathlib import Path
 
 import pytest
-from agentic_review_worker.navigation import (
+from agentcore_review_worker.navigation import (
     MAX_GLOB_RESULTS,
     MAX_GREP_RESULTS,
     MAX_READ_LINES,

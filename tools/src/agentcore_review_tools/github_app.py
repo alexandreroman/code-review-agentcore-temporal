@@ -11,8 +11,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
 import httpx2 as httpx
-from agentic_review_shared.github import API_URL, GitHubApp
-from agentic_review_shared.secrets import GITHUB_APP_SECRET, GitHubAppSecret
+from agentcore_review_shared.github import API_URL, GitHubApp
+from agentcore_review_shared.secrets import GITHUB_APP_SECRET, GitHubAppSecret
 from botocore.exceptions import ClientError
 
 PERMISSIONS = {
@@ -204,7 +204,7 @@ def check_install(args: argparse.Namespace) -> None:
 
 
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(prog="agentic_review_tools.github_app")
+    parser = argparse.ArgumentParser(prog="agentcore_review_tools.github_app")
     commands = parser.add_subparsers(dest="command", required=True)
     reg = commands.add_parser("register", help="register the app through the manifest flow")
     reg.add_argument("--owner", required=True)

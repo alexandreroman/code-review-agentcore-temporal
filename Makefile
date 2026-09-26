@@ -17,7 +17,7 @@ TEMPORAL_WORKER_CERT_PATH ?= $(TEMPORAL_TLS_CERT_PATH)
 TEMPORAL_WORKER_KEY_PATH ?= $(TEMPORAL_TLS_KEY_PATH)
 TEMPORAL_ROUTER_CERT_PATH ?= $(TEMPORAL_TLS_CERT_PATH)
 TEMPORAL_ROUTER_KEY_PATH ?= $(TEMPORAL_TLS_KEY_PATH)
-TEMPORAL_DEPLOYMENT_NAME ?= agentic-review
+TEMPORAL_DEPLOYMENT_NAME ?= agentcore-review-demo-worker
 TASK_QUEUE ?= review
 DEV_TASK_QUEUE ?= review-dev
 DEV_BRANCH_PREFIX ?= dev/
@@ -25,8 +25,8 @@ ANTHROPIC_API_KEY ?=
 ANTHROPIC_MODEL ?= claude-opus-5
 ANTHROPIC_EFFORT ?= high
 MAX_PARALLEL_AGENTS ?= 3
-DEMO_REPO ?= temporal-agentic-review-demo
-GITHUB_APP_NAME ?= temporal-agentic-review
+DEMO_REPO ?= agentcore-review-demo-app
+GITHUB_APP_NAME ?= temporal-agentcore-review-demo
 AGENTCORE_IDLE_TIMEOUT ?= 120
 GITHUB_APP_CALLBACK_PORT ?= 8765
 
@@ -61,9 +61,9 @@ export TF_VAR_max_parallel_agents = $(MAX_PARALLEL_AGENTS)
 export TF_VAR_idle_timeout = $(AGENTCORE_IDLE_TIMEOUT)
 export TF_VAR_demo_repo = $(DEMO_REPO)
 
-PROJECT := temporal-agentic-review
+PROJECT := temporal-agentcore-review-demo
 NAMESPACE_PLACEHOLDER := your-namespace.a1b2c
-TOOLS := uv run --quiet python -m agentic_review_tools
+TOOLS := uv run --quiet python -m agentcore_review_tools
 TOFU_BOOTSTRAP := tofu -chdir=infra/bootstrap
 TOFU_AWS := tofu -chdir=infra/aws
 TOFU_GITHUB := tofu -chdir=infra/github
@@ -91,7 +91,7 @@ dev: ## Run the local worker (dev task queue on Temporal Cloud) with hot reload
 	@# The trap reaps the whole process group (kill 0) on exit or signal, so no
 	@# orphaned processes survive Ctrl-C or a child crash.
 	@trap 'kill 0' EXIT INT TERM; \
-		uv run watchfiles 'python -m agentic_review_worker' worker/src shared/src & \
+		uv run watchfiles 'python -m agentcore_review_worker' worker/src shared/src & \
 		wait
 
 # Casper gives each worktree a band of ports starting at CASPER_PORT; the
@@ -181,7 +181,7 @@ ROUTER_BUILD := build/router
 .PHONY: router-build
 router-build: ## Build the router Lambda package (python3.14, arm64) into build/router
 	rm -rf $(ROUTER_BUILD) && mkdir -p $(ROUTER_BUILD)
-	uv export --quiet --frozen --package agentic-review-router --no-dev --no-hashes --no-emit-workspace \
+	uv export --quiet --frozen --package agentcore-review-router --no-dev --no-hashes --no-emit-workspace \
 		--no-emit-package boto3 --no-emit-package botocore --no-emit-package s3transfer --no-emit-package jmespath \
 		-o build/router-requirements.txt
 	uv pip install --quiet --target $(ROUTER_BUILD) --python-platform $(LAMBDA_PLATFORM) --python-version 3.14 \

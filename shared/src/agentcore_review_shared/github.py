@@ -8,7 +8,7 @@ from datetime import datetime
 import httpx2 as httpx
 import jwt
 
-from agentic_review_shared.github_errors import Classification, classify
+from agentcore_review_shared.github_errors import Classification, classify
 
 API_URL = "https://api.github.com"
 TOKEN_REFRESH_MARGIN = 300.0

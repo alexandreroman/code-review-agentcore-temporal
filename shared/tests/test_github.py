@@ -3,7 +3,7 @@ import json
 import httpx2 as httpx
 import jwt
 import pytest
-from agentic_review_shared.github import API_URL, GitHubApp, GitHubError
+from agentcore_review_shared.github import API_URL, GitHubApp, GitHubError
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 

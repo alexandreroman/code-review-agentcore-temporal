@@ -1,5 +1,5 @@
 import pytest
-from agentic_review_shared.contract import (
+from agentcore_review_shared.contract import (
     CHECK_NAME,
     QUERY_GET_FINDINGS,
     SIGNAL_FIX_REQUESTED,

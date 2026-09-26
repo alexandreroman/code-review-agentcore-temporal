@@ -15,5 +15,7 @@ the repository root.
 **Why:** the spec is the binding authority for every implementation plan.
 
 **How to access:** read
-`docs/superpowers/specs/2026-09-25-temporal-agentic-review-design.md` before
-implementation work; never `git add -f` anything under `docs/`.
+`docs/superpowers/specs/2026-09-25-temporal-agentcore-review-demo-design.md`
+before implementation work; read `docs/superpowers/STATUS.md` for the
+hand-off status between conversations; never `git add -f` anything under
+`docs/`.

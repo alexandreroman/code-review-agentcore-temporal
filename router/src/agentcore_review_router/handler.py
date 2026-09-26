@@ -4,7 +4,7 @@ import logging
 import os
 from functools import cache
 
-from agentic_review_shared.secrets import GitHubAppSecret
+from agentcore_review_shared.secrets import GitHubAppSecret
 
 from .signature import decode_body, verify_signature
 

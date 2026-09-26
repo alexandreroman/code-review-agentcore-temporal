@@ -70,7 +70,7 @@ ensure_image() {
 
   local image="${repository_url}:${build_id}"
   docker build --platform linux/arm64 -f worker/Dockerfile -t "$image" .
-  docker run --rm --platform linux/arm64 "$image" python -m agentic_review_worker.selfcheck
+  docker run --rm --platform linux/arm64 "$image" python -m agentcore_review_worker.selfcheck
   aws ecr get-login-password | docker login --username AWS --password-stdin "${repository_url%%/*}"
 
   local attempt

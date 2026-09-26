@@ -1,8 +1,8 @@
 {
   "action": "created",
-  "issue": {"number": 3, "pull_request": {"url": "https://api.github.com/repos/octocat/temporal-agentic-review-demo/pulls/3"}},
+  "issue": {"number": 3, "pull_request": {"url": "https://api.github.com/repos/octocat/agentcore-review-demo-app/pulls/3"}},
   "comment": {"id": 555, "body": "/fix", "performed_via_github_app": null},
-  "repository": {"name": "temporal-agentic-review-demo", "owner": {"login": "octocat"}},
+  "repository": {"name": "agentcore-review-demo-app", "owner": {"login": "octocat"}},
   "sender": {"login": "octocat", "type": "User"},
   "installation": {"id": 90210}
 }

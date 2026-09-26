@@ -25,7 +25,7 @@ COPY shared/pyproject.toml shared/
 COPY router/pyproject.toml router/
 COPY worker/pyproject.toml worker/
 COPY tools/pyproject.toml tools/
-RUN uv sync --frozen --no-dev --package agentic-review-worker --no-install-workspace
+RUN uv sync --frozen --no-dev --package agentcore-review-worker --no-install-workspace
 
 FROM deps AS app
 
@@ -33,7 +33,7 @@ FROM deps AS app
 # venv as the third-party dependencies above. No .env, no certificates.
 COPY shared/src shared/src
 COPY worker/src worker/src
-RUN uv sync --frozen --no-dev --package agentic-review-worker --no-editable
+RUN uv sync --frozen --no-dev --package agentcore-review-worker --no-editable
 
 # `COPY --from` flattens each wildcard match's own contents into the
 # destination instead of nesting it (a Dockerfile quirk, unlike plain `cp`),
@@ -57,4 +57,4 @@ WORKDIR /app
 
 USER 1000
 EXPOSE 8080
-CMD ["python", "-m", "agentic_review_worker.agentcore"]
+CMD ["python", "-m", "agentcore_review_worker.agentcore"]

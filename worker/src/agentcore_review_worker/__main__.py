@@ -1,4 +1,4 @@
-"""Local dev worker: `python -m agentic_review_worker` (make dev). Unversioned, on the dev task queue."""
+"""Local dev worker: `python -m agentcore_review_worker` (make dev). Unversioned, on the dev task queue."""
 
 import asyncio
 import logging
@@ -6,7 +6,7 @@ import os
 import socket
 import sys
 
-from agentic_review_shared.identity import dev_identity
+from agentcore_review_shared.identity import dev_identity
 
 from .runtime import build_worker, connect, tls_from_files
 from .settings import SettingsError, dev_settings

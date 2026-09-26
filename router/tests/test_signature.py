@@ -3,7 +3,7 @@ import hashlib
 import hmac
 
 import pytest
-from agentic_review_router.signature import decode_body, verify_signature
+from agentcore_review_router.signature import decode_body, verify_signature
 
 SECRET = "webhook-secret"
 BODY = b'{"action":"opened","number":1}'

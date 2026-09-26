@@ -1,4 +1,4 @@
-from agentic_review_shared.ids import (
+from agentcore_review_shared.ids import (
     fixer_workflow_id,
     pr_workflow_id,
     reviewer_workflow_id,
@@ -9,14 +9,12 @@ from agentic_review_shared.ids import (
 
 
 def test_pr_workflow_id_format():
-    assert pr_workflow_id("octocat", "temporal-agentic-review-demo", 7) == (
-        "pr-octocat-temporal-agentic-review-demo-7"
-    )
+    assert pr_workflow_id("octocat", "agentcore-review-demo-app", 7) == ("pr-octocat-agentcore-review-demo-app-7")
 
 
 def test_pr_workflow_id_ignores_case_differences_between_events():
-    assert pr_workflow_id("OctoCat", "Temporal-Agentic-Review-Demo", 7) == pr_workflow_id(
-        "octocat", "temporal-agentic-review-demo", 7
+    assert pr_workflow_id("OctoCat", "Agentcore-Review-Demo-App", 7) == pr_workflow_id(
+        "octocat", "agentcore-review-demo-app", 7
     )
 
 

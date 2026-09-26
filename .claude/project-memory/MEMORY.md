@@ -28,7 +28,7 @@
 - [Makefile as the single entry point](references/feedback_makefile_only.md) — make targets delegate to scripts/*.sh; logic never in recipes
 - [Ask before implementing](references/feedback_ask_before_implementing.md) — confirm with the user before starting a plan or app code
 - [English only](references/feedback_english_only.md) — all generated text (code, docs, commits, memory) is in English
-- [Title and code name](references/project_naming.md) — title in human-facing docs, temporal-agentic-review in code
+- [Title and code name](references/project_naming.md) — title in human-facing docs, temporal-agentcore-review-demo in code
 - [Amend unpushed commits](references/feedback_amend_unpushed.md) — fold fixes into the unpushed commit they correct
 - [Placeholders for account identifiers](references/feedback_no_real_identifiers.md) — real namespace/account/app IDs only in .env, never tracked
 - [Casper stays out of user-facing files](references/feedback_no_casper_in_docs.md) — README and .env.example never mention Casper

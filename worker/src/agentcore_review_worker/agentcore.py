@@ -3,8 +3,8 @@
 import asyncio
 import os
 
-from agentic_review_shared.identity import agentcore_identity
-from agentic_review_shared.secrets import TemporalCertSecret
+from agentcore_review_shared.identity import agentcore_identity
+from agentcore_review_shared.secrets import TemporalCertSecret
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
 from .drain import ActivityTracker

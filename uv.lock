@@ -4,10 +4,10 @@ requires-python = ">=3.14"
 
 [manifest]
 members = [
-    "agentic-review-router",
-    "agentic-review-shared",
-    "agentic-review-tools",
-    "agentic-review-worker",
+    "agentcore-review-router",
+    "agentcore-review-shared",
+    "agentcore-review-tools",
+    "agentcore-review-worker",
 ]
 
 [manifest.dependency-groups]
@@ -19,22 +19,22 @@ dev = [
 ]
 
 [[package]]
-name = "agentic-review-router"
+name = "agentcore-review-router"
 version = "0.1.0"
 source = { editable = "router" }
 dependencies = [
-    { name = "agentic-review-shared" },
+    { name = "agentcore-review-shared" },
     { name = "boto3" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "agentic-review-shared", editable = "shared" },
+    { name = "agentcore-review-shared", editable = "shared" },
     { name = "boto3", specifier = "==1.43.103" },
 ]
 
 [[package]]
-name = "agentic-review-shared"
+name = "agentcore-review-shared"
 version = "0.1.0"
 source = { editable = "shared" }
 dependencies = [
@@ -51,26 +51,26 @@ requires-dist = [
 ]
 
 [[package]]
-name = "agentic-review-tools"
+name = "agentcore-review-tools"
 version = "0.1.0"
 source = { editable = "tools" }
 dependencies = [
-    { name = "agentic-review-shared" },
+    { name = "agentcore-review-shared" },
     { name = "boto3" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "agentic-review-shared", editable = "shared" },
+    { name = "agentcore-review-shared", editable = "shared" },
     { name = "boto3", specifier = "==1.43.103" },
 ]
 
 [[package]]
-name = "agentic-review-worker"
+name = "agentcore-review-worker"
 version = "0.1.0"
 source = { editable = "worker" }
 dependencies = [
-    { name = "agentic-review-shared" },
+    { name = "agentcore-review-shared" },
     { name = "bedrock-agentcore" },
     { name = "boto3" },
     { name = "temporalio", extra = ["pydantic"] },
@@ -78,7 +78,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentic-review-shared", editable = "shared" },
+    { name = "agentcore-review-shared", editable = "shared" },
     { name = "bedrock-agentcore", specifier = "==1.23.1" },
     { name = "boto3", specifier = "==1.43.103" },
     { name = "temporalio", extras = ["pydantic"], specifier = "==1.33.0" },

@@ -1,5 +1,5 @@
 import pytest
-from agentic_review_shared.github_errors import DEFAULT_RATE_LIMIT_WAIT, classify
+from agentcore_review_shared.github_errors import DEFAULT_RATE_LIMIT_WAIT, classify
 
 
 @pytest.mark.parametrize("status", [500, 502, 503])

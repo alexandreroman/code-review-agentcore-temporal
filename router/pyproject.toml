@@ -1,11 +1,11 @@
 [project]
-name = "agentic-review-router"
+name = "agentcore-review-router"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = ["agentic-review-shared", "boto3==1.43.103"]
+dependencies = ["agentcore-review-shared", "boto3==1.43.103"]
 
 [tool.uv.sources]
-agentic-review-shared = { workspace = true }
+agentcore-review-shared = { workspace = true }
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13"]

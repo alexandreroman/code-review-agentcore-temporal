@@ -1,5 +1,5 @@
 resource "aws_s3_bucket" "snapshots" {
-  bucket_prefix = "${local.name}-snapshots-"
+  bucket_prefix = "${local.component_prefix}-snapshots-"
   force_destroy = true
 }
 

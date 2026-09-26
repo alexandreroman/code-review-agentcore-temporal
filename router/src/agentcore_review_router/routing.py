@@ -3,8 +3,8 @@
 from dataclasses import dataclass
 from typing import Literal
 
-from agentic_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, PrUpdated
-from agentic_review_shared.ids import pr_workflow_id
+from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, PrUpdated
+from agentcore_review_shared.ids import pr_workflow_id
 from pydantic import BaseModel
 
 ReusePolicy = Literal["allow_duplicate", "allow_duplicate_failed_only"]

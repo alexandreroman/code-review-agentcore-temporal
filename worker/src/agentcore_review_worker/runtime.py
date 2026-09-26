@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from datetime import timedelta
 from pathlib import Path
 
-from agentic_review_shared.secrets import TemporalCertSecret
+from agentcore_review_shared.secrets import TemporalCertSecret
 from temporalio.client import Client
 from temporalio.common import VersioningBehavior
 from temporalio.contrib.pydantic import pydantic_data_converter

@@ -28,7 +28,7 @@ variable "dev_branch_prefix" {
 
 variable "deployment_name" {
   type    = string
-  default = "agentic-review"
+  default = "agentcore-review-demo-worker"
 }
 
 variable "anthropic_model" {
@@ -63,7 +63,7 @@ variable "build_id" {
 }
 
 variable "retained_endpoints" {
-  description = "Endpoints of earlier builds still kept, name => runtime version (set by agentic_review_tools.infra)"
+  description = "Endpoints of earlier builds still kept, name => runtime version (set by agentcore_review_tools.infra)"
   type        = map(string)
   default     = {}
 }

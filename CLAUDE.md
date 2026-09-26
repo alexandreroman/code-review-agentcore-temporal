@@ -1,4 +1,4 @@
-# Agentic Review with Temporal
+# Agentic Code Review with AgentCore x Temporal
 
 Conference demo: AI agents review GitHub pull requests, orchestrated by
 Temporal and run as Serverless Workers on Amazon Bedrock AgentCore.

@@ -1,5 +1,5 @@
-from agentic_review_shared.contract import Finding, FindingDraft
-from agentic_review_worker.findings import (
+from agentcore_review_shared.contract import Finding, FindingDraft
+from agentcore_review_worker.findings import (
     assign_ids,
     check_conclusion,
     fallback_merge,

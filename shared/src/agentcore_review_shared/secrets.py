@@ -4,7 +4,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, StringConstraints
 
-SECRET_PREFIX = "temporal-agentic-review"
+SECRET_PREFIX = "temporal-agentcore-review-demo"
 GITHUB_APP_SECRET = f"{SECRET_PREFIX}/github-app"
 ANTHROPIC_SECRET = f"{SECRET_PREFIX}/anthropic-api-key"
 WORKER_CERT_SECRET = f"{SECRET_PREFIX}/temporal-worker-cert"

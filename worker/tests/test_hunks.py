@@ -1,4 +1,4 @@
-from agentic_review_worker.hunks import commentable_lines, is_commentable
+from agentcore_review_worker.hunks import commentable_lines, is_commentable
 
 PATCH = """@@ -1,4 +1,5 @@
  import os

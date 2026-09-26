@@ -3,14 +3,14 @@ import json
 from pathlib import Path
 
 import pytest
-from agentic_review_router.routing import Ignore, RouterConfig, RunCommand, SendSignal, StartOrSignal, route
-from agentic_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed
+from agentcore_review_router.routing import Ignore, RouterConfig, RunCommand, SendSignal, StartOrSignal, route
+from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CONFIG = RouterConfig(
     prod_queue="review", dev_queue="review-dev", dev_branch_prefix="dev/", app_id=5078593, app_slug="tar-bot"
 )
-WF = "pr-octocat-temporal-agentic-review-demo-3"
+WF = "pr-octocat-agentcore-review-demo-app-3"
 
 
 def load(name: str) -> dict:
@@ -34,7 +34,7 @@ def test_pr_updates_start_or_signal(action, policy):
     assert result.signal.head_sha == "a1b2c3d4e5f6" and result.signal.delivery_id == "delivery-1"
     assert (result.pr.owner, result.pr.repo, result.pr.number, result.pr.installation_id) == (
         "octocat",
-        "temporal-agentic-review-demo",
+        "agentcore-review-demo-app",
         3,
         90210,
     )
