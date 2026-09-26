@@ -24,10 +24,14 @@ version = "0.1.0"
 source = { editable = "router" }
 dependencies = [
     { name = "agentic-review-shared" },
+    { name = "boto3" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "agentic-review-shared", editable = "shared" }]
+requires-dist = [
+    { name = "agentic-review-shared", editable = "shared" },
+    { name = "boto3", specifier = "==1.43.103" },
+]
 
 [[package]]
 name = "agentic-review-shared"
