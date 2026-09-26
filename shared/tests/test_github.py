@@ -116,3 +116,16 @@ async def test_graphql_returns_data(key_pair):
 
     app, _ = make_app(key_pair, handler, FakeClock(1_790_000_000.0))
     assert await app.graphql(42, "query { viewer { login } }", {}) == {"viewer": {"login": "bot"}}
+
+
+async def test_graphql_rate_limit_is_retryable(key_pair):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/access_tokens"):
+            return token_response("2099-01-01T00:00:00Z")
+        return httpx.Response(200, json={"errors": [{"type": "RATE_LIMITED", "message": "API rate limit exceeded"}]})
+
+    app, _ = make_app(key_pair, handler, FakeClock(1_790_000_000.0))
+    with pytest.raises(GitHubError) as exc:
+        await app.graphql(42, "query { x }", {})
+    assert exc.value.classification.error_type == "GitHubRateLimited"
+    assert exc.value.classification.retryable and exc.value.classification.retry_after == 60.0

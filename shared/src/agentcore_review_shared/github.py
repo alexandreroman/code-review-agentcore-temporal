@@ -8,7 +8,7 @@ from datetime import datetime
 import httpx2 as httpx
 import jwt
 
-from agentcore_review_shared.github_errors import Classification, classify
+from agentcore_review_shared.github_errors import DEFAULT_RATE_LIMIT_WAIT, Classification, classify
 
 API_URL = "https://api.github.com"
 TOKEN_REFRESH_MARGIN = 300.0
@@ -82,8 +82,9 @@ class GitHubApp:
     async def graphql(self, installation_id: int, query: str, variables: dict) -> dict:
         resp = await self.request(installation_id, "POST", "/graphql", json={"query": query, "variables": variables})
         payload = resp.json()
-        if payload.get("errors"):
-            raise GitHubError(resp.status_code, Classification("GitHubGraphQLError", False), str(payload["errors"]))
+        errors = payload.get("errors")
+        if errors:
+            raise GitHubError(resp.status_code, _graphql_classification(errors), str(errors))
         return payload["data"]
 
 
@@ -91,3 +92,10 @@ def _raise_for_status(resp: httpx.Response) -> None:
     if resp.is_success:
         return
     raise GitHubError(resp.status_code, classify(resp.status_code, resp.headers, resp.text), resp.text)
+
+
+def _graphql_classification(errors: list[dict]) -> Classification:
+    # GitHub reports GraphQL rate limits with HTTP 200 and an error of type RATE_LIMITED.
+    if any(error.get("type") == "RATE_LIMITED" for error in errors):
+        return Classification("GitHubRateLimited", True, DEFAULT_RATE_LIMIT_WAIT)
+    return Classification("GitHubGraphQLError", False)

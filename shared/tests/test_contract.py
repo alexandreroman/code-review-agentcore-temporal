@@ -1,6 +1,7 @@
 import pytest
 from agentcore_review_shared.contract import (
     CHECK_NAME,
+    PULL_REQUEST_WORKFLOW,
     QUERY_GET_FINDINGS,
     SIGNAL_FIX_REQUESTED,
     SIGNAL_PR_CLOSED,
@@ -34,6 +35,7 @@ def test_names_match_the_spec():
     assert (SIGNAL_PR_UPDATED, SIGNAL_FIX_REQUESTED, SIGNAL_PR_CLOSED) == ("pr_updated", "fix_requested", "pr_closed")
     assert QUERY_GET_FINDINGS == "get_findings"
     assert CHECK_NAME == "AI Review"
+    assert PULL_REQUEST_WORKFLOW == "PullRequestWorkflow"
 
 
 def test_severity_rank_and_blocking():
@@ -72,3 +74,20 @@ def test_outcome_holds_open_findings():
         merged=True, closed_by="alex", open_findings=[Finding(**draft().model_dump(), id="F-1")], rounds=2
     )
     assert outcome.open_findings[0].id == "F-1"
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"), [("Security", Category.SECURITY), (" PERFORMANCE ", Category.PERFORMANCE)]
+)
+def test_categories_tolerate_case_and_spaces(raw, expected):
+    assert draft(category=raw).category is expected
+
+
+def test_severities_tolerate_case_in_nested_reports():
+    report = ReviewerReport.model_validate({"findings": [draft().model_dump() | {"severity": "Critical"}]})
+    assert report.findings[0].severity is Severity.CRITICAL
+
+
+def test_unknown_enum_values_are_still_rejected():
+    with pytest.raises(ValidationError):
+        draft(category="style")

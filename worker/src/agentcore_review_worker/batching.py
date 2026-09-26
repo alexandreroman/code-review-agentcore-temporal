@@ -1,6 +1,6 @@
 """Which changed files get reviewed, and how they are split into reviewer batches."""
 
-from fnmatch import fnmatch
+from fnmatch import fnmatchcase
 from pathlib import PurePosixPath
 
 from agentcore_review_worker.models import ChangedFile
@@ -14,7 +14,8 @@ def is_excluded(changed: ChangedFile) -> bool:
     if changed.patch_bytes is None:
         return True
     name = PurePosixPath(changed.path).name
-    return any(fnmatch(name, pattern) for pattern in EXCLUDED_NAME_PATTERNS)
+    # fnmatchcase gives the same answer on every OS, as workflow code requires.
+    return any(fnmatchcase(name, pattern) for pattern in EXCLUDED_NAME_PATTERNS)
 
 
 def partition(files: list[ChangedFile]) -> tuple[list[ChangedFile], list[ChangedFile]]:
