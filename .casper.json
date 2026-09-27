@@ -1,6 +1,6 @@
 {
   "workspace": {
-    "copyFiles": [".env", "client.pem", "client.key", "worker.pem", "worker.key", "router.pem", "router.key"],
+    "copyFiles": [".env", "client.pem", "client.key"],
     "scripts": {
       "setup": "make worktree-init",
       "run": "make up",

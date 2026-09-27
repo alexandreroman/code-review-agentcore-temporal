@@ -12,44 +12,42 @@ variable "temporal_namespace" {
 }
 
 variable "task_queue" {
-  type    = string
-  default = "review"
+  type = string
 }
 
 variable "dev_task_queue" {
-  type    = string
-  default = "review-dev"
+  type = string
 }
 
 variable "dev_branch_prefix" {
-  type    = string
-  default = "dev/"
+  type = string
 }
 
 variable "deployment_name" {
-  type    = string
-  default = "agentcore-review-demo-worker"
+  type = string
 }
 
 variable "anthropic_model" {
-  type    = string
-  default = "claude-opus-5"
+  type = string
 }
 
 variable "anthropic_effort" {
-  type    = string
-  default = "high"
+  type = string
 }
 
 variable "max_parallel_agents" {
-  type    = number
-  default = 3
+  type = number
+
+  validation {
+    # 0 would block every review round on Semaphore(0).
+    condition     = var.max_parallel_agents >= 1
+    error_message = "max_parallel_agents must be at least 1."
+  }
 }
 
 variable "idle_timeout" {
   description = "AgentCore session idle timeout, in seconds"
   type        = number
-  default     = 120
 }
 
 variable "build_id" {
@@ -63,7 +61,7 @@ variable "build_id" {
 }
 
 variable "retained_endpoints" {
-  description = "Endpoints of earlier builds still kept, name => runtime version (set by agentcore_review_tools.infra)"
+  description = "Endpoints of earlier builds still kept, name => runtime version (set by scripts/infra.sh)"
   type        = map(string)
   default     = {}
 }

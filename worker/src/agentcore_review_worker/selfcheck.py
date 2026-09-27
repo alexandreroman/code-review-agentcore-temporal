@@ -10,7 +10,8 @@ import temporalio.workflow
 from temporalio.worker import WorkerConfig
 from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner
 
-from .registry import WORKFLOWS, activities, plugins
+from .agent_model import strands_plugin
+from .runtime import WORKFLOWS, activities
 from .settings import AppSettings
 
 # Placeholder settings: everything is built without reading a secret or calling AWS.
@@ -24,17 +25,9 @@ SELFCHECK = AppSettings(
 )
 
 
-def validate_workflows() -> list[str]:
-    # Sandbox instance creation needs a running event loop (it initializes the workflow's asyncio
-    # runtime), which the real Worker has while it starts. This standalone check has none of its own.
-    return asyncio.run(_validate_workflows())
-
-
-async def _validate_workflows() -> list[str]:
-    # The Worker applies its plugins' sandbox settings (Strands passthrough); validate with the same ones.
-    config = WorkerConfig(workflow_runner=SandboxedWorkflowRunner())
-    for plugin in plugins(SELFCHECK):
-        config = plugin.configure_worker(config)
+async def validate_workflows() -> list[str]:
+    # The Worker applies its plugin's sandbox settings (Strands passthrough); validate with the same ones.
+    config = strands_plugin(SELFCHECK).configure_worker(WorkerConfig(workflow_runner=SandboxedWorkflowRunner()))
     runner = config["workflow_runner"]
     names = []
     for cls in WORKFLOWS:
@@ -46,7 +39,9 @@ async def _validate_workflows() -> list[str]:
 
 
 def main() -> None:
-    names = validate_workflows()
+    # Sandbox instance creation needs a running event loop (it initializes the workflow's asyncio
+    # runtime), which the real Worker has while it starts. This standalone check has none of its own.
+    names = asyncio.run(validate_workflows())
     activities(SELFCHECK, "selfcheck")
     print(f"selfcheck ok: {', '.join(names)}")
 

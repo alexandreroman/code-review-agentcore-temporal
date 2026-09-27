@@ -9,17 +9,13 @@ from temporalio.api.enums.v1 import TaskQueueKind, TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 from temporalio.client import Client
-from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
+from temporalio.common import WorkflowIDConflictPolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
 
 from .routing import StartOrSignal
 
 RPC_TIMEOUT = timedelta(seconds=5)
-REUSE_POLICIES = {
-    "allow_duplicate": WorkflowIDReusePolicy.ALLOW_DUPLICATE,
-    "allow_duplicate_failed_only": WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
-}
 
 
 async def start_or_signal(client: Client, action: StartOrSignal) -> bool:
@@ -30,7 +26,7 @@ async def start_or_signal(client: Client, action: StartOrSignal) -> bool:
             PullRequestInput(pr=action.pr),
             id=action.workflow_id,
             task_queue=action.task_queue,
-            id_reuse_policy=REUSE_POLICIES[action.reuse_policy],
+            id_reuse_policy=action.reuse_policy,
             id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
             start_signal=SIGNAL_PR_UPDATED,
             start_signal_args=[action.signal],
@@ -39,6 +35,7 @@ async def start_or_signal(client: Client, action: StartOrSignal) -> bool:
     except WorkflowAlreadyStartedError:
         return False
     except RPCError as error:
+        # The SDK raises WorkflowAlreadyStartedError only when the server reply carries error details.
         if error.status == RPCStatusCode.ALREADY_EXISTS:
             return False
         raise

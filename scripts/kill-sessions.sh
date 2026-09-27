@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Stops every AgentCore session polling the production task queue (make
-# kill-sessions), the same logic /kill will use later:
+# kill-sessions), the same steps as the router's /kill command:
 #   1. list the pollers of the task queue;
 #   2. keep the agentcore:<endpoint>:<session> identities;
 #   3. stop them all in parallel, retrying a transient ConflictException.
@@ -72,5 +72,5 @@ printf '%s\n' "$IDENTITIES" | xargs -P 8 -I{} bash -c 'stop_one "$@"' _ {}
 STOPPED=$(grep -c '^stopped$' "$RESULTS_FILE" || true)
 GONE=$(grep -c '^gone$' "$RESULTS_FILE" || true)
 FAILED=$(grep -c '^failed$' "$RESULTS_FILE" || true)
-echo "Stopped ${STOPPED:-0} AgentCore session(s), ${GONE:-0} already gone, ${FAILED:-0} failed."
-[[ "${FAILED:-0}" -eq 0 ]]
+echo "Stopped $STOPPED AgentCore session(s), $GONE already gone, $FAILED failed."
+[[ "$FAILED" -eq 0 ]]

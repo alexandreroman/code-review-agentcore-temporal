@@ -99,7 +99,6 @@ resource "aws_bedrockagentcore_agent_runtime" "worker" {
     TASK_QUEUE               = var.task_queue
     TEMPORAL_DEPLOYMENT_NAME = var.deployment_name
     TEMPORAL_BUILD_ID        = var.build_id
-    DRAIN_IDLE_SECONDS       = "60"
     TEMPORAL_CERT_SECRET_ARN = aws_secretsmanager_secret.worker_cert.arn
     ANTHROPIC_SECRET_ARN     = aws_secretsmanager_secret.anthropic.arn
     GITHUB_APP_SECRET_ARN    = aws_secretsmanager_secret.github_app.arn

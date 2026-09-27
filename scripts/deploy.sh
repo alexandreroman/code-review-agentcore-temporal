@@ -81,94 +81,60 @@ ensure_image() {
   done
 }
 
-# describe_version DEPLOYMENT BUILD_ID: prints the version's JSON, or nothing
-# if it does not exist yet.
-describe_version() {
-  tcli worker deployment describe-version --deployment-name "$1" --build-id "$2" -o json 2>/dev/null || true
-}
-
 queue_attached() {
   jq -e --arg queue "$TASK_QUEUE" '[.taskQueuesInfos[]?.name] | index($queue) != null' <<<"$1" >/dev/null
 }
 
-# create_version DEPLOYMENT BUILD_ID: creates the version against the current aws stack outputs.
+# create_version BUILD_ID: creates the version with the current compute config.
 create_version() {
-  local deployment="$1" build_id="$2" outputs endpoint_arn role_arn external_id
-  outputs=$(aws_outputs)
-  endpoint_arn=$(jq -r '.current_endpoint_arn.value' <<<"$outputs")
-  role_arn=$(jq -r '.temporal_invoke_role_arn.value' <<<"$outputs")
-  external_id=$(jq -r '.temporal_external_id.value' <<<"$outputs")
-  tcli worker deployment create-version --deployment-name "$deployment" --build-id "$build_id" \
-    --aws-agentcore-endpoint-arn "$endpoint_arn" \
-    --aws-agentcore-assume-role-arn "$role_arn" \
-    --aws-agentcore-assume-role-external-id "$external_id"
+  tcli worker deployment create-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$1" \
+    "${COMPUTE_FLAGS[@]}"
 }
 
-# reconcile_compute_config DEPLOYMENT BUILD_ID: a destroy + up leaves an existing version pointing at
-# a gone AgentCore endpoint and role (same build ID, stale compute config). describe-version's JSON
-# never shows them back to confirm it by diffing (only computeConfig.scalingGroups.default.provider.type
-# comes through), so this re-applies the current outputs unconditionally instead, falling back to
-# deleting and recreating the version if Temporal refuses the update.
+# reconcile_compute_config BUILD_ID: re-applies the current compute config to
+# an existing version, deleting and recreating it if Temporal refuses the update.
 reconcile_compute_config() {
-  local deployment="$1" build_id="$2" outputs endpoint_arn role_arn external_id
-  outputs=$(aws_outputs)
-  endpoint_arn=$(jq -r '.current_endpoint_arn.value' <<<"$outputs")
-  role_arn=$(jq -r '.temporal_invoke_role_arn.value' <<<"$outputs")
-  external_id=$(jq -r '.temporal_external_id.value' <<<"$outputs")
+  local build_id="$1"
   echo "Reconciling the compute config of existing version $build_id"
-  if tcli worker deployment update-version-compute-config --deployment-name "$deployment" --build-id "$build_id" \
-    --aws-agentcore-endpoint-arn "$endpoint_arn" \
-    --aws-agentcore-assume-role-arn "$role_arn" \
-    --aws-agentcore-assume-role-external-id "$external_id" >/dev/null 2>&1; then
+  if tcli worker deployment update-version-compute-config --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" \
+    --build-id "$build_id" "${COMPUTE_FLAGS[@]}" >/dev/null 2>&1; then
     return
   fi
   echo "Compute config update refused: deleting the stale version and recreating it"
-  if ! tcli worker deployment delete-version --deployment-name "$deployment" --build-id "$build_id" \
-    --skip-drainage; then
-    die "delete-version failed for $build_id (pollers from the destroyed worker are likely still listed)." \
-      "Wait about 5 minutes, then re-run make deploy."
-  fi
-  create_version "$deployment" "$build_id"
+  delete_version "$build_id" || die "delete-version failed for $build_id: re-run make deploy in about 5 minutes"
+  create_version "$build_id"
 }
 
-# register DEPLOYMENT BUILD_ID: creates the Worker Deployment Version if it
-# does not exist, waits for its task queue to attach, then makes it current.
+# register BUILD_ID: creates the Worker Deployment Version if it does not
+# exist, waits for its task queue to attach, then makes it current.
 register() {
-  local deployment="$1" build_id="$2"
+  local build_id="$1"
 
   # A flaky connection can make `describe` fail even though the deployment
   # already exists; treat that specific "create" error the same as success
   # instead of aborting on a false negative.
-  if ! tcli worker deployment describe --name "$deployment" >/dev/null 2>&1; then
+  if ! tcli worker deployment describe --name "$TEMPORAL_DEPLOYMENT_NAME" >/dev/null 2>&1; then
     local create_output
-    if ! create_output=$(tcli worker deployment create --name "$deployment" 2>&1); then
+    if ! create_output=$(tcli worker deployment create --name "$TEMPORAL_DEPLOYMENT_NAME" 2>&1); then
       [[ "$create_output" == *"already exists"* ]] || die "$create_output"
     else
       echo "$create_output"
     fi
   fi
 
-  local version existed=true
-  version=$(describe_version "$deployment" "$build_id")
-  if [[ -z "$version" ]]; then
-    existed=false
-    create_version "$deployment" "$build_id"
-    version=$(describe_version "$deployment" "$build_id")
+  # An existing version may point at a destroyed endpoint (destroy + up): re-apply the compute config.
+  if [[ -z "$(describe_version "$build_id")" ]]; then
+    create_version "$build_id"
   else
-    # A version that already existed before this run may be stale (a destroy + up still lists
-    # $TASK_QUEUE in taskQueuesInfos from before the destroy), so its compute config is reconciled
-    # up front instead of waiting for the attach loop below to time out. A version just created
-    # above already carries the current endpoint and role and needs no reconciliation.
-    reconcile_compute_config "$deployment" "$build_id"
-    version=$(describe_version "$deployment" "$build_id")
+    reconcile_compute_config "$build_id"
   fi
 
-  local elapsed=0 invoked=false
+  local version elapsed=0 invoked=false
+  version=$(describe_version "$build_id")
   while ! queue_attached "$version"; do
     if [[ "$elapsed" -ge "$ATTACH_TIMEOUT" ]]; then
-      local outputs runtime_id
-      outputs=$(aws_outputs)
-      runtime_id=$(jq -r '.runtime_id.value' <<<"$outputs")
+      local runtime_id
+      runtime_id=$(jq -r '.runtime_id.value' <<<"$OUTPUTS")
       die "task queue $TASK_QUEUE never attached to $build_id: check the CloudWatch log group" \
         "/aws/bedrock-agentcore/runtimes/${runtime_id}-${build_id}"
     fi
@@ -179,23 +145,25 @@ register() {
     fi
     sleep "$POLL_EVERY"
     elapsed=$((elapsed + POLL_EVERY))
-    version=$(describe_version "$deployment" "$build_id")
+    version=$(describe_version "$build_id")
   done
   echo "Task queue $TASK_QUEUE attached to $build_id"
 
+  # An unset timestamp comes back as the Unix epoch.
   if jq -e '(.currentSinceTime // "") as $t | ($t != "" and ($t | startswith("1970-01-01") | not))' <<<"$version" >/dev/null; then
     echo "$build_id is already the current version"
     return
   fi
-  tcli worker deployment set-current-version --deployment-name "$deployment" --build-id "$build_id" --yes
+  tcli worker deployment set-current-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$build_id" \
+    --yes
 }
 
 # invoke_endpoint BUILD_ID: starts one session of this build, so its worker
 # polls and attaches the task queue.
 invoke_endpoint() {
-  local build_id="$1" outputs runtime_arn
-  outputs=$(aws_outputs)
-  runtime_arn=$(jq -r '.runtime_arn.value' <<<"$outputs")
+  local build_id="$1" runtime_arn
+  runtime_arn=$(jq -r '.runtime_arn.value' <<<"$OUTPUTS")
+  # AWS CLI v2 expects blob parameters base64-encoded.
   aws bedrock-agentcore invoke-agent-runtime \
     --agent-runtime-arn "$runtime_arn" \
     --qualifier "$build_id" \
@@ -206,8 +174,14 @@ invoke_endpoint() {
 
 BUILD_ID=$(build_id)
 echo "Deploying build $BUILD_ID"
-OUTPUTS=$(aws_outputs)
-ECR_REPOSITORY_URL=$(jq -r '.ecr_repository_url.value' <<<"$OUTPUTS")
+ECR_REPOSITORY_URL=$(jq -r '.ecr_repository_url.value' <<<"$(aws_outputs)")
 ensure_image "$ECR_REPOSITORY_URL" "$BUILD_ID"
-aws_apply "$BUILD_ID"
-register "$TEMPORAL_DEPLOYMENT_NAME" "$BUILD_ID"
+scripts/infra.sh "$BUILD_ID"
+
+OUTPUTS=$(aws_outputs)
+COMPUTE_FLAGS=(
+  --aws-agentcore-endpoint-arn "$(jq -r '.current_endpoint_arn.value' <<<"$OUTPUTS")"
+  --aws-agentcore-assume-role-arn "$(jq -r '.temporal_invoke_role_arn.value' <<<"$OUTPUTS")"
+  --aws-agentcore-assume-role-external-id "$(jq -r '.temporal_external_id.value' <<<"$OUTPUTS")"
+)
+register "$BUILD_ID"

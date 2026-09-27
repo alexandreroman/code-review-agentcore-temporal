@@ -1,4 +1,4 @@
-"""Activity options and retry policies (spec section 8), shared by the workflows."""
+"""Activity timeouts and retry policies, shared by the workflows."""
 
 from datetime import timedelta
 from typing import Any
@@ -15,7 +15,7 @@ MODEL_RETRY = RetryPolicy(
     backoff_coefficient=2.0,
     maximum_interval=timedelta(seconds=60),
     maximum_attempts=5,
-    # Anthropic SDK class names, which the plugin keeps as the error type (spike point 7).
+    # Anthropic SDK exception class names: the Strands plugin keeps them as the error type.
     non_retryable_error_types=["BadRequestError", "AuthenticationError", "PermissionDeniedError", "NotFoundError"],
 )
 

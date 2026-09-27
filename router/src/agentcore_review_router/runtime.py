@@ -7,14 +7,13 @@ invocation a new loop and leave them bound to a closed one. A failed creation is
 
 import asyncio
 import os
-from collections.abc import Coroutine, Mapping
+from collections.abc import Coroutine
 from dataclasses import dataclass
 from functools import cache
 from typing import Any
 
 import boto3
-import httpx2 as httpx
-from agentcore_review_shared.github import API_URL, GitHubApp
+from agentcore_review_shared.github import GitHubApp
 from agentcore_review_shared.secrets import GitHubAppSecret, TemporalCertSecret
 from botocore.config import Config
 from temporalio.client import Client
@@ -42,7 +41,17 @@ class Settings:
     function_name: str
 
 
-def load_settings(env: Mapping[str, str]) -> Settings:
+_runner = asyncio.Runner()
+_temporal: Client | None = None
+
+
+def run[T](coro: Coroutine[Any, Any, T]) -> T:
+    return _runner.run(coro)
+
+
+@cache
+def settings() -> Settings:
+    env = os.environ
     return Settings(
         temporal_address=env["TEMPORAL_ADDRESS"],
         temporal_namespace=env["TEMPORAL_NAMESPACE"],
@@ -54,19 +63,6 @@ def load_settings(env: Mapping[str, str]) -> Settings:
         temporal_cert_secret_arn=env["TEMPORAL_CERT_SECRET_ARN"],
         function_name=env["AWS_LAMBDA_FUNCTION_NAME"],
     )
-
-
-_runner = asyncio.Runner()
-_temporal: Client | None = None
-
-
-def run[T](coro: Coroutine[Any, Any, T]) -> T:
-    return _runner.run(coro)
-
-
-@cache
-def settings() -> Settings:
-    return load_settings(os.environ)
 
 
 @cache
@@ -84,10 +80,13 @@ def github_app_secret() -> GitHubAppSecret:
 
 
 def clear_github_app_secret() -> None:
-    """Drops the cached secret and the config derived from it, so a warm container picks up a
-    freshly registered app's webhook secret instead of answering 401 for the rest of its life."""
+    """Drops the cached secret and everything derived from it (router config, GitHub App client), so a warm
+    container picks up a freshly registered app's webhook secret and credentials instead of failing for the rest
+    of its life."""
+    # Any unsigned POST triggers this refresh: one Secrets Manager call, cheap enough for the demo.
     github_app_secret.cache_clear()
     router_config.cache_clear()
+    github.cache_clear()
 
 
 @cache
@@ -97,7 +96,6 @@ def router_config() -> RouterConfig:
         prod_queue=current.task_queue,
         dev_queue=current.dev_task_queue,
         dev_branch_prefix=current.dev_branch_prefix,
-        app_id=app.app_id,
         app_slug=app.slug,
     )
 
@@ -121,7 +119,7 @@ async def temporal_client() -> Client:
 def github() -> GitHubApp:
     """Keeps the installation token cache for the life of the container."""
     app = github_app_secret()
-    return GitHubApp(app.client_id, app.private_key, http=httpx.AsyncClient(base_url=API_URL, timeout=GITHUB_TIMEOUT))
+    return GitHubApp(app.client_id, app.private_key, timeout=GITHUB_TIMEOUT)
 
 
 @cache

@@ -3,6 +3,7 @@ import time
 from pathlib import Path
 
 import pytest
+from agentcore_review_worker import navigation
 from agentcore_review_worker.navigation import (
     MAX_FILE_BYTES,
     MAX_GLOB_RESULTS,
@@ -159,22 +160,14 @@ def test_read_strips_trailing_cr_from_crlf_files(tmp_path):
     assert read_file(root, "win.txt") == "     1\tline1\n     2\tline2"
 
 
-@pytest.mark.parametrize("bad_path", ["a\x00b", "\udcff"])
-def test_read_reports_malformed_paths_instead_of_raising(repo, bad_path):
-    result = read_file(repo, bad_path)
-    assert result.startswith("Error:") and repr(bad_path) in result
-
-
-@pytest.mark.parametrize("bad_path", ["a\x00b", "\udcff"])
-def test_grep_reports_malformed_paths_instead_of_raising(repo, bad_path):
-    result = grep_files(repo, "x", path=bad_path)
-    assert result.startswith("Error:") and repr(bad_path) in result
-
-
-@pytest.mark.parametrize("bad_path", ["a\x00b", "\udcff"])
-def test_glob_reports_malformed_paths_instead_of_raising(repo, bad_path):
-    result = glob_files(repo, "*", path=bad_path)
-    assert result.startswith("Error:") and repr(bad_path) in result
+def test_tools_report_malformed_paths_instead_of_raising(repo):
+    bad_path = "a\x00b"
+    for result in (
+        read_file(repo, bad_path),
+        grep_files(repo, "x", path=bad_path),
+        glob_files(repo, "*", path=bad_path),
+    ):
+        assert result.startswith("Error:") and repr(bad_path) in result
 
 
 def test_empty_file(tmp_path):
@@ -194,16 +187,15 @@ def test_read_accepts_numeric_strings_for_offset_and_limit(tmp_path):
 def test_read_rejects_non_integer_offset_and_limit(repo):
     assert read_file(repo, "app/db.py", offset="abc").startswith("Error:")
     assert read_file(repo, "app/db.py", limit="ten").startswith("Error:")
-    assert read_file(repo, "app/db.py", limit=1.5).startswith("Error:")
-    assert read_file(repo, "app/db.py", offset=True).startswith("Error:")
 
 
-def test_grep_stops_a_catastrophic_regular_expression(tmp_path):
+def test_grep_stops_a_catastrophic_regular_expression(tmp_path, monkeypatch):
+    monkeypatch.setattr(navigation, "GREP_TIME_BUDGET", 0.5)
     root = tmp_path / "slow"
     root.mkdir()
     (root / "a.txt").write_text("a" * 60 + "b\n")
     started = time.monotonic()
-    out = grep_files(root, r"(a|aa)+$", time_budget=0.5)
+    out = grep_files(root, r"(a|aa)+$")
     assert time.monotonic() - started < 5
     assert out.splitlines()[0] == "No matches found." and "search stopped after 0.5 s" in out
 

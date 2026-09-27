@@ -4,11 +4,10 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
-from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, PrUpdated
-from agentcore_review_shared.ids import pr_workflow_id
+from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, PrUpdated, pr_workflow_id
 from pydantic import BaseModel
+from temporalio.common import WorkflowIDReusePolicy
 
-ReusePolicy = Literal["allow_duplicate", "allow_duplicate_failed_only"]
 COMMANDS: dict[str, Literal["fix", "kill"]] = {"/fix": "fix", "/kill": "kill"}
 
 
@@ -17,7 +16,6 @@ class RouterConfig:
     prod_queue: str
     dev_queue: str
     dev_branch_prefix: str
-    app_id: int
     app_slug: str
 
 
@@ -27,7 +25,7 @@ class StartOrSignal:
     task_queue: str
     pr: PrRef
     signal: PrUpdated
-    reuse_policy: ReusePolicy
+    reuse_policy: WorkflowIDReusePolicy
 
 
 @dataclass(frozen=True)
@@ -89,7 +87,11 @@ def _route_pull_request(payload: dict, delivery_id: str, config: RouterConfig) -
     workflow_id = pr_workflow_id(ref.owner, ref.repo, ref.number)
     if action in ("opened", "synchronize", "reopened"):
         dev = pull_request["head"]["ref"].startswith(config.dev_branch_prefix)
-        policy: ReusePolicy = "allow_duplicate" if action == "reopened" else "allow_duplicate_failed_only"
+        # Reopening a closed PR asks for a fresh review, even though its previous run completed.
+        if action == "reopened":
+            policy = WorkflowIDReusePolicy.ALLOW_DUPLICATE
+        else:
+            policy = WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
         signal = PrUpdated(head_sha=pull_request["head"]["sha"], delivery_id=delivery_id)
         return StartOrSignal(workflow_id, config.dev_queue if dev else config.prod_queue, ref, signal, policy)
     if action == "closed":
@@ -110,8 +112,7 @@ def _route_comment(payload: dict, delivery_id: str, config: RouterConfig) -> Act
         return Ignore("comment on an issue, not on a pull request")
     comment = payload["comment"]
     sender = payload.get("sender") or {}
-    app = comment.get("performed_via_github_app") or {}
-    if sender.get("login") == f"{config.app_slug}[bot]" or app.get("id") == config.app_id:
+    if sender.get("login") == f"{config.app_slug}[bot]":
         return Ignore("comment from the bot itself")
     words = (comment.get("body") or "").split()
     command = COMMANDS.get(words[0]) if words else None

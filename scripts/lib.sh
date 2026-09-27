@@ -1,8 +1,4 @@
 # Shared helpers for the deployment scripts (sourced, not executed directly).
-#
-# Every apply of the aws stack goes through aws_apply: the endpoints a pinned
-# workflow still needs live only in the stack outputs, so keeping them alive
-# means re-reading those outputs before every apply and passing them back.
 
 AWS_STACK="infra/aws"
 
@@ -23,38 +19,18 @@ tcli() {
   temporal "$@" --tls-cert-path "$TEMPORAL_TLS_CERT_PATH" --tls-key-path "$TEMPORAL_TLS_KEY_PATH"
 }
 
-# aws_apply [BUILD_ID] [DROP...]: applies the aws stack with BUILD_ID as the
-# deployed build (or the current one when omitted), keeping every endpoint
-# except the one being applied and the DROP names.
-aws_apply() {
-  local build_id="${1:-}"
-  if [[ $# -gt 0 ]]; then
-    shift
-  fi
+# describe_version BUILD_ID: prints the version's JSON, or nothing if it does
+# not exist.
+describe_version() {
+  tcli worker deployment describe-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$1" -o json \
+    2>/dev/null || true
+}
 
-  local outputs
-  outputs=$(aws_outputs)
-  if [[ -z "$build_id" ]]; then
-    build_id=$(jq -r '.current_build.value // ""' <<<"$outputs")
+# delete_version BUILD_ID: deletes the version without waiting for it to drain.
+delete_version() {
+  if ! tcli worker deployment delete-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$1" \
+    --skip-drainage; then
+    echo "pollers from the destroyed worker stay listed about 5 minutes; retry later" >&2
+    return 1
   fi
-
-  local drop_json="[]"
-  if [[ $# -gt 0 ]]; then
-    drop_json=$(printf '%s\n' "$@" | jq -R . | jq -sc .)
-  fi
-  if jq -e --arg build "$build_id" 'index($build) != null' <<<"$drop_json" >/dev/null; then
-    die "refusing to drop the current build $build_id"
-  fi
-
-  local retained
-  retained=$(jq -c --arg build "$build_id" --argjson drop "$drop_json" '
-    (.endpoints.value // {})
-    | to_entries
-    | map(select(.key != $build and ((.key as $k | $drop | index($k)) == null)))
-    | map({key, value: .value.version})
-    | from_entries
-  ' <<<"$outputs")
-
-  TF_VAR_build_id="$build_id" TF_VAR_retained_endpoints="$retained" \
-    tofu -chdir="$AWS_STACK" apply -input=false -auto-approve
 }

@@ -9,8 +9,8 @@ from agentcore_review_worker.batching import (
 from agentcore_review_worker.models import ChangedFile
 
 
-def cf(path: str, patch_bytes: int | None = 100, status: str = "modified") -> ChangedFile:
-    return ChangedFile(path=path, status=status, additions=1, deletions=0, patch_bytes=patch_bytes)
+def cf(path: str, patch_bytes: int | None = 100) -> ChangedFile:
+    return ChangedFile(path=path, patch_bytes=patch_bytes)
 
 
 @pytest.mark.parametrize("path", ["uv.lock", "poetry.lock", "web/package-lock.json", "static/app.min.js"])

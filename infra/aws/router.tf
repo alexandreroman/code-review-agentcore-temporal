@@ -20,10 +20,6 @@ resource "aws_lambda_layer_version" "router_deps" {
   compatible_architectures = ["arm64"]
 }
 
-locals {
-  router_name = "${local.component_prefix}-router"
-}
-
 resource "aws_cloudwatch_log_group" "router" {
   name              = "/aws/lambda/${local.router_name}"
   retention_in_days = 7

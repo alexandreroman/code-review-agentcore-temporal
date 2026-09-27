@@ -4,11 +4,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, StringConstraints
 
-SECRET_PREFIX = "temporal-agentcore-review-demo"
-GITHUB_APP_SECRET = f"{SECRET_PREFIX}/github-app"
-ANTHROPIC_SECRET = f"{SECRET_PREFIX}/anthropic-api-key"
-WORKER_CERT_SECRET = f"{SECRET_PREFIX}/temporal-worker-cert"
-ROUTER_CERT_SECRET = f"{SECRET_PREFIX}/temporal-router-cert"
+GITHUB_APP_SECRET = "temporal-agentcore-review-demo/github-app"
+ANTHROPIC_SECRET = "temporal-agentcore-review-demo/anthropic-api-key"
 
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 
@@ -21,7 +18,6 @@ class GitHubAppSecret(BaseModel):
     client_id: NonEmpty
     private_key: NonEmpty
     webhook_secret: NonEmpty
-    html_url: NonEmpty
 
 
 class AnthropicSecret(BaseModel):

@@ -30,18 +30,19 @@ warn_on_failure tcli worker deployment set-current-version --deployment-name "$T
 
 while IFS= read -r build; do
   [[ -n "$build" ]] || continue
-  if ! tcli worker deployment delete-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" \
-    --build-id "$build" --skip-drainage; then
-    echo "warning: delete-version failed for $build (pollers from the destroyed worker are likely" \
-      "still listed). Wait about 5 minutes, then re-run make destroy before the next make up." >&2
-  fi
+  delete_version "$build" || true
 done <<<"$BUILDS"
 
 warn_on_failure tcli worker deployment delete --name "$TEMPORAL_DEPLOYMENT_NAME"
 
+# The prefix covers the log groups of every runtime of earlier destroy/up
+# cycles, and needs no stack output, so a re-run after a partial destroy works.
 LOG_GROUPS=$(aws logs describe-log-groups \
   --log-group-name-prefix "/aws/bedrock-agentcore/runtimes/agentcore_review_demo_worker" \
-  --query 'logGroups[].logGroupName' --output text)
+  --query 'logGroups[].logGroupName' --output text) || {
+  echo "warning: cannot list the AgentCore log groups" >&2
+  LOG_GROUPS=""
+}
 for group in $LOG_GROUPS; do
-  aws logs delete-log-group --log-group-name "$group"
+  warn_on_failure aws logs delete-log-group --log-group-name "$group"
 done

@@ -13,31 +13,32 @@ disable-model-invocation: true
 
 # E2E validation
 
-Mode requested: `$ARGUMENTS`. `full` selects the full mode; anything else,
-or nothing, selects `smoke`.
+Mode requested: `$ARGUMENTS`. `full` selects the full mode (before a talk);
+anything else, or nothing, selects `smoke` (after a change).
 
-| Mode | Use | Target | Steps, in run order |
-|---|---|---|---|
-| `smoke` | After a change | 6 to 8 min | Setup, 01, 03, 02, 04, 05, 06 |
-| `full` | Before a talk | About 30 min | smoke, reset, 04 x2, 06b, 08, 07, 09 |
+| Mode    | Target       | Steps, in run order                                 |
+| ------- | ------------ | --------------------------------------------------- |
+| `smoke` | 6 to 8 min   | P-0, Setup, 01-06, Report                           |
+| `full`  | About 30 min | P-0, Setup, 01-06, reset, 04 x2, 06b, 07-09, Report |
 
 The smoke run walks one pull request through its whole life: opened
-(E2E-01), `/kill` during the review (E2E-03), round published (E2E-02),
+(E2E-01), `/kill` during the review (E2E-02), round published (E2E-03),
 defects found (E2E-04), `/fix` (E2E-05), merge (E2E-06).
 
 ## Rules
 
 - Run every block with the Bash tool, from the repository root, exactly as
-  written. Each block is a `bash <<'STEP'` script that sources
-  `helpers.sh` first: shell state does not survive between commands, so
-  settings come from the Makefile and run state from
+  written. Each block is a `bash` script fed by a `<<'STEP'` heredoc that
+  sources `helpers.sh` first: shell state does not survive between
+  commands, so settings come from the Makefile and run state from
   `/tmp/e2e-validation/current/state.env`.
 - Set the Bash tool timeout given in each step heading (600000 ms for the
   steps that wait for a review).
 - Run the steps in order and do not add retries: `tcli` already retries the
   Temporal CLI (5 attempts; the Go CLI fails intermittently on unstable
   networks), and every wait polls every 5 s up to the step's maximum.
-- A failing check records `FAIL`, collects the step's items into
+- A failing check records `FAIL`, runs `collect` (histories of the step's
+  workflows, task queue, router and worker logs, pull request) into
   `/tmp/e2e-validation/current/failure/`, and the run goes on, unless the
   step says **Stop**. A step whose precondition failed is recorded with
   `result <step> FAIL "skipped: <reason>"`.
@@ -55,14 +56,11 @@ Requires: `make up` has run, the demo repository holds `baseline` and
 `scenario/customer-search`, AWS credentials, `gh` logged in with write
 access to the demo repository, the mTLS certificate of `.env`.
 
-In the block, write `save MODE full` instead of `save MODE smoke` for the
-full mode.
-
 ```bash
 bash <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
 new_run
-save MODE smoke
+save MODE "$([[ "$ARGUMENTS" == full ]] && echo full || echo smoke)"
 save RUN_START "$(now)"
 fail=0
 check() {
@@ -101,17 +99,15 @@ deployed: `make up`).
 
 ## Setup — Reset and return to zero (timeout 600000)
 
-Requires P-0. Also run as "Reset between runs" in the full mode (change
-`label`).
+Requires P-0. The full mode runs this block again as "Reset between runs".
 
 ```bash
 bash <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
-label=Setup   # "Reset between runs" in the full mode
+label=${1:-Setup}
 t0=$SECONDS
-prod_idle() { [[ "$(running_pr_workflows "$TASK_QUEUE")" == 0 ]]; }
-if reset_demo && demo_refs_ok && wait_until 120 "production PR workflows closed" prod_idle \
-  && make_retry kill-sessions && agentcore_pollers "$E2E_DIR/pollers-before.json"; then
+if reset_and_wait 120 "$TASK_QUEUE" && make_retry kill-sessions \
+  && agentcore_pollers "$E2E_DIR/pollers-before.json"; then
   result "$label" ok "reset, workflows closed and sessions stopped in $((SECONDS - t0))s"
 else
   result "$label" FAIL "see the output above"
@@ -121,12 +117,9 @@ fi
 STEP
 ```
 
-Success: the reset run succeeded, `main` is on `baseline` and both scenario
-branches on `scenario/customer-search`, no `PullRequestWorkflow` runs on
-the production queue, `make kill-sessions` exited 0. Max wait: 30 s for the
-run to register, 180 s for it to finish, 120 s for the workflows to close.
-Collect on failure: task queue, router log, webhook deliveries (the reset
-closes PRs through the app, so its `closed` events go through the router).
+Success: the reset run succeeded, no PR is open, no `PullRequestWorkflow`
+runs on the production queue, `main` is on `baseline` and both scenario
+branches on `scenario/customer-search`, `make kill-sessions` exited 0.
 **Stop** on failure.
 
 ## E2E-01 — Scale-from-zero (timeout 180000)
@@ -176,15 +169,13 @@ Success: the first workflow task runs on an `agentcore:` identity absent
 from the pollers listed after `make kill-sessions` (`DescribeTaskQueue`
 keeps dead sessions for about 5 minutes, so "no poller" means "no live
 one"), at most 30 s after the execution started, and an activity is
-scheduled. Max wait: 30 s for the workflow, 60 s for the first activity.
-Collect on failure: parent history, router log and webhook deliveries (no
-workflow means the webhook or the router failed), worker log. **Stop** if
-no workflow started.
+scheduled. **Stop** if no workflow started.
 
-## E2E-03 (part 1) — `/kill` during the review (timeout 300000)
+## E2E-02 — `/kill` during the review (timeout 300000)
 
 Requires E2E-01. Waits until a reviewer has finished one activity and runs
-another, then kills every session of the production queue.
+another, then kills every session of the production queue. E2E-03 records
+the verdict once the round is published.
 
 ```bash
 bash <<'STEP'
@@ -199,12 +190,12 @@ mid_flight() {
   return 1
 }
 if ! wait_until 150 "a reviewer finished one activity and runs another" mid_flight; then
-  result E2E-03 FAIL "no reviewer reached the middle of its loop"
+  result E2E-02 FAIL "no reviewer reached the middle of its loop"
   collect "$WF" "$WF-r1-security" "$WF-r1-performance" "$WF-r1-maintainability"
   exit 1
 fi
 agentcore_pollers "$E2E_DIR/pollers-at-kill.json"
-url=$(gh pr comment "$PR" -R "$REPO" --body "/kill") || { result E2E-03 FAIL "gh pr comment failed"; exit 1; }
+url=$(gh pr comment "$PR" -R "$REPO" --body "/kill") || { result E2E-02 FAIL "gh pr comment failed"; exit 1; }
 save KILL_AT "$(now)"
 echo "/kill posted: $url"
 confirmed() { [[ "$(bot_comments "$PR" '[1-9][0-9]* AgentCore sessions? stopped')" -ge 1 ]]; }
@@ -216,79 +207,77 @@ fi
 STEP
 ```
 
-Max wait: 150 s for the reviewers, 60 s for the confirmation comment. The
-verdict comes in part 2, after the round.
+## E2E-03 — Review round under 3 minutes (timeout 600000)
 
-## E2E-02 — Review round under 3 minutes (timeout 600000)
-
-Requires E2E-01.
+Requires E2E-01. Records the E2E-02 verdict first when `/kill` was posted.
 
 ```bash
 bash <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
+round1=("$WF" "$WF-r1-security" "$WF-r1-performance" "$WF-r1-maintainability" "$WF-r1-synthesis")
 if ! wait_until 360 "round 1 published" round_published "$WF" 1; then
-  result E2E-02 FAIL "round 1 not published 6 min after the PR"
-  collect "$WF" "$WF-r1-security" "$WF-r1-performance" "$WF-r1-maintainability" "$WF-r1-synthesis"
+  if [[ -n "${KILL_AT:-}" ]]; then result E2E-02 FAIL "skipped: round 1 not published"; fi
+  result E2E-03 FAIL "round 1 not published 6 min after the PR"
+  for step in E2E-04 E2E-05 E2E-06; do result "$step" FAIL "skipped: round 1 not published"; done
+  collect "${round1[@]}"
   exit 1
 fi
+
+# E2E-02 verdict: resumption without replay.
+if [[ -n "${KILL_AT:-}" ]]; then
+  killed=$(jq -cs 'add | unique' "$E2E_DIR/pollers-before.json" "$E2E_DIR/pollers-at-kill.json")
+  report="$E2E_DIR/e2e-02.json"
+  for wf in "${round1[@]}"; do
+    file=$(fetch_history "$wf") || continue
+    jqe -c --argjson kill "$KILL_AT" --argjson killed "$killed" \
+      'include "e2e"; kill_report($kill) + {resumed: resumed_starts($killed)}' "$file"
+  done | jq -s --argjson kill "$KILL_AT" '{
+    finished_before: (map(.finished_before) | add),
+    retried_before: (map(.retried_before) | add),
+    interrupted: (map(.interrupted) | add),
+    resume_s: ((map(.resumed[]) | min) as $m | if $m then ($m - $kill) * 10 | round / 10 else null end)}' >"$report"
+  cat "$report"
+  save RESUME_S "$(jq -r '.resume_s // "none"' "$report")"
+  if jq -e '.retried_before == 0 and .interrupted >= 1 and .resume_s != null' "$report" >/dev/null \
+    && [[ "${KILL_CONFIRMED:-no}" == yes ]]; then
+    kept=$(jq -r '"\(.finished_before) finished activities kept attempt 1, \(.interrupted) retried"' "$report")
+    result E2E-02 ok "$kept, resumed ${RESUME_S}s after /kill"
+  else
+    result E2E-02 FAIL "$(jq -c . "$report"), confirmation comment: ${KILL_CONFIRMED:-no}"
+    collect "${round1[@]}"
+  fi
+fi
+
+# E2E-03 verdict.
 save ROUND1_S "$(jqe 'include "e2e"; check_updates[1] - started_at | round' "$E2E_DIR/history/$WF.json")"
 conclusion=$(check_conclusion "$(head_sha "$PR")")
 reviews=$(gh api "repos/$REPO/pulls/$PR/reviews?per_page=100" \
   --jq '[.[] | select(.user.type == "Bot" and .state == "COMMENTED")] | length')
 if [[ "$ROUND1_S" -le 180 && "$conclusion" == failure && "$reviews" == 1 ]]; then
-  result E2E-02 ok "round 1 in ${ROUND1_S}s (kill included), one review, AI Review red"
+  result E2E-03 ok "round 1 in ${ROUND1_S}s (kill included), one review, AI Review red"
 else
-  result E2E-02 FAIL "round 1 in ${ROUND1_S}s, $reviews review(s), AI Review $conclusion"
+  result E2E-03 FAIL "round 1 in ${ROUND1_S}s, $reviews review(s), AI Review $conclusion"
   collect "$WF"
 fi
 STEP
 ```
 
-Success: from the execution start to the second `set_check` completion
-(the round's conclusion) takes at most 180 s, the bot published exactly one
-`COMMENTED` review, and `AI Review` is `failure` (the SQL injection is at
-least `high`). Max wait: 360 s. Collect on failure: parent and child
-histories, worker log. **Stop** if the round never finishes: record
-E2E-03 to E2E-06 as skipped, then go to the report.
+Success for E2E-02: the bot confirmed the stopped sessions; every activity
+completed before the kill needed one attempt; at least one activity
+scheduled before the kill was retried (attempt 2 or more), on a session
+that was not killed.
 
-## E2E-03 (part 2) — Resumption without replay (timeout 180000)
+Success for E2E-03: from the execution start to the second `set_check`
+completion (the round's conclusion) takes at most 180 s, the bot published
+exactly one `COMMENTED` review, and `AI Review` is `failure` (the SQL
+injection is at least `high`).
 
-```bash
-bash <<'STEP'
-source .claude/skills/e2e-validation/helpers.sh
-killed=$(jq -cs 'add | unique' "$E2E_DIR/pollers-before.json" "$E2E_DIR/pollers-at-kill.json")
-report="$E2E_DIR/e2e-03.json"
-for wf in "$WF" "$WF-r1-security" "$WF-r1-performance" "$WF-r1-maintainability" "$WF-r1-synthesis"; do
-  file=$(fetch_history "$wf") || continue
-  jqe -c --argjson kill "$KILL_AT" --argjson killed "$killed" \
-    'include "e2e"; kill_report($kill) + {resumed: resumed_starts($killed)}' "$file"
-done | jq -s --argjson kill "$KILL_AT" '{
-  finished_before: (map(.finished_before) | add),
-  retried_before: (map(.retried_before) | add),
-  interrupted: (map(.interrupted) | add),
-  resume_s: ((map(.resumed[]) | min) as $m | if $m then ($m - $kill) * 10 | round / 10 else null end)}' >"$report"
-cat "$report"
-save RESUME_S "$(jq -r '.resume_s // "none"' "$report")"
-if jq -e '.retried_before == 0 and .interrupted >= 1 and .resume_s != null' "$report" >/dev/null \
-  && [[ "${KILL_CONFIRMED:-no}" == yes ]]; then
-  kept=$(jq -r '"\(.finished_before) finished activities kept attempt 1, \(.interrupted) retried"' "$report")
-  result E2E-03 ok "$kept, resumed ${RESUME_S}s after /kill"
-else
-  result E2E-03 FAIL "$(jq -c . "$report"), confirmation comment: ${KILL_CONFIRMED:-no}"
-  collect "$WF" "$WF-r1-security" "$WF-r1-performance" "$WF-r1-maintainability"
-fi
-STEP
-```
-
-Success: the bot confirmed the stopped sessions; every activity completed
-before the kill needed one attempt; at least one activity scheduled before
-the kill was retried (attempt 2 or more), on a session that was not
-killed; the round completed (E2E-02). Collect on failure: parent and
-reviewer histories, router log (the `/kill` handling), worker log.
+**Stop** if the round never finishes (the block records E2E-04 to E2E-06
+as skipped): go to the report.
 
 ## E2E-04 — Planted defects found (timeout 120000)
 
-Requires E2E-02. In the full mode, the label becomes `E2E-04 run 2` and
+Requires E2E-03. In the full mode, the label becomes `E2E-04 run 2` and
 `E2E-04 run 3` (see below).
 
 ```bash
@@ -298,23 +287,18 @@ check_coverage "E2E-04"
 STEP
 ```
 
-Matching: the findings are the `ReviewerReport.findings` returned by the
-three round-1 reviewer child workflows (`$WF-r1-<category>`). The
-workflow ID pattern assumes one batch per category; this holds for the
-demo scenario (well under 15 files / 60,000 bytes), but larger diffs
-would add a `-b<n>` suffix.
-A defect of `expected-findings.yaml` is found when one finding has its
-`category`, its `file` as `path`, and a span `[line, end_line or line]`
-that overlaps one of its `line_ranges` (inclusive). The missing tests
-have no line and are not matched. Success: every defect found. On
-failure the step prints every finding: a finding on the right function
-just outside the range means line drift in the demo repository (compare
-with the tag), otherwise a reviewer missed it. Collect on failure: the
-three reviewer histories.
+Matching rules: header of `expected-findings.yaml`. The reviewer workflow
+IDs (`$WF-r1-<category>`) assume one batch per category: true for the demo
+scenario (well under 15 files / 60,000 bytes), but a larger diff would add
+a `-b<n>` suffix.
+
+Success: every defect found. On failure the step prints every finding: a
+finding on the right function just outside the range means line drift in
+the demo repository (compare with the tag), otherwise a reviewer missed it.
 
 ## E2E-05 — `/fix` (timeout 600000)
 
-Requires E2E-02 with a red check.
+Requires E2E-03 with a red check.
 
 ```bash
 bash <<'STEP'
@@ -352,21 +336,29 @@ STEP
 Success: 👀 (`eyes`) on the `/fix` comment; exactly one commit carrying the
 `Review-Fix: <workflow id>/<n>` trailer, verified by GitHub, and it is the
 head of the PR; `AI Review` is `success` on it; at least one review thread
-resolved. Max wait: 30 s for the reaction, 360 s for the commit (cold start
-and fixer), 300 s for the incremental round. Collect on failure: parent and
-fixer histories, router log, worker log, PR comments (a "branch changed,
-fix abandoned" comment explains a refused push).
+resolved.
 
 ## E2E-06 — Merge with a green check (timeout 300000)
 
-Requires E2E-05. If E2E-05 failed, record E2E-06 as skipped and close the
-PR instead: `gh pr close <number> -R <owner>/agentcore-review-demo-app`.
+Requires E2E-05. If E2E-05 failed, run only this block, which closes the
+PR:
+
+```bash
+bash <<'STEP'
+source .claude/skills/e2e-validation/helpers.sh
+gh pr close "$PR" -R "$REPO"
+result E2E-06 FAIL "skipped: E2E-05 failed"
+STEP
+```
+
+Otherwise:
 
 ```bash
 bash <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
 merge() { gh pr merge "$PR" -R "$REPO" --merge; }
 completed() { workflow_completed "$WF"; }
+# Retried: GitHub may take a few seconds to see the green check.
 wait_until 30 "PR merged" merge || { result E2E-06 FAIL "gh pr merge refused"; collect "$WF"; exit 1; }
 wait_until 120 "workflow completed" completed || { result E2E-06 FAIL "workflow still open"; collect "$WF"; exit 1; }
 outcome=$(jqe -c 'include "e2e"; result_with(["merged", "rounds"])' "$(fetch_history "$WF")")
@@ -395,9 +387,7 @@ Success: `gh pr merge` (no `--admin`) succeeds; the workflow completes; its
 `PullRequestOutcome` says merged, by the `gh` user, at least 2 rounds, no
 open `critical`/`high` finding; every thread of a finding still open is
 unresolved and every other thread resolved; the PR's snapshot prefix
-`<owner>/<repo>/pr-<n>/` in the snapshots bucket is empty. Max wait: 30 s
-for the merge (GitHub may take a few seconds to see the green check), 120 s
-for the workflow. Collect on failure: parent history, worker log.
+`<owner>/<repo>/pr-<n>/` in the snapshots bucket is empty.
 
 **End of the smoke mode**: go to the report.
 
@@ -407,18 +397,20 @@ Run after the smoke steps, in this order.
 
 ### Reset between runs (timeout 600000)
 
-Run the Setup block again with `label="Reset between runs"`: the smoke
-merge moved `main` and deleted `feature/customer-search`.
+The smoke merge moved `main` and deleted `feature/customer-search`: run the
+Setup block again with the label as argument, its first line becoming
+`bash -s -- "Reset between runs" <<'STEP'`.
 
 ### E2E-04 runs 2 and 3 (timeout 600000 each)
 
-Run the block with `RUN=2`, then with `RUN=3`. Run 2 closes its PR; run 3
+Run the block as written (run 2), then again with `3` as argument, its
+first line becoming `bash -s -- 3 <<'STEP'`. Run 2 closes its PR; run 3
 keeps it open for E2E-06b.
 
 ```bash
-bash <<'STEP'
+bash -s -- 2 <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
-RUN=2   # 3 for the third run
+RUN=${1:?run number}
 PR=$(open_pr feature/customer-search "$SCENARIO_TITLE (run $RUN)") \
   || { result "E2E-04 run $RUN" FAIL "gh pr create failed"; exit 1; }
 save PR "$PR"
@@ -471,11 +463,10 @@ STEP
 
 Success: the admin merge succeeds; the outcome records the merge by the
 `gh` user with at least one open blocking finding; exactly one bot comment
-carries `<!-- closing:<workflow id> -->`. Max wait: 120 s. Collect on
-failure: parent history, worker log. The completion time is the start of
-the E2E-09 clock: no production workflow runs after it.
+carries `<!-- closing:<workflow id> -->`. The completion time is the start
+of the E2E-09 clock: no production workflow runs after it.
 
-### E2E-08 — Dev mode (timeout 600000)
+### E2E-07 — Dev mode (timeout 600000)
 
 1. Start the local worker with the Bash tool's `run_in_background` option
    (keep the task ID to stop it later):
@@ -489,7 +480,7 @@ the E2E-09 clock: no production workflow runs after it.
 ```bash
 bash <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
-fail() { result E2E-08 FAIL "$1"; collect ${DEV_WF:+"$DEV_WF"}; exit 1; }
+fail() { result E2E-07 FAIL "$1"; collect ${DEV_WF:+"$DEV_WF"}; exit 1; }
 ready() { grep -q "polling $DEV_TASK_QUEUE" "$E2E_DIR/dev-worker.log"; }
 wait_until 120 "local worker polling $DEV_TASK_QUEUE" ready || fail "local worker not polling (dev-worker.log)"
 PR=$(open_pr dev/customer-search "$SCENARIO_TITLE (dev)") || fail "gh pr create failed"
@@ -510,7 +501,7 @@ reply=$?
 wait_until 360 "dev round 1 published" round_published "$DEV_WF" 1
 round=$?
 if [[ "$queue" == "$DEV_TASK_QUEUE" && "$identity" == dev:* && "$reply" == 0 && "$round" == 0 ]]; then
-  result E2E-08 ok "handled by $identity on $queue, /kill answered with the dev message"
+  result E2E-07 ok "handled by $identity on $queue, /kill answered with the dev message"
 else
   fail "queue $queue, identity $identity, /kill reply $reply, round $round"
 fi
@@ -519,12 +510,10 @@ STEP
 
 Success: the workflow runs on `review-dev`, its first workflow task on a
 `dev:` identity, `/kill` gets the "Ctrl-C is your friend" reply and no
-session is stopped, the round is published by the local worker. Max wait:
-120 s for the worker, 60 s for the pickup and the reply, 360 s for the
-round. Collect on failure: dev workflow history, `dev-worker.log`, router
-log. Keep the local worker and the PR: E2E-07 closes it.
+session is stopped, the round is published by the local worker. Keep the
+local worker and the PR: E2E-08 closes it.
 
-### E2E-07 — Reset (timeout 600000)
+### E2E-08 — Reset (timeout 600000)
 
 Requires the local worker still running (it finishes the dev workflow when
 the reset closes its PR).
@@ -533,14 +522,10 @@ the reset closes its PR).
 bash <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
 t0=$SECONDS
-all_idle() {
-  [[ "$(running_pr_workflows "$TASK_QUEUE")" == 0 && "$(running_pr_workflows "$DEV_TASK_QUEUE")" == 0 ]]
-}
-if reset_demo && [[ "$(gh pr list -R "$REPO" --state open --json number --jq length)" == 0 ]] \
-  && wait_until 180 "every PR workflow closed" all_idle && demo_refs_ok; then
-  result E2E-07 ok "reset in $((SECONDS - t0))s: no open PR, no running workflow, refs on their tags"
+if reset_and_wait 180 "$TASK_QUEUE" "$DEV_TASK_QUEUE"; then
+  result E2E-08 ok "reset in $((SECONDS - t0))s: no open PR, no running workflow, refs on their tags"
 else
-  result E2E-07 FAIL "see the output above"
+  result E2E-08 FAIL "see the output above"
   collect ${DEV_WF:+"$DEV_WF"}
 fi
 STEP
@@ -548,8 +533,6 @@ STEP
 
 Success: the run succeeds, no PR is open, no `PullRequestWorkflow` runs on
 either queue, `main` is on `baseline` and both branches on the scenario tag.
-Max wait: 180 s for the run, 180 s for the workflows. Collect on failure:
-the run log (`gh run view <id> --log-failed`), router log, dev workflow.
 
 Then stop the local worker: stop its background task, then run:
 
@@ -591,6 +574,7 @@ if [[ "$late" == 0 && "$last_poll" -le $((LAST_PROD_AT + 135)) ]]; then
 else
   msg="$late log event(s) after +$((deadline - LAST_PROD_AT))s, last poll +$((last_poll - LAST_PROD_AT))s"
   result E2E-09 FAIL "$msg"
+  collect
 fi
 STEP
 ```
@@ -599,9 +583,7 @@ Success: no runtime log event later than the last production activity +
 60 s (drain) + `AGENTCORE_IDLE_TIMEOUT` + 30 s, and no AgentCore poll later
 than the last activity + 60 s (drain) + 75 s (one long poll). The poller
 list of `DescribeTaskQueue` keeps sessions for about 5 minutes, so only the
-poll timestamps count. Max wait: up to about 4 minutes after E2E-06b (most
-of it already spent in E2E-08 and E2E-07). Collect on failure: worker log
-(`collect`).
+poll timestamps count.
 
 ## Report (timeout 60000)
 
@@ -637,15 +619,15 @@ drain by themselves, and the next run's Setup resets the demo repository
 
 ## Troubleshooting
 
-| Symptom | Where to look |
-|---|---|
-| Every `tcli` attempt fails | Unstable network (Go CLI): use a stable one |
-| No workflow after the PR | `webhook-deliveries.log` has no line for it |
-| Webhook status 401 | Webhook secret of the app vs Secrets Manager |
-| Webhook status 500 | `router.log`: Temporal error of the router |
-| Workflow started, no task | Current version, queue attachment |
-| E2E-04 misses a defect | Printed findings: line drift or a real miss |
-| No fix commit | Fixer history; "branch changed" comment |
+| Symptom                    | Where to look                                |
+| -------------------------- | -------------------------------------------- |
+| Every `tcli` attempt fails | Unstable network (Go CLI): use a stable one  |
+| No workflow after the PR   | `webhook-deliveries.log` has no line for it  |
+| Webhook status 401         | Webhook secret of the app vs Secrets Manager |
+| Webhook status 500         | `router.log`: Temporal error of the router   |
+| Workflow started, no task  | Current version, queue attachment            |
+| E2E-04 misses a defect     | Printed findings: line drift or a real miss  |
+| No fix commit              | Fixer history; "branch changed" comment      |
 
 A delivery that never reached the router appears in the app's settings
 (Advanced, Recent Deliveries); ask the human to redeliver it there.

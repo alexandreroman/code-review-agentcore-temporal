@@ -1,17 +1,18 @@
-"""What the bot writes on GitHub: review comments and body, check output, closing comment, fix commit.
+"""What the bot writes on GitHub: review comments and body, check output, closing comment, fixer changes.
 
 Pure functions: the activities call them with data they fetched, the workflow with its state.
 """
 
-from collections.abc import Sequence
 from pathlib import PurePosixPath
+from typing import Literal
 
-from agentcore_review_shared.contract import FileChange, Finding
+from agentcore_review_shared.contract import Finding
 from pydantic import BaseModel
 
-from agentcore_review_worker.findings import sort_key, split_inline
+from agentcore_review_worker.hunks import is_commentable
+from agentcore_review_worker.lifecycle import sort_key
 from agentcore_review_worker.markers import finding_marker
-from agentcore_review_worker.models import ReviewContent
+from agentcore_review_worker.models import FileChange, ReviewContent
 
 MAX_INLINE_COMMENTS = 20
 MAX_BODY_CHARS = 60_000  # GitHub rejects review bodies over 65,536 characters
@@ -57,6 +58,10 @@ def _inline(finding: Finding) -> InlineComment:
     return InlineComment(path=finding.path, line=finding.line, body=comment_body(finding))
 
 
+def _count(n: int, noun: str) -> str:
+    return f"{n} {noun}" if n == 1 else f"{n} {noun}s"
+
+
 def _line(finding: Finding) -> str:
     return f"- **{finding.id}** {finding.severity} · `{finding.path}:{finding.line}` · {finding.title}"
 
@@ -68,23 +73,31 @@ def _file_list(paths: list[str]) -> str:
     return "\n".join(lines)
 
 
-def build_review(
-    content: ReviewContent, commentable: dict[str, set[int]], marker: str, inline: bool = True
-) -> ReviewPayload:
+def split_inline(
+    findings: list[Finding], commentable: dict[str, set[int]], cap: int
+) -> tuple[list[Finding], list[Finding]]:
+    """The findings to attach inline (at most `cap`, on commentable diff lines) and the ones for the body."""
+    inline: list[Finding] = []
+    body: list[Finding] = []
+    for f in sorted(findings, key=sort_key):
+        if len(inline) < cap and is_commentable(commentable.get(f.path, set()), f.line, f.end_line):
+            inline.append(f)
+        else:
+            body.append(f)
+    return inline, body
+
+
+def build_review(content: ReviewContent, commentable: dict[str, set[int]], marker: str, inline: bool) -> ReviewPayload:
     """One COMMENT review: findings on diff lines inline (at most 20), all others in the body.
 
     With inline=False (after GitHub refused the inline comments with a 422), every finding goes
     into the body.
     """
-    if inline:
-        attached, in_body = split_inline(content.findings, commentable, MAX_INLINE_COMMENTS)
-    else:
-        attached, in_body = [], sorted(content.findings, key=sort_key)
+    cap = MAX_INLINE_COMMENTS if inline else 0
+    attached, in_body = split_inline(content.findings, commentable, cap)
     sections = [marker, f"## AI Review — round {content.round}", content.summary_markdown.strip() or "No summary."]
-    if not content.findings:
-        sections.append("No new finding in this round.")
     if in_body:
-        sections.append("### Other findings" if inline else "### Findings")
+        sections.append("### Other findings" if attached else "### Findings")
         sections += [comment_body(f) for f in in_body]
     if content.resolved_ids:
         sections.append("### Resolved in this round\n\n" + ", ".join(content.resolved_ids))
@@ -103,26 +116,27 @@ def build_review(
     return ReviewPayload(body=body, comments=[_inline(f) for f in attached])
 
 
-def check_output(open_findings: list[Finding], unavailable: Sequence[str] = ()) -> tuple[str, str]:
-    """Title and summary of a completed round's check; `unavailable` names the reviewers that failed."""
+def check_output(
+    open_findings: list[Finding], unavailable: list[str]
+) -> tuple[Literal["success", "failure"], str, str]:
+    """Conclusion, title and summary of a completed round's check; `unavailable` names the reviewers that failed."""
+    blocking = sum(f.severity.blocking for f in open_findings)
+    conclusion: Literal["success", "failure"] = "failure" if blocking else "success"
     if open_findings:
         ordered = sorted(open_findings, key=sort_key)
-        blocking = sum(f.severity.blocking for f in ordered)
-        plural = "s" if len(ordered) != 1 else ""
-        title = f"{len(ordered)} open finding{plural}, {blocking} blocking"
+        title = f"{_count(len(ordered), 'open finding')}, {blocking} blocking"
         lines = [_line(f) for f in ordered]
         lines += ["", "The check fails while a finding of high severity or above is open."]
     else:
         title = "No open finding"
         lines = ["No finding is open."]
     if unavailable:
-        plural = "s" if len(unavailable) != 1 else ""
-        title += f", {len(unavailable)} reviewer{plural} unavailable"
+        title += f", {_count(len(unavailable), 'reviewer')} unavailable"
         lines += ["", f"Not reviewed in this round (reviewer unavailable): {', '.join(unavailable)}."]
-    return title, "\n".join(lines)
+    return conclusion, title, "\n".join(lines)
 
 
-def unavailable_check_output(round_number: int, unavailable: Sequence[str]) -> tuple[str, str]:
+def unavailable_check_output(round_number: int, unavailable: list[str]) -> tuple[str, str]:
     """Title and summary of a round where no reviewer completed: the head stays unreviewed."""
     summary = (
         f"No reviewer completed round {round_number} (unavailable: {', '.join(unavailable)}), "
@@ -134,15 +148,11 @@ def unavailable_check_output(round_number: int, unavailable: Sequence[str]) -> t
 def closing_comment(closed_by: str | None, open_findings: list[Finding]) -> str:
     ordered = sorted(open_findings, key=sort_key)
     listed = ", ".join(f"{f.id} ({f.severity})" for f in ordered)
-    count = f"{len(ordered)} open finding{'s' if len(ordered) != 1 else ''}"
+    count = _count(len(ordered), "open finding")
     who = f" by @{closed_by}" if closed_by else ""
     if any(f.severity.blocking for f in ordered):
         return f"⚠️ Merged{who} bypassing AI Review, {count}: {listed}."
     return f"Merged{who} with {count}: {listed}."
-
-
-def commit_message(message: str, trailer: str) -> str:
-    return f"{message.rstrip()}\n\n{trailer}"
 
 
 def _repository_path(raw: str) -> str | None:

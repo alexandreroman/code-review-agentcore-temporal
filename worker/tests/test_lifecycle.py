@@ -5,8 +5,6 @@ from agentcore_review_shared.contract import (
     FindingDraft,
     FixRequested,
     PullRequestState,
-    ReviewerReport,
-    ReviewSummary,
 )
 from agentcore_review_worker.lifecycle import (
     MAX_FIX_DELIVERIES,
@@ -20,7 +18,7 @@ from agentcore_review_worker.lifecycle import (
     record_head,
     resolved_ids,
 )
-from agentcore_review_worker.models import SynthesisInput
+from agentcore_review_worker.models import ReviewerReport, ReviewSummary, SynthesisInput
 
 
 def draft(category="security", severity="high", path="app/search.py", line=5, title="SQL injection") -> FindingDraft:
@@ -119,7 +117,7 @@ def test_fallback_summary_keeps_the_most_severe_finding_per_line():
     assert summary.ordered_ids == ["F-002", "F-003"]
     assert summary.duplicates == ["F-001"]
     assert "F-002 (critical)" in summary.summary_markdown
-    assert "Resolved: F-000." in summary.summary_markdown
+    assert "F-000" not in summary.summary_markdown  # the review body lists the resolved IDs
 
 
 def test_fallback_summary_without_new_findings():

@@ -11,21 +11,27 @@ from pathlib import Path
 
 import httpx2 as httpx
 from agentcore_review_shared.contract import PrRef
-from agentcore_review_shared.github import API_URL, GitHubError
-from agentcore_review_shared.github_errors import classify
-from agentcore_review_shared.ids import snapshot_key, snapshot_prefix
+from agentcore_review_shared.github import API_URL, raise_for_status
+from botocore.exceptions import ClientError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
 from ..aws import s3
-from ..errors import github_errors
-from ..github_client import github
 from ..models import SnapshotInput, SnapshotRef
 from ..settings import AppSettings
+from .github_api import github, github_errors
 
 MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
 HEARTBEAT_SECONDS = 5.0
+
+
+def snapshot_prefix(owner: str, repo: str, number: int) -> str:
+    return f"{owner.lower()}/{repo.lower()}/pr-{number}/"
+
+
+def snapshot_key(owner: str, repo: str, number: int, sha: str) -> str:
+    return f"{snapshot_prefix(owner, repo, number)}{sha}.tar.gz"
 
 
 class SnapshotActivities:
@@ -61,8 +67,6 @@ class SnapshotActivities:
 
 
 def _exists(bucket: str, key: str) -> bool:
-    from botocore.exceptions import ClientError
-
     try:
         s3().head_object(Bucket=bucket, Key=key)
     except ClientError as error:
@@ -82,8 +86,8 @@ async def _download_tarball(pr: PrRef, sha: str, archive: Path) -> None:
         http.stream("GET", url, headers=headers) as response,
     ):
         if not response.is_success:
-            body = (await response.aread()).decode(errors="replace")
-            raise GitHubError(response.status_code, classify(response.status_code, response.headers, body), body)
+            await response.aread()
+            raise_for_status(response)
         size = 0
         with archive.open("wb") as out:
             async for chunk in response.aiter_bytes(CHUNK_BYTES):

@@ -1,32 +1,59 @@
-"""Temporal client and worker construction, shared by the local and AgentCore entry points."""
+"""How the worker is assembled: its workflows, activities and Temporal client, shared by every entry point."""
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import timedelta
-from pathlib import Path
 
-from agentcore_review_shared.secrets import TemporalCertSecret
-from temporalio.client import Client, Plugin
+from temporalio.client import Client
 from temporalio.common import VersioningBehavior
 from temporalio.service import TLSConfig
 from temporalio.worker import Interceptor, Worker, WorkerDeploymentConfig, WorkerDeploymentVersion
 
-from .registry import WORKFLOWS, activities
-from .settings import WorkerSettings
+from .activities import commits, github_api, reviews, tools
+from .activities.ping import PingActivities
+from .activities.pulls import PullActivities
+from .activities.snapshots import SnapshotActivities
+from .agent_model import strands_plugin
+from .settings import AppSettings, WorkerSettings
+from .workflows.fixer import FixerWorkflow
+from .workflows.ping import PingWorkflow
+from .workflows.pull_request import PullRequestWorkflow
+from .workflows.reviewer import ReviewerWorkflow
+from .workflows.synthesis import SynthesisWorkflow
+
+WORKFLOWS: list[type] = [PingWorkflow, PullRequestWorkflow, ReviewerWorkflow, SynthesisWorkflow, FixerWorkflow]
 
 
-def tls_from_files(cert_path: str, key_path: str) -> TLSConfig:
-    return TLSConfig(client_cert=Path(cert_path).read_bytes(), client_private_key=Path(key_path).read_bytes())
+def activities(settings: AppSettings, identity: str) -> list[Callable]:
+    github_api.configure(settings.github_app_secret)
+    pulls = PullActivities(settings)
+    snapshots = SnapshotActivities(settings)
+    return [
+        PingActivities(identity).ping,
+        pulls.list_changed_files,
+        pulls.fetch_batch_patches,
+        snapshots.snapshot_repo,
+        snapshots.delete_snapshots,
+        reviews.set_check,
+        reviews.publish_review,
+        reviews.resolve_threads,
+        reviews.post_closing_comment,
+        commits.commit_changes,
+        tools.glob_tool,
+        tools.grep_tool,
+        tools.read_tool,
+    ]
 
 
-def tls_from_secret(secret: TemporalCertSecret) -> TLSConfig:
-    return TLSConfig(client_cert=secret.cert.encode(), client_private_key=secret.key.encode())
-
-
-async def connect(settings: WorkerSettings, tls: TLSConfig, identity: str, plugins: Sequence[Plugin] = ()) -> Client:
+async def connect(settings: WorkerSettings, identity: str, cert: bytes, key: bytes) -> Client:
+    # The Worker inherits the client's plugins: the Strands model activities, sandbox passthrough and converter.
     # No explicit data converter: StrandsPlugin installs the Pydantic converter with its failure converter
     # (Strands errors stay typed and non-retryable), and only does so over the default converter.
     return await Client.connect(
-        settings.address, namespace=settings.namespace, tls=tls, identity=identity, plugins=list(plugins)
+        settings.address,
+        namespace=settings.namespace,
+        tls=TLSConfig(client_cert=cert, client_private_key=key),
+        identity=identity,
+        plugins=[strands_plugin(settings.app)],
     )
 
 
@@ -34,7 +61,7 @@ def build_worker(
     client: Client, settings: WorkerSettings, identity: str, interceptors: Sequence[Interceptor] = ()
 ) -> Worker:
     deployment = None
-    if settings.versioned:
+    if settings.deployment_name is not None and settings.build_id is not None:
         deployment = WorkerDeploymentConfig(
             version=WorkerDeploymentVersion(deployment_name=settings.deployment_name, build_id=settings.build_id),
             use_worker_versioning=True,
@@ -42,8 +69,8 @@ def build_worker(
         )
     # The dev worker's Ctrl-C stands in for AgentCore's /kill: it must cancel activities at once,
     # like a crash, so the same run resumes at attempt 2 when a worker comes back. The AgentCore
-    # worker keeps a full drain instead: its idle-session teardown (ActivityTracker) depends on it.
-    graceful_shutdown_timeout = timedelta(seconds=120) if settings.versioned else timedelta(0)
+    # worker keeps a normal graceful shutdown: it stops only once idle, so there is rarely anything to finish.
+    graceful_shutdown_timeout = timedelta(seconds=120) if deployment is not None else timedelta(0)
     return Worker(
         client,
         task_queue=settings.task_queue,

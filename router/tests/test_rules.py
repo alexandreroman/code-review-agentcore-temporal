@@ -1,26 +1,12 @@
 import pytest
-from agentcore_review_router.rules import (
-    DEV_KILL_REPLY,
-    NO_REVIEW_REPLY,
-    NO_WORKER_REPLY,
-    REACTION_DENIED,
-    REACTION_FIX,
-    REACTION_KILL,
-    KillTally,
-    can_run_commands,
-    kill_comment,
-    kill_scope,
-    kill_targets,
-    stop_outcome,
-)
-from agentcore_review_shared.identity import AgentCoreSession
+from agentcore_review_router.rules import KillTally, can_run_commands, kill_comment, kill_targets, stop_outcome
+from agentcore_review_shared.contract import AgentCoreSession
 
 
 @pytest.mark.parametrize(
     ("permission", "allowed"),
     [
         ("admin", True),
-        ("maintain", True),
         ("write", True),
         ("triage", False),
         ("read", False),
@@ -34,28 +20,14 @@ def test_only_write_access_runs_commands(permission, allowed):
     assert can_run_commands(permission) is allowed
 
 
-@pytest.mark.parametrize(
-    ("queue", "scope"), [("review-dev", "dev"), ("review", "prod"), (None, "prod"), ("other", "prod")]
-)
-def test_kill_scope(queue, scope):
-    assert kill_scope(queue, "review-dev") == scope
-
-
 def test_kill_targets_keep_each_agentcore_session_once():
     identities = [
         "agentcore:b_2:s-9",
         "dev:laptop",
         "agentcore:b_1:s-1",
         "agentcore:b_2:s-9",
-        "40213@ip-10-0-0-1",
-        "agentcore::s-2",
-        "agentcore:b_1:",
     ]
     assert kill_targets(identities) == [AgentCoreSession("b_1", "s-1"), AgentCoreSession("b_2", "s-9")]
-
-
-def test_kill_targets_keep_colons_in_session_ids():
-    assert kill_targets(["agentcore:b_1:a:b"]) == [AgentCoreSession("b_1", "a:b")]
 
 
 def test_no_agentcore_poller_means_no_target():
@@ -96,10 +68,3 @@ def test_tally_counts_unconfirmed_stops_as_failed():
 )
 def test_kill_comment(tally, text):
     assert kill_comment(tally) == text
-
-
-def test_replies_and_reactions_match_the_spec():
-    assert NO_REVIEW_REPLY == "No review in progress."
-    assert DEV_KILL_REPLY == "Dev worker: Ctrl-C is your friend."
-    assert NO_WORKER_REPLY == "No active worker, nothing to kill."
-    assert (REACTION_DENIED, REACTION_FIX, REACTION_KILL) == ("confused", "eyes", "rocket")

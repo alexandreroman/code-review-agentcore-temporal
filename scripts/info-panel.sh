@@ -7,8 +7,6 @@
 # nothing: the panel must never make a target fail.
 set -euo pipefail
 
-source scripts/lib.sh
-
 LOCAL_WORKER=false
 [[ "${1:-}" != "--local-worker" ]] || LOCAL_WORKER=true
 
@@ -93,6 +91,7 @@ render() {
   fi
 }
 
+# BSD mktemp only replaces trailing Xs, so the .md suffix is added afterwards.
 DOCUMENT=$(mktemp)
 mv "$DOCUMENT" "${DOCUMENT}.md"
 DOCUMENT="${DOCUMENT}.md"

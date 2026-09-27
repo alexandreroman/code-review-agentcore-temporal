@@ -5,7 +5,7 @@ import re
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
-def _git_lines(text: str) -> list[str]:
+def git_lines(text: str) -> list[str]:
     """Split text into lines the way git does: on "\\n" only.
 
     str.splitlines() also breaks on "\\x0c", "\\v", "\\x1c"-"\\x1e", "\\x85" and
@@ -24,7 +24,7 @@ def commentable_lines(patch: str | None) -> set[int]:
     if not patch:
         return lines
     current: int | None = None
-    for raw in _git_lines(patch):
+    for raw in git_lines(patch):
         match = _HUNK.match(raw)
         if match:
             current = int(match.group(1))
@@ -38,6 +38,7 @@ def commentable_lines(patch: str | None) -> set[int]:
 
 def is_commentable(lines: set[int], line: int, end_line: int | None = None) -> bool:
     last = line if end_line is None else end_line
+    # An inverted range would make all() below vacuously true, and GitHub rejects such a comment.
     if last < line:
         return False
     return all(number in lines for number in range(line, last + 1))

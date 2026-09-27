@@ -43,7 +43,7 @@ def activities:
 # completes two of them: in_progress, then the conclusion.
 def check_updates: [activities[] | select(.name == "set_check" and .completed) | .completed] | sort;
 
-# E2E-03 bookkeeping for one history, around the /kill time $kill.
+# E2E-02 bookkeeping for one history, around the /kill time $kill.
 def kill_report($kill):
   activities
   | {finished_before: [.[] | select(.completed and .completed < $kill)] | length,
@@ -84,10 +84,7 @@ def agentcore_last_poll:
    | .lastAccessTime | ts]
   | max;
 
-# E2E-04. Input: expected-findings as JSON. For each defect, found is true
-# when a finding of $findings has the defect's category, its file as path,
-# and a span [line, end_line or line] overlapping one of its line_ranges
-# (bounds included).
+# E2E-04: marks each defect of expected-findings (as JSON) found in $findings (rules: its header).
 def coverage($findings):
   .defects | map(. as $d | {id, category: $d.category,
     found: any($findings[]; . as $f

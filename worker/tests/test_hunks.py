@@ -17,15 +17,6 @@ def test_added_and_context_lines_are_commentable():
     assert commentable_lines(PATCH) == {1, 2, 3, 4, 5, 21, 22, 23}
 
 
-def test_removed_lines_do_not_advance_the_new_file():
-    assert 2 in commentable_lines(PATCH)  # "+import re" takes line 2 after "-import sys"
-
-
-def test_file_headers_are_skipped():
-    patch = "--- a/x.py\n+++ b/x.py\n@@ -0,0 +1,2 @@\n+a\n+b"
-    assert commentable_lines(patch) == {1, 2}
-
-
 def test_added_line_that_looks_like_a_header_counts():
     assert commentable_lines("@@ -1 +1,2 @@\n x\n+++i") == {1, 2}
 

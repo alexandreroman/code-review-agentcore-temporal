@@ -21,17 +21,16 @@
 > only makes sense knowing the prior state,
 > rewrite it.
 
-- [Project objective](references/project_objective.md) — 15-min conference demo of Temporal + AgentCore PR reviews
-- [Stack choices](references/project_stack.md) — Temporal Cloud mTLS, Anthropic API, Python, OpenTofu, and why
-- [Local dev uses Temporal Cloud](references/project_dev_on_temporal_cloud.md) — no local Temporal server; dev queue review-dev
-- [Design docs location](references/reference_design_docs.md) — spec, plans and spike results live in git-ignored docs/
+- [Project objective](references/project_objective.md) — 15-min talk, two screens, four moments; stage reliability first
+- [Stack choices](references/project_stack.md) — mTLS, Anthropic API (no Bedrock), Python, and why
+- [Local dev uses Temporal Cloud](references/project_dev_on_temporal_cloud.md) — no local Temporal server; make dev targets Cloud
+- [Design docs location](references/reference_design_docs.md) — spec, plans, decisions and spike results in git-ignored docs/
 - [Makefile as the single entry point](references/feedback_makefile_only.md) — make targets delegate to scripts/*.sh; logic never in recipes
-- [Ask before implementing](references/feedback_ask_before_implementing.md) — confirm with the user before starting a plan or app code
-- [English only](references/feedback_english_only.md) — all generated text (code, docs, commits, memory) is in English
-- [Title and code name](references/project_naming.md) — title in human-facing docs, temporal-agentcore-review-demo in code
-- [Amend unpushed commits](references/feedback_amend_unpushed.md) — fold fixes into the unpushed commit they correct
+- [Ask before implementing](references/feedback_ask_before_implementing.md) — present a plan and wait for approval before carrying it out
+- [English only for generated text](references/feedback_english_only.md) — all generated text (code, docs, commits, memory) is in English
+- [Project title and code name](references/project_naming.md) — title in human-facing docs, temporal-agentcore-review-demo in code
+- [Amend unpushed commits instead of stacking fixes](references/feedback_amend_unpushed.md) — fold fixes into the unpushed commit they correct
 - [Placeholders for account identifiers](references/feedback_no_real_identifiers.md) — real namespace/account/app IDs only in .env, never tracked
-- [Casper stays out of user-facing files](references/feedback_no_casper_in_docs.md) — README and .env.example never mention Casper
-- [Tests cover business logic only](references/feedback_tests_business_only.md) — no tests for infra, tooling or runtime plumbing
-- [Lean, optimized artifacts over ceremony](references/feedback_lean_artifacts.md) — small images/zips from the start, no ceremony
-- [Generic tooling references](references/feedback_generic_tooling.md) — docker, never machine specifics like podman
+- [No maintainer specifics in public files](references/feedback_no_maintainer_specifics.md) — generic docker, no Casper in public files
+- [Tests cover business logic only](references/feedback_tests_business_only.md) — pure review/routing logic only; no plumbing or constant tests
+- [Lean, optimized artifacts](references/feedback_lean_artifacts.md) — small images/zips from the start, few moving parts

@@ -13,10 +13,6 @@ AWS_REGION ?= ca-central-1
 TEMPORAL_NAMESPACE ?=
 TEMPORAL_TLS_CERT_PATH ?= certs/client.pem
 TEMPORAL_TLS_KEY_PATH ?= certs/client.key
-TEMPORAL_WORKER_CERT_PATH ?= $(TEMPORAL_TLS_CERT_PATH)
-TEMPORAL_WORKER_KEY_PATH ?= $(TEMPORAL_TLS_KEY_PATH)
-TEMPORAL_ROUTER_CERT_PATH ?= $(TEMPORAL_TLS_CERT_PATH)
-TEMPORAL_ROUTER_KEY_PATH ?= $(TEMPORAL_TLS_KEY_PATH)
 TEMPORAL_DEPLOYMENT_NAME ?= agentcore-review-demo-worker
 TASK_QUEUE ?= review
 DEV_TASK_QUEUE ?= review-dev
@@ -42,8 +38,7 @@ endif
 # Settings read by the worker, the tools and the CLIs. The list is explicit:
 # a bare `export` would expand $(GITHUB_OWNER), hence run gh, for every recipe.
 export AWS_REGION TEMPORAL_NAMESPACE TEMPORAL_ADDRESS TEMPORAL_TLS_CERT_PATH TEMPORAL_TLS_KEY_PATH \
-	TEMPORAL_WORKER_CERT_PATH TEMPORAL_WORKER_KEY_PATH TEMPORAL_ROUTER_CERT_PATH TEMPORAL_ROUTER_KEY_PATH \
-	TEMPORAL_DEPLOYMENT_NAME TASK_QUEUE DEV_TASK_QUEUE DEV_BRANCH_PREFIX ANTHROPIC_API_KEY ANTHROPIC_MODEL \
+	TEMPORAL_DEPLOYMENT_NAME TASK_QUEUE DEV_TASK_QUEUE ANTHROPIC_API_KEY ANTHROPIC_MODEL \
 	ANTHROPIC_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO
 export AWS_DEFAULT_REGION = $(AWS_REGION)
 
@@ -63,8 +58,7 @@ export TF_VAR_demo_repo = $(DEMO_REPO)
 
 PROJECT := temporal-agentcore-review-demo
 NAMESPACE_PLACEHOLDER := your-namespace.a1b2c
-TOOLS := uv run --quiet python -m agentcore_review_tools
-TOFU_BOOTSTRAP := tofu -chdir=infra/bootstrap
+GITHUB_APP := uv run --quiet python -m agentcore_review_tools.github_app
 TOFU_AWS := tofu -chdir=infra/aws
 TOFU_GITHUB := tofu -chdir=infra/github
 # Expanded by the shell of the recipe that uses it, so STS is only called then.
@@ -75,9 +69,6 @@ require = $(if $(strip $($(1))),,$(error $(1) is not set: $(2)))
 # Stop the target while TEMPORAL_NAMESPACE is empty or still the placeholder.
 require_namespace = $(if $(filter-out $(NAMESPACE_PLACEHOLDER),$(strip $(TEMPORAL_NAMESPACE))),,$(error \
 	TEMPORAL_NAMESPACE is not set: put your Temporal Cloud namespace in .env))
-# $(call set_env,KEY,VALUE): replace or append KEY=VALUE in .env (idempotent).
-set_env = if grep -q '^$(1)=' .env; then sed -i.bak "s|^$(1)=.*|$(1)=$(2)|" .env && rm -f .env.bak; \
-	else echo "$(1)=$(2)" >> .env; fi
 
 ##@ Develop
 
@@ -90,7 +81,6 @@ dev: infra-init ## Run the local worker (dev task queue on Temporal Cloud) with 
 	$(call require_namespace)
 	@GITHUB_OWNER=$(GITHUB_OWNER) scripts/dev.sh
 
-# Manual driver, as the router does from webhooks: make review-pr PR=3 [ACTION=fix] [QUEUE=review]
 PR ?=
 ACTION ?= update
 QUEUE ?= $(DEV_TASK_QUEUE)
@@ -102,15 +92,10 @@ review-pr: ## Drive a pull request's workflow by hand: PR=<n> [ACTION=update|fix
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
 	scripts/review-pr.sh "$(GITHUB_OWNER)" "$(DEMO_REPO)" "$(PR)" "$(ACTION)" "$(QUEUE)"
 
-# Casper gives each worktree a band of ports starting at CASPER_PORT; the
-# local port is derived from it once, here, and .env stays the only source.
 .PHONY: worktree-init
-worktree-init: ## Prepare a new worktree: .env, dependencies, local port
+worktree-init: ## Prepare a new worktree: .env and dependencies
 	@[ -f .env ] || cp .env.example .env
 	uv sync --all-packages
-	@if [ -n "$${CASPER_PORT:-}" ]; then \
-		$(call set_env,GITHUB_APP_CALLBACK_PORT,$$((CASPER_PORT + 0))); \
-	fi
 
 ##@ Quality
 
@@ -144,12 +129,7 @@ check: test lint infra-check ## Run tests and static checks
 
 .PHONY: bootstrap
 bootstrap: ## Create the OpenTofu state bucket and KMS key (once per AWS account)
-	@bucket=$(STATE_BUCKET) && \
-	if aws s3api head-bucket --bucket "$$bucket" >/dev/null 2>&1; then \
-		echo "State bucket $$bucket already exists"; \
-	else \
-		$(TOFU_BOOTSTRAP) init -input=false && $(TOFU_BOOTSTRAP) apply -input=false -auto-approve; \
-	fi
+	@scripts/bootstrap.sh
 
 .PHONY: infra-init
 infra-init: ## Initialise the OpenTofu backends (S3 state, per worktree)
@@ -158,6 +138,8 @@ infra-init: ## Initialise the OpenTofu backends (S3 state, per worktree)
 	$(TOFU_GITHUB) init -input=false -backend-config="bucket=$(STATE_BUCKET)" \
 		-backend-config="region=$(AWS_REGION)" >/dev/null
 
+# infra, deploy, prune and destroy depend on router-build: every plan of the aws
+# stack, destroy included, reads build/router through archive_file data sources.
 .PHONY: infra
 infra: router-build infra-init ## Apply the aws stack (keeps the deployed build and its endpoints)
 	$(call require_namespace)
@@ -170,22 +152,14 @@ secrets: ## Push the Anthropic key and the mTLS certificates from .env to Secret
 .PHONY: github-app
 github-app: infra-init ## Register the GitHub App through the manifest flow (interactive, once)
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
-	$(TOOLS).github_app register --owner $(GITHUB_OWNER) --name $(GITHUB_APP_NAME) \
+	$(GITHUB_APP) register --owner $(GITHUB_OWNER) --name $(GITHUB_APP_NAME) \
 		--port $(GITHUB_APP_CALLBACK_PORT) --webhook-url "$$($(TOFU_AWS) output -raw router_url)" \
 		$(if $(FORCE),--force)
 
-.PHONY: require-github-app
-require-github-app:
-	@aws secretsmanager get-secret-value --secret-id $(PROJECT)/github-app --query ARN --output text >/dev/null 2>&1 \
-		|| { echo "The GitHub App is not registered yet: run make github-app, then make up again."; exit 1; }
-
 .PHONY: github
-github: infra-init require-github-app ## Apply the github stack (demo repository, ruleset, Actions secrets)
+github: infra-init ## Apply the github stack (demo repository, ruleset, Actions secrets)
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
-	GITHUB_TOKEN=$$(gh auth token) TF_VAR_github_owner=$(GITHUB_OWNER) \
-		TF_VAR_app_installed=$$($(TOOLS).github_app installation-id --owner $(GITHUB_OWNER) --repo $(DEMO_REPO) \
-			>/dev/null 2>&1 && echo true || echo false) \
-		$(TOFU_GITHUB) apply -input=false -auto-approve
+	@GITHUB_OWNER=$(GITHUB_OWNER) scripts/github.sh
 
 .PHONY: deploy
 deploy: router-build infra-init ## Build and push the worker image, then make it the current Worker Deployment Version
@@ -200,7 +174,7 @@ up: ## Deploy everything: state, AWS, secrets, worker, GitHub (idempotent, stops
 	$(MAKE) --no-print-directory secrets
 	$(MAKE) --no-print-directory deploy
 	$(MAKE) --no-print-directory github
-	$(TOOLS).github_app check-install --owner $(GITHUB_OWNER) --repo $(DEMO_REPO)
+	$(GITHUB_APP) check-install --owner $(GITHUB_OWNER) --repo $(DEMO_REPO)
 	$(MAKE) --no-print-directory info-publish
 
 .PHONY: kill-sessions
@@ -242,6 +216,6 @@ help: ## Show this help
 		/^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } \
 		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(firstword $(MAKEFILE_LIST))
 
-# Debug helper, hidden from help: make -s print-TEMPORAL_ADDRESS
+# Prints a resolved setting (used by the e2e-validation skill): make -s print-VAR
 print-%:
 	@echo '$($*)'

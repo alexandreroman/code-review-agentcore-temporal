@@ -36,25 +36,29 @@ sync_secret() {
     return
   fi
 
+  # A private temp file keeps the secret out of `ps`, which would show an
+  # inline --secret-string value; the RETURN trap removes it on every exit path.
   local tmp
   tmp=$(umask 077 && mktemp)
   trap 'rm -f "$tmp"' RETURN
   printf '%s' "$json" >"$tmp"
   local error
-  if ! error=$(aws secretsmanager put-secret-value --secret-id "$name" --secret-string "file://$tmp" 2>&1 1>/dev/null); then
+  if ! error=$(aws secretsmanager put-secret-value --secret-id "$name" \
+    --secret-string "file://$tmp" 2>&1 1>/dev/null); then
     die "make secrets: $error (has make infra run?)"
   fi
   echo "$name: updated"
 }
 
 [[ -n "${ANTHROPIC_API_KEY:-}" ]] || die "make secrets: ANTHROPIC_API_KEY is empty in .env"
-require_pem "${TEMPORAL_WORKER_CERT_PATH:-}" TEMPORAL_WORKER_CERT_PATH
-require_pem "${TEMPORAL_WORKER_KEY_PATH:-}" TEMPORAL_WORKER_KEY_PATH
-require_pem "${TEMPORAL_ROUTER_CERT_PATH:-}" TEMPORAL_ROUTER_CERT_PATH
-require_pem "${TEMPORAL_ROUTER_KEY_PATH:-}" TEMPORAL_ROUTER_KEY_PATH
+require_pem "${TEMPORAL_TLS_CERT_PATH:-}" TEMPORAL_TLS_CERT_PATH
+require_pem "${TEMPORAL_TLS_KEY_PATH:-}" TEMPORAL_TLS_KEY_PATH
+
+# The worker and the router each read their own secret; both get the same
+# client certificate.
+CERT_JSON=$(jq -n --rawfile cert "$TEMPORAL_TLS_CERT_PATH" --rawfile key "$TEMPORAL_TLS_KEY_PATH" \
+  '{cert: $cert, key: $key}')
 
 sync_secret "$PREFIX/anthropic-api-key" "$(jq -n '{api_key: env.ANTHROPIC_API_KEY}')"
-sync_secret "$PREFIX/temporal-worker-cert" "$(jq -n --rawfile cert "$TEMPORAL_WORKER_CERT_PATH" \
-  --rawfile key "$TEMPORAL_WORKER_KEY_PATH" '{cert: $cert, key: $key}')"
-sync_secret "$PREFIX/temporal-router-cert" "$(jq -n --rawfile cert "$TEMPORAL_ROUTER_CERT_PATH" \
-  --rawfile key "$TEMPORAL_ROUTER_KEY_PATH" '{cert: $cert, key: $key}')"
+sync_secret "$PREFIX/temporal-worker-cert" "$CERT_JSON"
+sync_secret "$PREFIX/temporal-router-cert" "$CERT_JSON"

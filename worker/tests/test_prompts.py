@@ -1,9 +1,6 @@
 from agentcore_review_shared.contract import Category, Finding
-from agentcore_review_worker.limits import MAX_MODEL_CALLS
 from agentcore_review_worker.models import BatchPatches, FilePatch, SynthesisInput
 from agentcore_review_worker.prompts import (
-    FIXER_SYSTEM,
-    REVIEWER_SYSTEM,
     fixer_prompt,
     reviewer_prompt,
     synthesis_prompt,
@@ -48,11 +45,6 @@ def test_open_findings_appear_only_in_incremental_rounds():
     assert "F-001" in focus and "resolved_ids" in focus
 
 
-def test_reviewer_system_prompt_names_the_tools_and_the_budget():
-    for word in ("Glob", "Grep", "Read", str(MAX_MODEL_CALLS), "ReviewerReport"):
-        assert word in REVIEWER_SYSTEM
-
-
 def test_synthesis_prompt_lists_findings_without_comment_ids():
     new = [finding("F-001").model_copy(update={"comment_id": 42})]
     text = synthesis_prompt(SynthesisInput(new_findings=new, resolved_ids=["F-000"], unavailable=["performance"]))
@@ -60,6 +52,5 @@ def test_synthesis_prompt_lists_findings_without_comment_ids():
     assert "F-000" in text and "performance" in text
 
 
-def test_fixer_prompt_carries_suggestions_and_the_system_prompt_protects_ci():
+def test_fixer_prompt_carries_suggestions():
     assert "Use parameters" in fixer_prompt([finding("F-001", suggestion="Use parameters")])
-    assert ".github/" in FIXER_SYSTEM

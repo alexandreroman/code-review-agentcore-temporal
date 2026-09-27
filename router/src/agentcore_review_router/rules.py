@@ -5,10 +5,10 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
-from agentcore_review_shared.identity import AgentCoreSession, parse_agentcore_identity
+from agentcore_review_shared.contract import AgentCoreSession, parse_agentcore_identity
 
 # The permission endpoint answers admin, write, read or none; maintain is a role that maps to write.
-WRITE_PERMISSIONS = frozenset({"admin", "maintain", "write"})
+WRITE_PERMISSIONS = frozenset({"admin", "write"})
 
 REACTION_DENIED = "confused"  # 😕
 REACTION_FIX = "eyes"  # 👀
@@ -26,11 +26,6 @@ RETRYABLE_STOP_ERRORS = frozenset({"ConflictException", "ThrottlingException", "
 def can_run_commands(permission: str | None) -> bool:
     """author_association is not enough (MEMBER does not grant write): the collaborator permission decides."""
     return permission in WRITE_PERMISSIONS
-
-
-def kill_scope(workflow_queue: str | None, dev_queue: str) -> Literal["dev", "prod"]:
-    """A PR on the dev queue is served by a local worker; with no workflow, /kill still clears production."""
-    return "dev" if workflow_queue == dev_queue else "prod"
 
 
 def kill_targets(identities: Iterable[str]) -> list[AgentCoreSession]:

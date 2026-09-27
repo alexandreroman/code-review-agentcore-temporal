@@ -5,10 +5,9 @@ from agentcore_review_shared.github import GitHubError
 from temporalio import activity
 
 from ..batching import partition
-from ..errors import github_errors
 from ..models import BatchInput, BatchPatches, ChangedFile, ChangeSet, FilePatch, ListFilesInput
 from ..settings import AppSettings
-from .github_api import get, get_pages, repo_path
+from .github_api import get, get_pages, github_errors, repo_path
 
 
 class PullActivities:
@@ -29,7 +28,6 @@ class PullActivities:
         reviewed, excluded = partition([_changed_file(f) for f in raw])
         return ChangeSet(
             head_sha=head,
-            base_sha=pull["base"]["sha"],
             diff_base=diff_base,
             files=reviewed,
             excluded=[f.path for f in excluded],
@@ -79,8 +77,5 @@ def _changed_file(raw: dict) -> ChangedFile:
     patch = raw.get("patch")
     return ChangedFile(
         path=raw["filename"],
-        status=raw["status"],
-        additions=raw["additions"],
-        deletions=raw["deletions"],
         patch_bytes=len(patch.encode()) if patch is not None else None,
     )

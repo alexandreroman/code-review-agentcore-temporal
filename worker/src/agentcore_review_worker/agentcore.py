@@ -3,15 +3,16 @@
 import asyncio
 import os
 
-from agentcore_review_shared.identity import agentcore_identity
+from agentcore_review_shared.contract import agentcore_identity
 from agentcore_review_shared.secrets import TemporalCertSecret
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
 
 from .aws import read_secret
 from .drain import ActivityTracker
-from .registry import plugins
-from .runtime import build_worker, connect, tls_from_secret
+from .runtime import build_worker, connect
 from .settings import agentcore_settings
+
+DRAIN_IDLE_SECONDS = 60
 
 app = BedrockAgentCoreApp()
 log = app.logger
@@ -20,16 +21,17 @@ _worker_task: asyncio.Task[None] | None = None
 
 async def _run(session_id: str) -> None:
     settings = agentcore_settings(os.environ)
+    assert settings.build_id is not None  # agentcore_settings always reads TEMPORAL_BUILD_ID
     # The endpoint is named after the build, so the identity gives /kill its StopRuntimeSession qualifier.
     identity = agentcore_identity(settings.build_id, session_id)
-    cert = TemporalCertSecret.model_validate_json(read_secret(os.environ["TEMPORAL_CERT_SECRET_ARN"]))
-    client = await connect(settings, tls_from_secret(cert), identity, plugins(settings.app))
+    secret = TemporalCertSecret.model_validate_json(read_secret(os.environ["TEMPORAL_CERT_SECRET_ARN"]))
+    client = await connect(settings, identity, secret.cert.encode(), secret.key.encode())
     tracker = ActivityTracker()
     worker = build_worker(client, settings, identity, interceptors=[tracker])
     log.info("polling %s as %s", settings.task_queue, identity)
     async with worker:
-        await tracker.wait_until_idle(settings.drain_idle_seconds)
-    log.info("idle for %ss: drained", settings.drain_idle_seconds)
+        await tracker.wait_until_idle(DRAIN_IDLE_SECONDS)
+    log.info("idle for %ss: drained", DRAIN_IDLE_SECONDS)
 
 
 async def _run_until_idle(task_id: int, session_id: str) -> None:

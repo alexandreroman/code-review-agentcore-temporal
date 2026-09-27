@@ -46,11 +46,9 @@ RUN mkdir -p /out && cp -a \
 
 FROM python:3.14-slim
 
-# Big, cached layer: unchanged by code edits, so it is never re-pushed for a
-# shared/src or worker/src change.
+# Third-party venv (cached)
 COPY --from=deps /app/.venv /app/.venv
-# Small layer: only the two workspace packages, rebuilt (and re-pushed) on
-# every code change.
+# Workspace packages (changes with the code)
 COPY --from=app /out/ /app/.venv/lib/python3.14/site-packages/
 ENV PATH=/app/.venv/bin:$PATH
 WORKDIR /app

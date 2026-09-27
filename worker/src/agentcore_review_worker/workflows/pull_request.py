@@ -18,25 +18,18 @@ from agentcore_review_worker.workflows.synthesis import SynthesisWorkflow
 with workflow.unsafe.imports_passed_through():
     from agentcore_review_shared.contract import (
         PULL_REQUEST_WORKFLOW,
-        QUERY_GET_FINDINGS,
         SIGNAL_FIX_REQUESTED,
         SIGNAL_PR_CLOSED,
         SIGNAL_PR_UPDATED,
         Category,
-        Finding,
         FixRequested,
         PrClosed,
         PrUpdated,
         PullRequestInput,
-        PullRequestOutcome,
-        ReviewerReport,
-        ReviewSummary,
     )
-    from agentcore_review_shared.ids import fixer_workflow_id, reviewer_workflow_id, synthesis_workflow_id
 
     from agentcore_review_worker import lifecycle, publishing
     from agentcore_review_worker.batching import make_batches
-    from agentcore_review_worker.findings import check_conclusion
     from agentcore_review_worker.models import (
         BatchInput,
         ChangeSet,
@@ -46,14 +39,29 @@ with workflow.unsafe.imports_passed_through():
         FixerInput,
         ListFilesInput,
         PublishInput,
-        PublishResult,
+        PullRequestOutcome,
         ResolveInput,
         ReviewContent,
         ReviewerInput,
+        ReviewerReport,
+        ReviewSummary,
         SnapshotInput,
         SnapshotRef,
         SynthesisInput,
     )
+
+
+def _reviewer_workflow_id(pr_id: str, round_number: int, category: str, batch: int | None = None) -> str:
+    suffix = f"-b{batch}" if batch is not None else ""
+    return f"{pr_id}-r{round_number}-{category}{suffix}"
+
+
+def _synthesis_workflow_id(pr_id: str, round_number: int) -> str:
+    return f"{pr_id}-r{round_number}-synthesis"
+
+
+def _fixer_workflow_id(pr_id: str, fix_number: int) -> str:
+    return f"{pr_id}-fix{fix_number}"
 
 
 @workflow.defn(name=PULL_REQUEST_WORKFLOW)
@@ -70,6 +78,7 @@ class PullRequestWorkflow:
     async def run(self, input: PullRequestInput) -> PullRequestOutcome:
         self._memo("waiting for changes")
         while True:
+            # Right after a round: moves to a newly deployed version, freeing old endpoints for make prune.
             await self._continue_as_new_if_needed()
             await workflow.wait_condition(lambda: self._next() is not None)
             await self._continue_as_new_if_needed()  # a deploy may have happened while waiting
@@ -94,10 +103,6 @@ class PullRequestWorkflow:
     @workflow.signal(name=SIGNAL_PR_CLOSED)
     def pr_closed(self, closed: PrClosed) -> None:
         self._closed = self._closed or closed
-
-    @workflow.query(name=QUERY_GET_FINDINGS)
-    def get_findings(self) -> list[Finding]:
-        return self._state.open_findings
 
     @property
     def _id(self) -> str:
@@ -155,11 +160,15 @@ class PullRequestWorkflow:
             else:
                 workflow.logger.error("round %d failed: %s", state.round, error.cause or error)
                 phase = f"round {state.round} failed, waiting for changes"
-                await self._report_failure(check, error)
+                reason = f"Round {state.round} failed: {error.cause or error}. Push a commit to retry."
+                try:
+                    await self._complete_check(check, "failure", "AI Review failed", reason)
+                except ActivityError as failure:
+                    workflow.logger.warning(
+                        "could not report the failed round on the check: %s", failure.cause or failure
+                    )
         finally:
             self._reviewing_sha = None
-            if state.pending_head_sha == state.last_reviewed_sha:
-                state.pending_head_sha = None
             self._memo(phase)
 
     async def _run_round(self, change: ChangeSet, check: CheckInput) -> bool:
@@ -167,15 +176,15 @@ class PullRequestWorkflow:
         state, number = self._state, self._state.round
         if not change.files:
             state.last_reviewed_sha = change.head_sha
-            await self._complete_check(check, unavailable=[])
+            await self._complete_check(check, *publishing.check_output(state.open_findings, []))
             return True
         snapshot = await self._snapshot(change.head_sha)
         title = f"Round {number}: reviewing {len(change.files)} files"
-        state.check_run_id = await self._set_check(check.model_copy(update={"title": title}))
+        await self._set_check(check.model_copy(update={"title": title}))
         reports, unavailable = await self._run_reviewers(change, snapshot)
         if not reports:
             # Publishing "no new finding" would pass a head nobody reviewed: the check fails instead.
-            await self._report_unavailable(check, unavailable)
+            await self._complete_check(check, "failure", *publishing.unavailable_check_output(number, unavailable))
             return False
         # IDs are committed to the state only once the review is published.
         new, next_finding_number = lifecycle.number_findings(reports, state.next_finding_number)
@@ -187,7 +196,6 @@ class PullRequestWorkflow:
                 still_open=still_open,
                 resolved_ids=resolved,
                 unavailable=unavailable,
-                excluded=change.excluded,
             )
         )
         kept = lifecycle.apply_summary(new, summary)
@@ -200,17 +208,15 @@ class PullRequestWorkflow:
             excluded=change.excluded,
             unavailable=unavailable,
         )
-        published = await self._publish(
+        comment_ids = await self._publish(
             PublishInput(pr=self._pr, head_sha=change.head_sha, workflow_id=self._id, content=content)
         )
         state.next_finding_number = next_finding_number
-        state.open_findings = still_open + [
-            f.model_copy(update={"comment_id": published.comment_ids.get(f.id)}) for f in kept
-        ]
+        state.open_findings = still_open + [f.model_copy(update={"comment_id": comment_ids.get(f.id)}) for f in kept]
         state.last_reviewed_sha = change.head_sha
         if resolved:
             await self._resolve(resolved)
-        await self._complete_check(check, unavailable)
+        await self._complete_check(check, *publishing.check_output(state.open_findings, unavailable))
         return True
 
     async def _run_reviewers(self, change: ChangeSet, snapshot: SnapshotRef) -> tuple[list[ReviewerReport], list[str]]:
@@ -231,7 +237,7 @@ class PullRequestWorkflow:
                     ),
                     open_findings=open_in_category,
                 )
-                jobs.append((reviewer_workflow_id(self._id, number, category, batch_number), label, reviewer))
+                jobs.append((_reviewer_workflow_id(self._id, number, category, batch_number), label, reviewer))
         slots = asyncio.Semaphore(change.max_parallel_agents)
 
         async def review(child_id: str, label: str, reviewer: ReviewerInput) -> ReviewerReport:
@@ -264,7 +270,7 @@ class PullRequestWorkflow:
             return await workflow.execute_child_workflow(
                 SynthesisWorkflow.run,
                 input,
-                id=synthesis_workflow_id(self._id, self._state.round),
+                id=_synthesis_workflow_id(self._id, self._state.round),
                 run_timeout=policies.CHILD_RUN_TIMEOUT,
                 static_summary="synthesis",
             )
@@ -272,10 +278,11 @@ class PullRequestWorkflow:
             workflow.logger.warning("synthesis failed, deterministic merge instead: %s", error.cause or error)
             return lifecycle.fallback_summary(input)
 
-    async def _publish(self, input: PublishInput) -> PublishResult:
+    async def _publish(self, input: PublishInput) -> dict[str, int]:
+        """The IDs of the inline comments, by finding ID."""
         try:
             return await workflow.execute_activity(
-                "publish_review", input, result_type=PublishResult, **policies.PUBLISH_REVIEW
+                "publish_review", input, result_type=dict[str, int], **policies.PUBLISH_REVIEW
             )
         except ActivityError as error:
             if not policies.failed_with(error, "GitHubUnprocessable"):
@@ -284,7 +291,7 @@ class PullRequestWorkflow:
             return await workflow.execute_activity(
                 "publish_review",
                 input.model_copy(update={"inline": False}),
-                result_type=PublishResult,
+                result_type=dict[str, int],
                 **policies.PUBLISH_REVIEW,
             )
 
@@ -311,27 +318,12 @@ class PullRequestWorkflow:
             pr = self._pr
             return SnapshotRef(owner=pr.owner, repo=pr.repo, installation_id=pr.installation_id, sha=sha)
 
-    async def _set_check(self, check: CheckInput) -> int:
-        return await workflow.execute_activity("set_check", check, result_type=int, **policies.SET_CHECK)
+    async def _set_check(self, check: CheckInput) -> None:
+        await workflow.execute_activity("set_check", check, **policies.SET_CHECK)
 
-    async def _complete_check(self, check: CheckInput, unavailable: list[str]) -> None:
-        title, summary = publishing.check_output(self._state.open_findings, unavailable)
-        conclusion = check_conclusion(self._state.open_findings)
+    async def _complete_check(self, check: CheckInput, conclusion: str, title: str, summary: str) -> None:
         update = {"status": "completed", "conclusion": conclusion, "title": title, "summary": summary}
-        self._state.check_run_id = await self._set_check(check.model_copy(update=update))
-
-    async def _report_unavailable(self, check: CheckInput, unavailable: list[str]) -> None:
-        title, summary = publishing.unavailable_check_output(self._state.round, unavailable)
-        update = {"status": "completed", "conclusion": "failure", "title": title, "summary": summary}
-        self._state.check_run_id = await self._set_check(check.model_copy(update=update))
-
-    async def _report_failure(self, check: CheckInput, error: ActivityError) -> None:
-        reason = f"Round {self._state.round} failed: {error.cause or error}. Push a commit to retry."
-        update = {"status": "completed", "conclusion": "failure", "title": "AI Review failed", "summary": reason}
-        try:
-            await self._set_check(check.model_copy(update=update))
-        except ActivityError as failure:
-            workflow.logger.warning("could not report the failed round on the check: %s", failure.cause or failure)
+        await self._set_check(check.model_copy(update=update))
 
     # --- fix ---
 
@@ -357,7 +349,7 @@ class PullRequestWorkflow:
             result: CommitResult = await workflow.execute_child_workflow(
                 FixerWorkflow.run,
                 fixer,
-                id=fixer_workflow_id(self._id, state.fix_count),
+                id=_fixer_workflow_id(self._id, state.fix_count),
                 run_timeout=policies.CHILD_RUN_TIMEOUT,
                 static_summary="fixer",
             )

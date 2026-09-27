@@ -1,5 +1,5 @@
-from agentcore_review_shared.contract import FileChange, Finding
-from agentcore_review_worker.models import ReviewContent
+from agentcore_review_shared.contract import Finding
+from agentcore_review_worker.models import FileChange, ReviewContent
 from agentcore_review_worker.publishing import (
     MAX_BODY_CHARS,
     MAX_INLINE_COMMENTS,
@@ -7,7 +7,6 @@ from agentcore_review_worker.publishing import (
     check_output,
     closing_comment,
     comment_body,
-    commit_message,
     split_changes,
     unavailable_check_output,
 )
@@ -42,21 +41,22 @@ def test_comment_body_carries_the_marker_and_the_suggestion():
 def test_findings_on_diff_lines_go_inline_and_the_rest_into_the_body():
     commentable = {"app/search.py": {10, 11, 12}}
     findings = [finding("F-001", line=11), finding("F-002", line=50), finding("F-003", line=11, end_line=13)]
-    payload = build_review(content(findings), commentable, MARKER)
+    payload = build_review(content(findings), commentable, MARKER, inline=True)
     assert [(c.path, c.line, c.side) for c in payload.comments] == [("app/search.py", 11, "RIGHT")]
     assert "<!-- finding:F-002 -->" in payload.body and "<!-- finding:F-003 -->" in payload.body
     assert payload.body.startswith(MARKER) and "Summary." in payload.body
 
 
 def test_multi_line_findings_use_start_line():
-    payload = build_review(content([finding("F-001", line=10, end_line=12)]), {"app/search.py": {10, 11, 12}}, MARKER)
+    commentable = {"app/search.py": {10, 11, 12}}
+    payload = build_review(content([finding("F-001", line=10, end_line=12)]), commentable, MARKER, inline=True)
     comment = payload.comments[0]
     assert (comment.start_line, comment.line, comment.start_side) == (10, 12, "RIGHT")
 
 
 def test_inline_comments_are_capped():
     findings = [finding(f"F-{i:03d}") for i in range(1, 26)]
-    payload = build_review(content(findings), {"app/search.py": {11}}, MARKER)
+    payload = build_review(content(findings), {"app/search.py": {11}}, MARKER, inline=True)
     assert len(payload.comments) == MAX_INLINE_COMMENTS
     assert payload.body.count("<!-- finding:") == 25 - MAX_INLINE_COMMENTS
 
@@ -65,6 +65,7 @@ def test_without_inline_comments_every_finding_is_in_the_body():
     payload = build_review(content([finding("F-001"), finding("F-002")]), {"app/search.py": {11}}, MARKER, inline=False)
     assert payload.comments == []
     assert payload.body.count("<!-- finding:") == 2
+    assert "### Findings" in payload.body and "### Other findings" not in payload.body
 
 
 def test_body_reports_resolved_open_excluded_and_unavailable():
@@ -74,29 +75,38 @@ def test_body_reports_resolved_open_excluded_and_unavailable():
         "excluded": ["uv.lock"],
         "unavailable": ["security"],
     }
-    body = build_review(content([], **extra), {}, MARKER).body
-    for expected in ("No new finding in this round.", "F-001", "F-002", "uv.lock", "security"):
+    body = build_review(content([], **extra), {}, MARKER, inline=True).body
+    for expected in ("F-001", "F-002", "uv.lock", "security"):
         assert expected in body
 
 
 def test_body_is_truncated_below_the_github_limit():
-    body = build_review(ReviewContent(round=1, summary_markdown="x" * 70_000, findings=[]), {}, MARKER).body
+    body = build_review(
+        ReviewContent(round=1, summary_markdown="x" * 70_000, findings=[]), {}, MARKER, inline=True
+    ).body
     assert len(body) <= MAX_BODY_CHARS + 20
     assert body.endswith("(truncated)")
 
 
 def test_check_output_counts_blocking_findings():
-    title, summary = check_output([finding("F-002", severity="low"), finding("F-001", severity="critical")])
+    _, title, summary = check_output([finding("F-002", severity="low"), finding("F-001", severity="critical")], [])
     assert title == "2 open findings, 1 blocking"
     assert summary.index("F-001") < summary.index("F-002")
-    assert check_output([])[0] == "No open finding"
+    assert check_output([], [])[1] == "No open finding"
+
+
+def test_check_is_red_only_for_blocking_findings():
+    assert check_output([], [])[0] == "success"
+    assert check_output([finding("F-1", severity="medium"), finding("F-2", severity="low")], [])[0] == "success"
+    assert check_output([finding("F-1", severity="low"), finding("F-2", severity="high")], [])[0] == "failure"
+    assert check_output([finding("F-1", severity="critical")], [])[0] == "failure"
 
 
 def test_check_output_names_the_unavailable_reviewers():
-    title, summary = check_output([finding("F-001", severity="low")], ["security", "performance (batch 2)"])
+    _, title, summary = check_output([finding("F-001", severity="low")], ["security", "performance (batch 2)"])
     assert title == "1 open finding, 0 blocking, 2 reviewers unavailable"
     assert "Not reviewed in this round (reviewer unavailable): security, performance (batch 2)." in summary
-    title, summary = check_output([], ["maintainability"])
+    _, title, summary = check_output([], ["maintainability"])
     assert title == "No open finding, 1 reviewer unavailable"
     assert "maintainability" in summary
 
@@ -117,11 +127,6 @@ def test_closing_comment_calls_out_a_bypass():
 
 def test_closing_comment_without_blocking_findings():
     assert closing_comment(None, [finding("F-002", severity="low")]) == "Merged with 1 open finding: F-002 (low)."
-
-
-def test_commit_message_ends_with_the_trailer():
-    trailer = "Review-Fix: pr-o-r-1/1"
-    assert commit_message("Fix SQL injection\n\n- F-001\n", trailer) == f"Fix SQL injection\n\n- F-001\n\n{trailer}"
 
 
 def test_split_changes_rejects_protected_and_escaping_paths():

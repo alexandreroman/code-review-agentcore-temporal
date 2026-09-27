@@ -10,9 +10,8 @@ import logging
 from collections.abc import Awaitable
 from typing import Any, Literal
 
-from agentcore_review_shared.contract import SIGNAL_FIX_REQUESTED, FixRequested, PrRef
+from agentcore_review_shared.contract import SIGNAL_FIX_REQUESTED, AgentCoreSession, FixRequested, PrRef
 from agentcore_review_shared.github import GitHubApp, GitHubError
-from agentcore_review_shared.identity import AgentCoreSession
 from pydantic import BaseModel
 from temporalio.client import Client
 
@@ -29,7 +28,6 @@ from .rules import (
     StopOutcome,
     can_run_commands,
     kill_comment,
-    kill_scope,
     kill_targets,
 )
 from .sessions import stop_sessions
@@ -69,7 +67,7 @@ async def finish_kill(event: dict, deadline: float) -> None:
     followup = KillFollowup.model_validate(event)
     fields = {"delivery": followup.delivery_id}
     outcomes = await _stop(followup.sessions, deadline, fields)
-    tally = followup.tally.add(outcomes.values())  # still unconfirmed: counted as failed
+    tally = followup.tally.add(outcomes.values())
     await _kill_feedback(runtime.github(), followup.pr, followup.comment_id, tally, fields)
     logger.info("kill follow-up", extra=fields | {"outcome": kill_comment(tally)})
 
@@ -86,7 +84,8 @@ async def _fix(command: RunCommand, client: Client, app: GitHubApp, fields: dict
 async def _kill(command: RunCommand, client: Client, app: GitHubApp, deadline: float, fields: dict[str, Any]) -> str:
     settings = runtime.settings()
     queue = await temporal_ops.workflow_task_queue(client, command.workflow_id)
-    if kill_scope(queue, settings.dev_task_queue) == "dev":
+    # A dev-queue PR is served by a local worker; with no workflow, /kill still clears production.
+    if queue == settings.dev_task_queue:
         await _best_effort(_reply(app, command.pr, DEV_KILL_REPLY), fields)
         return "/kill: dev worker"
     targets = kill_targets(await temporal_ops.poller_identities(client, settings.task_queue))

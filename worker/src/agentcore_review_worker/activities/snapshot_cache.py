@@ -34,13 +34,13 @@ def _fetch(bucket: str, key: str, target: Path) -> None:
     try:
         archive = work / "archive.tar.gz"
         s3().download_file(bucket, key, str(archive))
-        extract(archive, work / "repo")
+        _extract(archive, work / "repo")
         (work / "repo").rename(target)  # atomic: a reader sees the whole tree or nothing
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
 
-def extract(archive: Path, destination: Path) -> None:
+def _extract(archive: Path, destination: Path) -> None:
     """Extract a GitHub tarball without its top-level "{owner}-{repo}-{sha}/" directory."""
     destination.mkdir()
     with tarfile.open(archive, "r:gz") as tar:

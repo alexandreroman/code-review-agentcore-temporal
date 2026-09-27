@@ -9,7 +9,7 @@ import json
 
 from agentcore_review_shared.contract import Category, Finding
 
-from agentcore_review_worker.findings import sort_key
+from agentcore_review_worker.lifecycle import sort_key
 from agentcore_review_worker.limits import MAX_MODEL_CALLS
 from agentcore_review_worker.models import BatchPatches, FilePatch, SynthesisInput
 

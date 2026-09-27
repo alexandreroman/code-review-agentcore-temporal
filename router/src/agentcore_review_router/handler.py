@@ -17,7 +17,6 @@ from .routing import Ignore, RouterConfig, RunCommand, SendSignal, StartOrSignal
 from .signature import decode_body, verify_signature
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 Reply = tuple[int, str]
 
@@ -27,10 +26,10 @@ def handler(event: dict, context: Any) -> dict:
     if event.get(commands.FOLLOWUP_KEY) == "kill":
         runtime.run(_finish_kill(event, deadline))
         return {}
-    return runtime.run(handle_webhook(event, deadline))
+    return runtime.run(_handle_webhook(event, deadline))
 
 
-async def handle_webhook(event: dict, deadline: float) -> dict:
+async def _handle_webhook(event: dict, deadline: float) -> dict:
     started = time.monotonic()
     headers = {name.lower(): value for name, value in (event.get("headers") or {}).items()}
     fields: dict[str, Any] = {
@@ -45,21 +44,21 @@ async def handle_webhook(event: dict, deadline: float) -> dict:
 
 
 async def _process(event: dict, headers: dict[str, str], fields: dict[str, Any], deadline: float) -> Reply:
-    loaded = _load_router_config(fields)
-    if loaded is None:
-        return 503, "router not configured"
-    secret, config = loaded
     body = decode_body(event)
-    if not verify_signature(secret.webhook_secret, body, headers.get("x-hub-signature-256")):
+    signature = headers.get("x-hub-signature-256")
+    loaded = _load_router_config(fields)
+    valid = loaded is not None and verify_signature(loaded[0].webhook_secret, body, signature)
+    if loaded is not None and not valid:
         # A re-registered GitHub App rotates the webhook secret: a warm container's cache is stale
         # exactly once, so retry against a fresh secret before answering 401 for good.
         runtime.clear_github_app_secret()
         loaded = _load_router_config(fields)
-        if loaded is None:
-            return 503, "router not configured"
-        secret, config = loaded
-        if not verify_signature(secret.webhook_secret, body, headers.get("x-hub-signature-256")):
-            return 401, "invalid signature"
+        valid = loaded is not None and verify_signature(loaded[0].webhook_secret, body, signature)
+    if loaded is None:
+        return 503, "router not configured"
+    if not valid:
+        return 401, "invalid signature"
+    config = loaded[1]
     payload = load_payload(body)
     if payload is None:
         return 400, "body is not a JSON object"

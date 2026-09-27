@@ -11,11 +11,10 @@ from agentcore_review_shared.github import GitHubError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
 
-from ..errors import github_errors
 from ..markers import fix_trailer
 from ..models import CommitInput, CommitResult
-from ..publishing import commit_message, split_changes
-from .github_api import get, repo_path, send
+from ..publishing import split_changes
+from .github_api import get, github_errors, repo_path, send
 
 FILE_MODE = "100644"  # the fixer edits regular source files
 
@@ -54,7 +53,7 @@ async def commit_changes(input: CommitInput) -> CommitResult:
             "POST",
             f"{repo_path(pr)}/git/commits",
             {
-                "message": commit_message(input.plan.commit_message, trailer),
+                "message": f"{input.plan.commit_message.rstrip()}\n\n{trailer}",
                 "tree": tree["sha"],
                 "parents": [input.expected_head_sha],
             },

@@ -4,17 +4,26 @@ Each one is idempotent: a hidden marker or the check run's external ID identifie
 attempt already wrote.
 """
 
-from agentcore_review_shared.contract import CHECK_NAME, PrRef
+from agentcore_review_shared.contract import PrRef
 from agentcore_review_shared.github import GitHubError
 from temporalio import activity
 
-from ..errors import github_application_error, github_errors
-from ..github_client import github
 from ..hunks import commentable_lines
 from ..markers import closing_marker, extract_finding_ids, round_marker
-from ..models import CheckInput, ClosingInput, PublishInput, PublishResult, ResolveInput
+from ..models import CheckInput, ClosingInput, PublishInput, ResolveInput
 from ..publishing import build_review
-from .github_api import get, get_pages, repo_path, send, spaced_write
+from .github_api import (
+    get,
+    get_pages,
+    github,
+    github_application_error,
+    github_errors,
+    repo_path,
+    send,
+    spaced_write,
+)
+
+CHECK_NAME = "AI Review"
 
 THREADS_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!, $after: String) {
@@ -32,7 +41,7 @@ RESOLVE_THREAD = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id
 
 
 @activity.defn(name="set_check")
-async def set_check(input: CheckInput) -> int:
+async def set_check(input: CheckInput) -> None:
     """Create or update the AI Review check run of a round, found again by its external ID."""
     pr = input.pr
     with github_errors():
@@ -48,14 +57,13 @@ async def set_check(input: CheckInput) -> int:
         if input.title:
             body["output"] = {"title": input.title, "summary": input.summary or input.title}
         if existing is None:
-            run = await send(pr, "POST", f"{repo_path(pr)}/check-runs", {**body, "head_sha": input.head_sha})
+            await send(pr, "POST", f"{repo_path(pr)}/check-runs", {**body, "head_sha": input.head_sha})
         else:
-            run = await send(pr, "PATCH", f"{repo_path(pr)}/check-runs/{existing['id']}", body)
-    return run["id"]
+            await send(pr, "PATCH", f"{repo_path(pr)}/check-runs/{existing['id']}", body)
 
 
 @activity.defn(name="publish_review")
-async def publish_review(input: PublishInput) -> PublishResult:
+async def publish_review(input: PublishInput) -> dict[str, int]:
     """Publish the round's single COMMENT review, unless its round marker shows it already exists.
 
     Inline comments are validated against the pull request's hunks at the head; GitHub still answers
@@ -82,8 +90,7 @@ async def publish_review(input: PublishInput) -> PublishResult:
                 },
             )
         comments = await get_pages(pr, f"{repo_path(pr)}/pulls/{pr.number}/reviews/{review['id']}/comments")
-    comment_ids = {fid: c["id"] for c in comments for fid in extract_finding_ids(c.get("body"))}
-    return PublishResult(review_id=review["id"], comment_ids=comment_ids)
+    return {fid: c["id"] for c in comments for fid in extract_finding_ids(c.get("body"))}
 
 
 @activity.defn(name="resolve_threads")

@@ -10,8 +10,9 @@ from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
 
+import boto3
 import httpx2 as httpx
-from agentcore_review_shared.github import API_URL, GitHubApp
+from agentcore_review_shared.github import API_URL, app_jwt
 from agentcore_review_shared.secrets import GITHUB_APP_SECRET, GitHubAppSecret
 from botocore.exceptions import ClientError
 
@@ -82,12 +83,11 @@ def convert(http: httpx.Client, code: str) -> GitHubAppSecret:
         client_id=data["client_id"],
         private_key=data["pem"],
         webhook_secret=data["webhook_secret"],
-        html_url=data["html_url"],
     )
 
 
 def install_url(app: GitHubAppSecret) -> str:
-    return f"{app.html_url}/installations/new"
+    return f"https://github.com/apps/{app.slug}/installations/new"
 
 
 def is_organization(http: httpx.Client, owner: str) -> bool:
@@ -97,7 +97,7 @@ def is_organization(http: httpx.Client, owner: str) -> bool:
 
 
 def installation_id(http: httpx.Client, app: GitHubAppSecret, owner: str, repo: str) -> int | None:
-    token = GitHubApp(app.client_id, app.private_key).jwt()
+    token = app_jwt(app.client_id, app.private_key)
     response = http.get(
         f"{API_URL}/repos/{owner}/{repo}/installation", headers={**ACCEPT, "Authorization": f"Bearer {token}"}
     )
@@ -154,9 +154,14 @@ def _registered_app(client) -> GitHubAppSecret | None:
     return GitHubAppSecret.model_validate_json(value)
 
 
-def register(args: argparse.Namespace) -> None:
-    import boto3
+def _require_registered_app() -> GitHubAppSecret:
+    app = _registered_app(boto3.client("secretsmanager"))
+    if app is None:
+        sys.exit("The GitHub App is not registered yet: run make github-app")
+    return app
 
+
+def register(args: argparse.Namespace) -> None:
     client = boto3.client("secretsmanager")
     existing = _registered_app(client)
     if existing and not args.force:
@@ -191,11 +196,7 @@ def register(args: argparse.Namespace) -> None:
 
 
 def check_install(args: argparse.Namespace) -> None:
-    import boto3
-
-    app = _registered_app(boto3.client("secretsmanager"))
-    if app is None:
-        sys.exit("The GitHub App is not registered yet: run make github-app")
+    app = _require_registered_app()
     with httpx.Client(timeout=20) as http:
         if installation_id(http, app, args.owner, args.repo) is not None:
             print(f"GitHub App {app.slug} is installed on {args.owner}/{args.repo}.")
@@ -204,11 +205,7 @@ def check_install(args: argparse.Namespace) -> None:
 
 
 def print_installation_id(args: argparse.Namespace) -> None:
-    import boto3
-
-    app = _registered_app(boto3.client("secretsmanager"))
-    if app is None:
-        sys.exit("The GitHub App is not registered yet: run make github-app")
+    app = _require_registered_app()
     with httpx.Client(timeout=20) as http:
         found = installation_id(http, app, args.owner, args.repo)
     if found is None:
@@ -216,7 +213,7 @@ def print_installation_id(args: argparse.Namespace) -> None:
     print(found)
 
 
-def main(argv: list[str] | None = None) -> None:
+def main() -> None:
     parser = argparse.ArgumentParser(prog="agentcore_review_tools.github_app")
     commands = parser.add_subparsers(dest="command", required=True)
     reg = commands.add_parser("register", help="register the app through the manifest flow")
@@ -231,7 +228,7 @@ def main(argv: list[str] | None = None) -> None:
     installation = commands.add_parser("installation-id", help="print the app's installation ID on a repository")
     installation.add_argument("--owner", required=True)
     installation.add_argument("--repo", required=True)
-    args = parser.parse_args(argv)
+    args = parser.parse_args()
     handlers = {"register": register, "check-install": check_install, "installation-id": print_installation_id}
     try:
         handlers[args.command](args)

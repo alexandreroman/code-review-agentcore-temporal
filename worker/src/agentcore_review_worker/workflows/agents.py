@@ -96,10 +96,17 @@ def navigation_tools(snapshot: SnapshotRef) -> list[AgentTool]:
     return [_SnapshotBound(activity_as_tool(fn, **TOOL_ACTIVITY), snapshot) for fn in activities]
 
 
-def new_agent(*, system_prompt: str, output: type[BaseModel], tools: list[AgentTool], summary: str) -> TemporalAgent:
-    return TemporalAgent(
+async def run_agent[T: BaseModel](
+    *, name: str, system_prompt: str, tools: list[AgentTool], output: type[T], prompt: str | list[dict]
+) -> T:
+    """Run an agent to its structured output.
+
+    A refusal ends the Strands loop without structured output: the agent is then unavailable, with a
+    final error (reading the missing output would fail the workflow task forever instead).
+    """
+    agent = TemporalAgent(
         model=MODEL_NAME,
-        summary=summary,  # labels the model activities in Temporal UI
+        summary=name,  # labels the model activities in Temporal UI
         **MODEL_ACTIVITY,
         system_prompt=system_prompt,
         tools=tools,
@@ -107,14 +114,6 @@ def new_agent(*, system_prompt: str, output: type[BaseModel], tools: list[AgentT
         hooks=[RoundLimit(output.__name__)],
         callback_handler=None,  # no printing from workflow code
     )
-
-
-async def run_agent[T: BaseModel](agent: TemporalAgent, prompt: str | list[dict], output: type[T], name: str) -> T:
-    """Run the agent to its structured output.
-
-    A refusal ends the Strands loop without structured output: the agent is then unavailable, with a
-    final error (reading the missing output would fail the workflow task forever instead).
-    """
     result = await agent.invoke_async(prompt, limits={"turns": HARD_TURN_LIMIT})
     if result.structured_output is None:
         raise ApplicationError(

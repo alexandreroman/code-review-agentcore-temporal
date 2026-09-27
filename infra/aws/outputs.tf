@@ -47,12 +47,3 @@ output "temporal_external_id" {
   value     = random_password.external_id.result
   sensitive = true
 }
-
-output "secret_arns" {
-  value = {
-    github_app  = aws_secretsmanager_secret.github_app.arn
-    anthropic   = aws_secretsmanager_secret.anthropic.arn
-    worker_cert = aws_secretsmanager_secret.worker_cert.arn
-    router_cert = aws_secretsmanager_secret.router_cert.arn
-  }
-}

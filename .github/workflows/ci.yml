@@ -21,6 +21,5 @@ jobs:
         with:
           tofu_version: "1.12.6"
           tofu_wrapper: false
-      - run: uv python install 3.14
       - run: uv sync --all-packages --locked
       - run: make check

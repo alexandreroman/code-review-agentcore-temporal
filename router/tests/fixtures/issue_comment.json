@@ -1,8 +1,8 @@
 {
   "action": "created",
   "issue": {"number": 3, "pull_request": {"url": "https://api.github.com/repos/octocat/agentcore-review-demo-app/pulls/3"}},
-  "comment": {"id": 555, "body": "/fix", "performed_via_github_app": null},
+  "comment": {"id": 555, "body": "/fix"},
   "repository": {"name": "agentcore-review-demo-app", "owner": {"login": "octocat"}},
-  "sender": {"login": "octocat", "type": "User"},
+  "sender": {"login": "octocat"},
   "installation": {"id": 90210}
 }

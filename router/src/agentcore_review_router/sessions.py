@@ -5,7 +5,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor, wait
 from typing import Any
 
-from agentcore_review_shared.identity import AgentCoreSession
+from agentcore_review_shared.contract import AgentCoreSession
 from botocore.exceptions import BotoCoreError, ClientError
 
 from .rules import StopOutcome, stop_outcome
@@ -21,8 +21,6 @@ def stop_sessions(
 ) -> dict[AgentCoreSession, StopOutcome]:
     """Outcome per session; "retry" marks a stop not confirmed before `deadline` (time.monotonic() clock)."""
     outcomes: dict[AgentCoreSession, StopOutcome] = dict.fromkeys(sessions, "retry")
-    if not sessions:
-        return outcomes
     pool = ThreadPoolExecutor(max_workers=min(MAX_PARALLEL_STOPS, len(sessions)))
     futures = {pool.submit(_stop, client, runtime_arn, session, deadline, fields): session for session in sessions}
     done, _ = wait(futures, timeout=max(0.0, deadline - time.monotonic()))

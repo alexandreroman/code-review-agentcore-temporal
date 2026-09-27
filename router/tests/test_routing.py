@@ -1,4 +1,3 @@
-import copy
 import json
 from pathlib import Path
 
@@ -13,24 +12,23 @@ from agentcore_review_router.routing import (
     route,
 )
 from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed
+from temporalio.common import WorkflowIDReusePolicy
 
 FIXTURES = Path(__file__).parent / "fixtures"
-CONFIG = RouterConfig(
-    prod_queue="review", dev_queue="review-dev", dev_branch_prefix="dev/", app_id=5078593, app_slug="tar-bot"
-)
+CONFIG = RouterConfig(prod_queue="review", dev_queue="review-dev", dev_branch_prefix="dev/", app_slug="tar-bot")
 WF = "pr-octocat-agentcore-review-demo-app-3"
 
 
 def load(name: str) -> dict:
-    return copy.deepcopy(json.loads((FIXTURES / f"{name}.json").read_text()))
+    return json.loads((FIXTURES / f"{name}.json").read_text())
 
 
 @pytest.mark.parametrize(
     ("action", "policy"),
     [
-        ("opened", "allow_duplicate_failed_only"),
-        ("synchronize", "allow_duplicate_failed_only"),
-        ("reopened", "allow_duplicate"),
+        ("opened", WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY),
+        ("synchronize", WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY),
+        ("reopened", WorkflowIDReusePolicy.ALLOW_DUPLICATE),
     ],
 )
 def test_pr_updates_start_or_signal(action, policy):
@@ -57,7 +55,7 @@ def test_dev_branch_goes_to_the_dev_queue():
 def test_bot_synchronize_is_still_routed():
     payload = load("pull_request")
     payload["action"] = "synchronize"
-    payload["sender"] = {"login": "tar-bot[bot]", "type": "Bot"}
+    payload["sender"] = {"login": "tar-bot[bot]"}
     assert isinstance(route("pull_request", payload, "d", CONFIG), StartOrSignal)
 
 
@@ -74,7 +72,7 @@ def test_merged_close_signals_the_merger():
 def test_unmerged_close_by_the_reset_bot_is_routed():
     payload = load("pull_request")
     payload["action"] = "closed"
-    payload["sender"] = {"login": "tar-bot[bot]", "type": "Bot"}
+    payload["sender"] = {"login": "tar-bot[bot]"}
     result = route("pull_request", payload, "d", CONFIG)
     assert isinstance(result, SendSignal)
     assert result.payload == PrClosed(merged=False, closed_by="tar-bot[bot]", delivery_id="d")
@@ -112,13 +110,7 @@ def test_non_commands_are_ignored(body):
 
 def test_bot_comments_are_ignored_by_login():
     payload = load("issue_comment")
-    payload["sender"] = {"login": "tar-bot[bot]", "type": "Bot"}
-    assert isinstance(route("issue_comment", payload, "d", CONFIG), Ignore)
-
-
-def test_bot_comments_are_ignored_by_app_id():
-    payload = load("issue_comment")
-    payload["comment"]["performed_via_github_app"] = {"id": 5078593}
+    payload["sender"] = {"login": "tar-bot[bot]"}
     assert isinstance(route("issue_comment", payload, "d", CONFIG), Ignore)
 
 

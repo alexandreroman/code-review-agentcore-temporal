@@ -10,6 +10,8 @@ from pathlib import Path, PurePosixPath
 
 import regex
 
+from agentcore_review_worker.hunks import git_lines
+
 MAX_GLOB_RESULTS = 500
 MAX_GREP_RESULTS = 50
 MAX_READ_LINES = 400
@@ -21,74 +23,51 @@ GREP_TIME_BUDGET = 10.0
 _BINARY_SNIFF_BYTES = 8_192
 
 
-class _OutsideRepository(ValueError):
-    pass
+class _ToolError(ValueError):
+    """An invalid tool argument; the message is returned to the agent after "Error: "."""
 
 
-class _InvalidArgument(ValueError):
-    pass
-
-
-def _coerce_int(value: object, name: str) -> int | None:
+def _coerce_int(value: int | str | None, name: str) -> int | None:
     """Coerce an offset/limit argument to an int, or None if it was not given.
 
-    Accepts int, None, or a string holding a base-10 integer (an LLM may quote a
-    numeral). Anything else — including bool and float — is invalid.
+    An LLM may quote a numeral, so a string holding an integer is accepted too.
     """
     if value is None:
         return None
-    if isinstance(value, bool):
-        raise _InvalidArgument(f"{name} must be an integer, got {value!r}.")
-    if isinstance(value, int):
-        return value
-    if isinstance(value, str):
-        try:
-            return int(value)
-        except ValueError:
-            raise _InvalidArgument(f"{name} must be an integer, got {value!r}.") from None
-    raise _InvalidArgument(f"{name} must be an integer, got {value!r}.")
+    try:
+        return int(value)
+    except TypeError, ValueError:
+        raise _ToolError(f"{name} must be an integer, got {value!r}.") from None
 
 
 def _resolve(root: Path, relative: str | None) -> Path:
-    base = root.resolve()
-    text = relative or "."
-    # A lone surrogate (e.g. from malformed agent input) cannot round-trip
-    # through the filesystem; fail here with a plain ValueError rather than
-    # deeper inside path resolution, where a NUL byte also raises ValueError.
-    text.encode()
-    target = (base / text).resolve()
-    if target != base and base not in target.parents:
-        raise _OutsideRepository(relative)
+    """Resolve a path given by the agent against the (already resolved) repository root."""
+    try:
+        target = (root / (relative or ".")).resolve()
+    except ValueError as exc:
+        raise _ToolError(f"invalid path {relative!r}: {exc}") from None
+    if not target.is_relative_to(root):
+        raise _ToolError(f"path {relative!r} is outside the repository.")
     return target
 
 
 def _inside(root: Path, candidate: Path) -> bool:
-    resolved = candidate.resolve()
-    return resolved == root or root in resolved.parents
+    return candidate.resolve().is_relative_to(root)
+
+
+def _is_binary(head: bytes) -> bool:
+    """Whether a file is binary, judged by a NUL byte in its first bytes."""
+    return b"\x00" in head[:_BINARY_SNIFF_BYTES]
 
 
 def _read_text(path: Path) -> str | None:
     """The file as text, or None for a binary file; the binary test reads only the first bytes."""
     with path.open("rb") as handle:
         head = handle.read(_BINARY_SNIFF_BYTES)
-        if b"\x00" in head:
+        if _is_binary(head):
             return None
         data = head + handle.read()
     return data.decode("utf-8", errors="replace")
-
-
-def _git_lines(text: str) -> list[str]:
-    """Split text into lines the way git does: on "\\n" only.
-
-    str.splitlines() also breaks on "\\x0c", "\\v", "\\x1c"-"\\x1e", "\\x85" and
-    a lone "\\r", which would miscount lines relative to GitHub. A trailing
-    "\\r" (CRLF) is stripped from each line, and the empty element produced by
-    a trailing newline is dropped.
-    """
-    split = text.split("\n")
-    if split and split[-1] == "":
-        split.pop()
-    return [line.removesuffix("\r") for line in split]
 
 
 def _clip(text: str, limit: int) -> str:
@@ -105,13 +84,11 @@ def _glob_output(matches: list[str]) -> str:
 
 
 def glob_files(root: Path, pattern: str, path: str | None = None) -> str:
-    base_root = root.resolve()
+    root = root.resolve()
     try:
         base = _resolve(root, path)
-    except _OutsideRepository:
-        return f"Error: path {path!r} is outside the repository."
-    except ValueError as exc:
-        return f"Error: invalid path {path!r}: {exc}"
+    except _ToolError as exc:
+        return f"Error: {exc}"
     if not base.exists():
         return f"Error: path {path!r} not found."
     if not base.is_dir():
@@ -120,9 +97,7 @@ def glob_files(root: Path, pattern: str, path: str | None = None) -> str:
         candidates = list(base.glob(pattern))
     except (ValueError, NotImplementedError) as exc:
         return f"Error: invalid glob pattern {pattern!r}: {exc}"
-    return _glob_output(
-        sorted(str(p.relative_to(base_root)) for p in candidates if p.is_file() and _inside(base_root, p))
-    )
+    return _glob_output(sorted(str(p.relative_to(root)) for p in candidates if p.is_file() and _inside(root, p)))
 
 
 def _validate_glob_pattern(pattern: str) -> None:
@@ -156,47 +131,51 @@ def glob_paths(paths: list[str], pattern: str, path: str | None = None) -> str:
 
 
 def _matches_glob(relative: PurePosixPath, glob: str) -> bool:
-    """Match a relative path the way Glob does, including "**" segments.
-
-    PurePosixPath.match treats "**" like "*" and anchors on the right, so it
-    misses top-level files and over-restricts patterns like "app/**/*.py".
-    full_match does not have that problem, but as a safety net we also try
-    the pattern with a leading "**/" removed, which allows zero directories.
-    """
+    """A pattern without "/" matches the file name at any depth (like rg --glob); otherwise the whole relative path."""
     if "/" not in glob:
         return PurePosixPath(relative.name).full_match(glob)
-    if relative.full_match(glob):
-        return True
-    trimmed = glob.removeprefix("**/")
-    return trimmed != glob and relative.full_match(trimmed)
+    return relative.full_match(glob)
 
 
-def grep_files(
-    root: Path, pattern: str, path: str | None = None, glob: str | None = None, time_budget: float = GREP_TIME_BUDGET
-) -> str:
+def _grep_text(compiled: regex.Pattern, text: str, relative: str, deadline: float) -> tuple[list[str], bool]:
+    """The matching lines of one file, and whether the time budget ran out while scanning it."""
+    hits: list[str] = []
+    for number, line in enumerate(git_lines(text), start=1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return hits, True
+        try:
+            # concurrent=True releases the GIL, so the activity keeps heartbeating meanwhile.
+            found = compiled.search(line, timeout=remaining, concurrent=True)
+        except TimeoutError:
+            return hits, True
+        if found:
+            hits.append(f"{relative}:{number}: {_clip(line.strip(), MAX_GREP_LINE_CHARS)}")
+    return hits, False
+
+
+def grep_files(root: Path, pattern: str, path: str | None = None, glob: str | None = None) -> str:
     try:
         compiled = regex.compile(pattern)
     except (regex.error, ValueError) as exc:
         return f"Error: invalid regular expression {pattern!r}: {exc}"
-    base_root = root.resolve()
+    root = root.resolve()
     try:
         base = _resolve(root, path)
-    except _OutsideRepository:
-        return f"Error: path {path!r} is outside the repository."
-    except ValueError as exc:
-        return f"Error: invalid path {path!r}: {exc}"
+    except _ToolError as exc:
+        return f"Error: {exc}"
     if not base.exists():
         return f"Error: path {path!r} not found."
     candidates = [base] if base.is_file() else sorted(base.rglob("*"))
-    deadline = time.monotonic() + time_budget
+    deadline = time.monotonic() + GREP_TIME_BUDGET
     hits: list[str] = []
     total = too_large = 0
     stopped = False
     for candidate in candidates:
-        if not candidate.is_file() or not _inside(base_root, candidate):
+        if not candidate.is_file() or not _inside(root, candidate):
             continue
-        relative = candidate.relative_to(base_root)
-        if glob and not _matches_glob(PurePosixPath(relative.as_posix()), glob):
+        relative = PurePosixPath(candidate.relative_to(root).as_posix())
+        if glob and not _matches_glob(relative, glob):
             continue
         if candidate.stat().st_size > MAX_FILE_BYTES:
             too_large += 1
@@ -204,20 +183,9 @@ def grep_files(
         text = _read_text(candidate)
         if text is None:
             continue
-        for number, line in enumerate(_git_lines(text), start=1):
-            remaining = deadline - time.monotonic()
-            try:
-                if remaining <= 0:
-                    raise TimeoutError
-                # concurrent=True releases the GIL, so the activity keeps heartbeating meanwhile.
-                found = compiled.search(line, timeout=remaining, concurrent=True)
-            except TimeoutError:
-                stopped = True
-                break
-            if found:
-                total += 1
-                if len(hits) < MAX_GREP_RESULTS:
-                    hits.append(f"{relative.as_posix()}:{number}: {_clip(line.strip(), MAX_GREP_LINE_CHARS)}")
+        file_hits, stopped = _grep_text(compiled, text, str(relative), deadline)
+        total += len(file_hits)
+        hits.extend(file_hits[: MAX_GREP_RESULTS - len(hits)])
         if stopped:
             break
     notes = []
@@ -227,18 +195,17 @@ def grep_files(
         notes.append(f"... skipped {too_large} files larger than {MAX_FILE_BYTES} bytes")
     if stopped:
         notes.append(
-            f"... search stopped after {time_budget:g} s: narrow the path or glob, or simplify the regular expression"
+            f"... search stopped after {GREP_TIME_BUDGET:g} s: "
+            "narrow the path or glob, or simplify the regular expression"
         )
     return "\n".join([*(hits or ["No matches found."]), *notes])
 
 
 def read_file(root: Path, file_path: str, offset: int | str | None = None, limit: int | str | None = None) -> str:
     try:
-        target = _resolve(root, file_path)
-    except _OutsideRepository:
-        return f"Error: path {file_path!r} is outside the repository."
-    except ValueError as exc:
-        return f"Error: invalid path {file_path!r}: {exc}"
+        target = _resolve(root.resolve(), file_path)
+    except _ToolError as exc:
+        return f"Error: {exc}"
     if target.is_dir():
         return f"Error: {file_path!r} is a directory: use Glob to list its files."
     if not target.is_file():
@@ -254,15 +221,15 @@ def render_file(file_path: str, data: bytes, offset: int | str | None = None, li
     try:
         offset = _coerce_int(offset, "offset")
         limit = _coerce_int(limit, "limit")
-    except _InvalidArgument as exc:
+    except _ToolError as exc:
         return f"Error: {exc}"
     if limit is not None and limit < 1:
         return "Error: limit must be at least 1."
-    if b"\x00" in data[:_BINARY_SNIFF_BYTES]:
+    if _is_binary(data):
         return f"Error: {file_path!r} is a binary file."
     if len(data) > MAX_FILE_BYTES:
         return f"Error: {file_path!r} is too large to read ({len(data)} bytes; limit {MAX_FILE_BYTES})."
-    lines = _git_lines(data.decode("utf-8", errors="replace"))
+    lines = git_lines(data.decode("utf-8", errors="replace"))
     if not lines:
         return "(empty file)"
     start = max(1, offset or 1)
@@ -271,8 +238,8 @@ def render_file(file_path: str, data: bytes, offset: int | str | None = None, li
     requested = min(limit or MAX_READ_LINES, MAX_READ_LINES)
     window: list[str] = []
     size = 0
-    for number in range(start, min(len(lines), start + requested - 1) + 1):
-        rendered = f"{number:6d}\t{_clip(lines[number - 1], MAX_READ_LINE_CHARS)}"
+    for number, line in enumerate(lines[start - 1 : start - 1 + requested], start=start):
+        rendered = f"{number:6d}\t{_clip(line, MAX_READ_LINE_CHARS)}"
         if window and size + len(rendered.encode()) + 1 > MAX_READ_BYTES:
             break
         window.append(rendered)

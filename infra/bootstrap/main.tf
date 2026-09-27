@@ -72,11 +72,3 @@ resource "aws_s3_bucket_server_side_encryption_configuration" "state" {
     bucket_key_enabled = true
   }
 }
-
-output "state_bucket" {
-  value = aws_s3_bucket.state.bucket
-}
-
-output "kms_alias" {
-  value = aws_kms_alias.state.name
-}

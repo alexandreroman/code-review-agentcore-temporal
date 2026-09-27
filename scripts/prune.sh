@@ -11,24 +11,16 @@ source scripts/lib.sh
 OUTPUTS=$(aws_outputs)
 CURRENT_BUILD=$(jq -r '.current_build.value // ""' <<<"$OUTPUTS")
 
-# describe_version BUILD_ID: prints the version's JSON, or nothing if it
-# does not exist any more.
-describe_version() {
-  tcli worker deployment describe-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$1" -o json \
-    2>/dev/null || true
-}
-
-PRUNABLE=()
-VERSION_EXISTS=()
+PRUNABLE=() # endpoints to drop
+DRAINED=()  # existing drained versions to delete
 while IFS= read -r name; do
   [[ -n "$name" && "$name" != "$CURRENT_BUILD" ]] || continue
   version=$(describe_version "$name")
   if [[ -z "$version" ]]; then
     PRUNABLE+=("$name")
-    VERSION_EXISTS+=(false)
   elif jq -e '.drainageInfo.drainageStatus == "drained"' <<<"$version" >/dev/null 2>&1; then
     PRUNABLE+=("$name")
-    VERSION_EXISTS+=(true)
+    DRAINED+=("$name")
   fi
 done < <(jq -r '.endpoints.value // {} | keys[]' <<<"$OUTPUTS")
 
@@ -38,13 +30,9 @@ if [[ ${#PRUNABLE[@]} -eq 0 ]]; then
 fi
 
 echo "Pruning ${PRUNABLE[*]}"
-aws_apply "" "${PRUNABLE[@]}"
+scripts/infra.sh "$CURRENT_BUILD" "${PRUNABLE[@]}"
 
-for i in "${!PRUNABLE[@]}"; do
-  [[ "${VERSION_EXISTS[$i]}" == true ]] || continue
-  name="${PRUNABLE[$i]}"
-  if ! tcli worker deployment delete-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$name" \
-    --skip-drainage; then
-    echo "warning: version $name cannot be deleted yet (pollers stay listed ~5 min): re-run make prune later" >&2
-  fi
+# The ${arr[@]+...} form keeps an empty array safe under set -u in bash 3.2.
+for name in ${DRAINED[@]+"${DRAINED[@]}"}; do
+  delete_version "$name" || true
 done

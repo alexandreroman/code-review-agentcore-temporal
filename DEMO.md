@@ -3,12 +3,12 @@
 A 15-minute talk with two screens only: **GitHub** and **Temporal UI**.
 Four moments, in this order:
 
-| # | Moment | What the audience sees |
-|---|---|---|
-| B | Scale-from-zero | No worker at rest; AgentCore starts one for the PR |
-| C | Parallel agents | Three reviewers as child workflows, then a synthesis |
-| A | Durability | `/kill` stops the sessions; the review resumes |
-| D | Human in the loop | `/fix`: an agent pushes a fix, the check turns green |
+| # | Moment            | What the audience sees                               |
+|---|-------------------|------------------------------------------------------|
+| 1 | Scale from zero   | No worker at rest; Temporal starts one on AgentCore  |
+| 2 | Parallel agents   | Three reviewers as child workflows, then a synthesis |
+| 3 | Durability        | `/kill` stops the sessions; the review resumes       |
+| 4 | Human in the loop | `/fix`: an agent pushes a fix, the check turns green |
 
 `<owner>` below is the owner of the demo repository
 `agentcore-review-demo-app`.
@@ -23,9 +23,11 @@ On a stable network, never on conference Wi-Fi:
 3. Validate: `/e2e-validation full` in Claude Code (about 30 minutes). It
    checks all four moments, the reset, the dev mode and the return to zero.
 4. Check the Anthropic console: credits and rate limits for a few reviews.
-5. Do not commit to `pyproject.toml`, `uv.lock`, `shared/`, `worker/`,
-   `router/pyproject.toml` or `tools/pyproject.toml` afterwards: the next
-   `make up` would build and push a new image.
+5. Afterwards, leave `pyproject.toml`, `uv.lock`, the member
+   `pyproject.toml` files, `shared/src/`, `worker/src/` and
+   `worker/Dockerfile` untouched, committed or not: the build ID hashes
+   these paths, so any change makes the next `make up` build and push a
+   new image. Docs and tests are safe to edit.
 
 ## Pre-stage checklist (30 minutes before)
 
@@ -52,31 +54,32 @@ On a stable network, never on conference Wi-Fi:
      `WorkflowType="PullRequestWorkflow"`;
    - Temporal UI: **Worker Deployments**, `agentcore-review-demo-worker`;
    - hidden, for plan B: the same compare page with `dev/customer-search`,
-     and a terminal at the repository root.
+     and a terminal at the repository root (run `make dev` once, then stop
+     it, so that its next start is fast).
 8. **Readability**: browser zoom at 150 to 175 %, terminal font at 20 pt
    or more, bookmarks bar hidden, notifications off (Do Not Disturb), chat
    and mail closed.
 
 ## Run-through (15 minutes)
 
-| Time | Do | Show | Moment |
-|---|---|---|---|
-| 0:00 | Architecture slide | GitHub, router, Temporal, AgentCore | — |
-| 2:00 | Open the PR (compare tab) | Workflow starts, then a session | B |
-| 3:00 | Open the workflow in Temporal UI | Three reviewers in parallel | C |
-| 4:00 | Comment `/kill` on the PR | Sessions stop, work resumes | A |
-| 5:30 | Back to GitHub | Review, red `AI Review`, idle queue | D, B |
-| 6:30 | Comment `/fix` | Cold start, the fixer pushes a commit | D |
-| 7:30 | Watch the new commit | Round 2, threads resolved, green | — |
-| 9:00 | Merge the PR | Workflow completes with its outcome | — |
-| 9:30 | Buffer | Code tour, questions | — |
+| Time | Do                   | Show                                  | Moment |
+|------|----------------------|---------------------------------------|--------|
+| 0:00 | Architecture slide   | GitHub, router, Temporal, AgentCore   | —      |
+| 2:00 | Open the PR          | Workflow starts, then a session       | 1      |
+| 3:00 | Open the workflow    | Three reviewers in parallel           | 2      |
+| 4:00 | Comment `/kill`      | Sessions stop, work resumes           | 3      |
+| 5:30 | Back to GitHub       | Review, red `AI Review`, idle queue   | 4, 1   |
+| 6:30 | Comment `/fix`       | Cold start, the fixer pushes a commit | 4      |
+| 7:30 | Watch the new commit | Round 2, threads resolved, green      | —      |
+| 9:00 | Merge the PR         | Workflow completes with its outcome   | —      |
+| 9:30 | Buffer               | Code tour, questions                  | —      |
 
 Talking points:
 
-- **2:00, scale-from-zero.** Title "Add customer search & order history",
-  **Create pull request**. In Temporal UI, the `pr-…` workflow starts; in
-  Worker Deployments, no poller existed before the PR, then an AgentCore
-  session appears within seconds.
+- **2:00, scale from zero.** From the compare tab, title "Add customer
+  search & order history", **Create pull request**. In Temporal UI, the
+  `pr-…` workflow starts; in Worker Deployments, no poller existed before
+  the PR, then Temporal starts an AgentCore session within seconds.
 - **3:00, parallel agents.** The parent starts `…-r1-security`,
   `…-r1-performance` and `…-r1-maintainability`. Open one: each model
   call is an activity; `Grep`, `Glob` and `Read` tool calls explore the
@@ -114,31 +117,29 @@ workflow. Switch to the local worker, same Temporal Cloud namespace:
 3. Play the same scenario. Instead of `/kill`, press `Ctrl-C` on the local
    worker during the review, then run `make dev` again: the interrupted
    activity resumes on the new worker. A `/kill` comment on this PR only
-   answers "dev worker: Ctrl-C is your friend".
+   answers "Dev worker: Ctrl-C is your friend."
 4. Scale-from-zero and the session kill are lost; everything else is
    identical.
 
-Prepare it with the pre-stage checklist: the hidden tab, the terminal, and
-one `make dev` run beforehand so that its start is fast.
+Everything it needs is in the pre-stage checklist.
 
 ## Network
 
 - **Slow uplinks.** Conference and hotel Wi-Fi can upload as slowly as
   80 KB/s. Deploy the day before; on stage only webhooks and API calls
   travel.
-- **Temporal CLI on unstable networks.** The Go CLI (used by `make deploy`
-  and `make kill-sessions`) can fail with "context deadline exceeded" or a
-  TLS EOF while the workers and the router work fine. Retry, or switch to
-  the hotspot. The stage path itself does not use the CLI.
+- **Temporal CLI on unstable networks.** `make deploy` and
+  `make kill-sessions` can fail with "context deadline exceeded" or a TLS
+  EOF: retry, or switch to the hotspot.
 - **Hotspot.** Test it with `make ping` before the talk. VPNs can make
   things worse: disconnect them if the network is unstable.
 
 ## Recovery
 
-| Symptom | Action |
-|---|---|
-| No workflow after the PR | App settings, Recent Deliveries: Redeliver |
-| Workflow started, no worker after 30 s | Plan B |
-| `/kill` answers nothing | Carry on: the review completes anyway |
-| Check red after `/fix` | Admin merge: the outcome and a comment trace it |
-| Review slower than 3 minutes | Tour the history meanwhile |
+| Symptom                        | Action                                     |
+|--------------------------------|--------------------------------------------|
+| No workflow after the PR       | App settings, Recent Deliveries: Redeliver |
+| No worker 30 s after the start | Plan B                                     |
+| `/kill` answers nothing        | Carry on: the review completes anyway      |
+| Check red after `/fix`         | Admin merge: the outcome records it        |
+| Review slower than 3 minutes   | Tour the history meanwhile                 |

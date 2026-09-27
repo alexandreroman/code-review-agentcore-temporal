@@ -1,5 +1,6 @@
-"""Signals, queries and models exchanged between the router, the workflows and the agents."""
+"""Identifiers, signals and models exchanged between the router and the worker."""
 
+from dataclasses import dataclass
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -8,8 +9,29 @@ SIGNAL_PR_UPDATED = "pr_updated"
 SIGNAL_FIX_REQUESTED = "fix_requested"
 SIGNAL_PR_CLOSED = "pr_closed"
 PULL_REQUEST_WORKFLOW = "PullRequestWorkflow"
-QUERY_GET_FINDINGS = "get_findings"
-CHECK_NAME = "AI Review"
+
+
+def pr_workflow_id(owner: str, repo: str, number: int) -> str:
+    # GitHub events may spell the owner and repository with different cases.
+    return f"pr-{owner.lower()}-{repo.lower()}-{number}"
+
+
+@dataclass(frozen=True)
+class AgentCoreSession:
+    endpoint: str
+    session_id: str
+
+
+def agentcore_identity(endpoint: str, session_id: str) -> str:
+    """Worker identity on AgentCore: the session ID lives in the identity so /kill can target it."""
+    return f"agentcore:{endpoint}:{session_id}"
+
+
+def parse_agentcore_identity(identity: str) -> AgentCoreSession | None:
+    parts = identity.split(":", 2)
+    if len(parts) != 3 or parts[0] != "agentcore" or not parts[1] or not parts[2]:
+        return None
+    return AgentCoreSession(endpoint=parts[1], session_id=parts[2])
 
 
 class _LenientEnum(StrEnum):
@@ -90,31 +112,6 @@ class Finding(FindingDraft):
     comment_id: int | None = None
 
 
-class ReviewerReport(BaseModel):
-    findings: list[FindingDraft] = Field(default_factory=list)
-    resolved_ids: list[str] = Field(
-        default_factory=list, description="IDs of open findings from earlier rounds that the current code fixes"
-    )
-
-
-class ReviewSummary(BaseModel):
-    summary_markdown: str = Field(description="Short Markdown summary of the round for the pull request author")
-    ordered_ids: list[str] = Field(description="IDs of the findings to keep, most important first")
-    duplicates: list[str] = Field(default_factory=list, description="IDs of findings that repeat another finding")
-
-
-class FileChange(BaseModel):
-    path: str = Field(description="File path relative to the repository root")
-    new_content: str = Field(description="Complete new content of the file, not a diff")
-
-
-class FixPlan(BaseModel):
-    changes: list[FileChange]
-    commit_message: str = Field(
-        description="Imperative subject of at most 50 characters, a blank line, then one line per fixed finding"
-    )
-
-
 class PullRequestState(BaseModel):
     last_reviewed_sha: str | None = None
     pending_head_sha: str | None = None
@@ -125,16 +122,8 @@ class PullRequestState(BaseModel):
     round: int = 0
     fix_count: int = 0
     next_finding_number: int = 1
-    check_run_id: int | None = None
 
 
 class PullRequestInput(BaseModel):
     pr: PrRef
     state: PullRequestState = Field(default_factory=PullRequestState)
-
-
-class PullRequestOutcome(BaseModel):
-    merged: bool
-    closed_by: str | None
-    open_findings: list[Finding]
-    rounds: int

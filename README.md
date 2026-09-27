@@ -6,8 +6,8 @@ conference demo that makes durable execution visible on stage.
 
 ## What the demo shows
 
-- **Scale from zero**: no worker runs at rest; AgentCore starts one when a
-  pull request arrives.
+- **Scale from zero**: no worker runs at rest; Temporal Cloud starts one on
+  AgentCore when a task waits.
 - **Parallel agents**: security, performance and maintainability reviewers
   run side by side as Temporal child workflows, then a synthesis agent
   publishes one GitHub review.
@@ -56,11 +56,12 @@ graph LR
 
 ## Prerequisites
 
-- [uv](https://docs.astral.sh/uv/) (it installs Python 3.14 for you) and
-  GNU Make (the 3.81 shipped with macOS is enough)
-- To deploy: [OpenTofu](https://opentofu.org/) 1.12, AWS CLI v2, the
-  [Temporal CLI](https://docs.temporal.io/cli) and `tcld`, the GitHub CLI,
-  `jq`, and Docker or a Docker-compatible CLI (arm64 image builds)
+- [uv](https://docs.astral.sh/uv/) (it installs Python 3.14 for you), GNU
+  Make (the 3.81 shipped with macOS is enough) and
+  [OpenTofu](https://opentofu.org/) 1.12
+- To deploy: AWS CLI v2, the [Temporal CLI](https://docs.temporal.io/cli)
+  and `tcld`, the GitHub CLI, `jq`, and Docker or a Docker-compatible CLI
+  (arm64 image builds)
 - A Temporal Cloud namespace with Serverless Workers enabled, an AWS
   account, an Anthropic API key and a GitHub account
 
@@ -79,38 +80,30 @@ repository.
 
 ## Usage
 
-| Command              | What it does                                         |
-| -------------------- | ---------------------------------------------------- |
-| `make install`       | Install every workspace package and the dev tools    |
-| `make dev`           | Run the local worker (dev task queue), hot reload    |
-| `make review-pr`     | Drive a PR's workflow by hand: PR=<n> [ACTION=...]   |
-| `make worktree-init` | Prepare a new worktree: .env, dependencies, port     |
-| `make test`          | Run the unit tests                                   |
-| `make lint`          | Check formatting and lint rules                      |
-| `make format`        | Format the code                                      |
-| `make infra-check`   | Check OpenTofu formatting and validate every stack   |
-| `make check`         | Run tests, lint and OpenTofu checks                  |
-| `make up`            | Deploy everything, in order (idempotent)             |
-| `make bootstrap`     | Create the OpenTofu state bucket and KMS key (once)  |
-| `make infra-init`    | Initialise the OpenTofu backends                     |
-| `make infra`         | Apply the aws stack                                  |
-| `make secrets`       | Push the Anthropic key and certificates to AWS       |
-| `make github-app`    | Register the GitHub App (interactive, once)          |
-| `make github`        | Apply the github stack (demo repository, ruleset)    |
-| `make router-build`  | Build the router Lambda package                      |
-| `make deploy`        | Build, push and activate a new worker version        |
-| `make ping`          | Run the Ping workflow on AgentCore (scale from zero) |
-| `make kill-sessions` | Stop the AgentCore sessions of the task queue        |
-| `make prune`         | Remove endpoints no workflow still uses              |
-| `make destroy`       | Destroy the AWS resources (with confirmation)        |
-| `make info-publish`  | Publish the deployment links to the info panel       |
-| `make help`          | List every target                                    |
+Develop:
+
+- `make install`: install every workspace package and the dev tools.
+- `make check`: run the unit tests, the lint rules and the OpenTofu checks.
+- `make dev`: run the local worker on the dev task queue, with hot reload.
+- `make review-pr PR=<n>`: drive a pull request's workflow by hand.
+
+Operate:
+
+- `make up`: deploy everything, in order (idempotent).
+- `make deploy`: build, push and activate a new worker version.
+- `make ping`: run the Ping workflow on AgentCore (scale from zero).
+- `make kill-sessions`: stop the AgentCore sessions of the task queue.
+- `make prune`: remove the endpoints no workflow uses any more.
+- `make destroy`: destroy the AWS resources, after a confirmation.
+
+`make help` lists every target with its description.
 
 ## Configuration
 
-Copy [`.env.example`](.env.example) to `.env` and fill in your values; the
-file documents every setting and its default. The Makefile loads `.env` for
-every target. Both `.env` and the `certs/` directory are git-ignored.
+Copy [`.env.example`](.env.example) to `.env` and set `TEMPORAL_NAMESPACE`
+and `ANTHROPIC_API_KEY`; the file documents every other setting with its
+default. The Makefile loads `.env` for every target. Both `.env` and the
+`certs/` directory are git-ignored.
 
 ## Validation
 

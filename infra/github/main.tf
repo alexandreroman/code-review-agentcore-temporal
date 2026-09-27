@@ -42,8 +42,7 @@ variable "github_owner" {
 }
 
 variable "demo_repo" {
-  type    = string
-  default = "agentcore-review-demo-app"
+  type = string
 }
 
 # The rulesets name the app as a bypass actor, which GitHub accepts only
@@ -55,9 +54,6 @@ variable "app_installed" {
 
 provider "aws" {
   region = var.region
-  default_tags {
-    tags = { Project = "temporal-agentcore-review-demo" }
-  }
 }
 
 # The token comes from GITHUB_TOKEN (make github passes `gh auth token`).
@@ -74,7 +70,8 @@ locals {
 }
 
 # Public: a ruleset on a private repository needs a paid plan, and the
-# audience sees the repository. Its content comes from its own history (plan 5).
+# audience sees the repository. Its content is pushed separately (baseline
+# and scenario tags).
 resource "github_repository" "demo" {
   name                   = var.demo_repo
   description            = "Demo application reviewed by Agentic Code Review with AgentCore x Temporal"
@@ -127,8 +124,8 @@ resource "github_repository_ruleset" "main" {
   }
 }
 
-# The scenario tags anchor the review batches (plan 5): once pushed, they must
-# stay in place, so a reset can't silently drift the demo.
+# The scenario tags anchor the review batches: once pushed they must not move,
+# so a reset cannot silently change the demo.
 resource "github_repository_ruleset" "tags" {
   count       = var.app_installed ? 1 : 0
   name        = "tags"
@@ -172,22 +169,9 @@ resource "github_actions_secret" "app_private_key" {
   value       = local.app.private_key
 }
 
-output "repo_full_name" {
-  value = github_repository.demo.full_name
-}
-
-output "repo_url" {
-  value = github_repository.demo.html_url
-}
-
 output "app_slug" {
   value = local.app.slug
-  # The whole github_app secret is sensitive, even though the slug and the
-  # app ID are not: OpenTofu propagates sensitivity from local.app as a whole.
-  sensitive = true
-}
-
-output "app_id" {
-  value     = local.app.app_id
+  # The whole github_app secret is sensitive, even though the slug is not:
+  # OpenTofu propagates sensitivity from local.app as a whole.
   sensitive = true
 }

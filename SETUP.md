@@ -5,8 +5,10 @@ Temporal**, from empty accounts to a first reviewed pull request. Plan about
 an hour; most of it is the first image push and the waits for AWS.
 
 Commands run from the repository root unless stated otherwise. Values in
-angle brackets (`<owner>`, `<profile>`) and `your-namespace.a1b2c` are
-placeholders for your own identifiers.
+angle brackets and `your-namespace.a1b2c` are placeholders for your own
+identifiers: `<owner>` owns your demo repository, `<your-org>` names your
+organization in the certificates, `<upstream-owner>` owns the upstream demo
+repository and `<profile>` is your AWS CLI profile.
 
 ## 1. Accounts and tools
 
@@ -51,8 +53,8 @@ make check
 ## 3. mTLS certificates
 
 Every component authenticates to Temporal Cloud with an mTLS client
-certificate. By default one certificate serves the local worker, the
-`temporal` CLI, the AgentCore worker and the router.
+certificate. One certificate serves the local worker, the `temporal` CLI,
+the AgentCore worker and the router.
 
 Generate a CA and a client certificate, valid for one year at most, at the
 default paths (`certs/` is git-ignored):
@@ -68,14 +70,6 @@ tcld gen leaf --org <your-org> --common-name agentcore-review-demo \
 
 Move `certs/ca.key` somewhere safe once you are done: only new leaf
 certificates need it.
-
-Optional: separate certificates for the AgentCore worker and the router.
-Generate two more leaves from the same CA (`--common-name
-agentcore-review-demo-worker`, then `agentcore-review-demo-router`) into
-`certs/worker.pem` / `certs/worker.key` and `certs/router.pem` /
-`certs/router.key`, then set `TEMPORAL_WORKER_CERT_PATH`,
-`TEMPORAL_WORKER_KEY_PATH`, `TEMPORAL_ROUTER_CERT_PATH` and
-`TEMPORAL_ROUTER_KEY_PATH` in `.env` (step 4).
 
 Add the CA to the namespace, **appending** it to the accepted bundle:
 
@@ -115,7 +109,8 @@ Set at least:
 
 Optional: `GITHUB_OWNER` when the demo repository belongs to an
 organization (the default is the account logged in to `gh`),
-`AWS_REGION` for another region, the certificate paths of step 3. Plain
+`AWS_REGION` for another region, `TEMPORAL_TLS_CERT_PATH` and
+`TEMPORAL_TLS_KEY_PATH` for certificates outside `certs/`. Plain
 `KEY=value` lines, no quotes: the Makefile includes the file.
 [`.env.example`](.env.example) documents every variable and its default.
 
@@ -155,11 +150,13 @@ make up
 ```
 
 `make up` chains `bootstrap` (OpenTofu state bucket and KMS key), `infra`
-(Lambda router, AgentCore runtime, IAM, secrets, snapshots bucket),
-`secrets` (Anthropic key and certificates into Secrets Manager) and
-`deploy` (image build and push, AgentCore endpoint, Temporal Worker
-Deployment Version). The first image push uploads about 95 MB: on a slow
-uplink it takes a long time; later pushes only send the changed layers.
+(Lambda router, ECR repository, IAM roles, secret containers, snapshots
+bucket), `secrets` (Anthropic key and certificates into Secrets Manager)
+and `deploy` (image build and push, AgentCore runtime and endpoint,
+Temporal Worker Deployment Version). The AgentCore runtime only exists once
+there is a build to run: `infra` alone never creates it. The first image
+push uploads about 95 MB: on a slow uplink it takes a long time; later
+pushes only send the changed layers.
 
 This first run stops on purpose:
 
@@ -242,15 +239,13 @@ make ping
 ```
 
 Expected: `pong: hello (worker agentcore:b_…:…)`. No worker ran before:
-AgentCore started a session for this workflow.
+Temporal started one on AgentCore for this workflow.
 
 Then a real review. Open a pull request from `feature/customer-search` to
 `main` in the demo repository: a review with inline comments and a red
-`AI Review` check arrives in under three minutes. With
-[Claude Code](https://claude.com/claude-code), the `e2e-validation`
-project skill runs the whole lifecycle and reports each step:
-`/e2e-validation` (6 to 8 minutes) or `/e2e-validation full` (about 30
-minutes, before a talk). Close the PR, or run the reset, when you are done.
+`AI Review` check arrives in under three minutes. To check the whole
+lifecycle, see [Validation](README.md#validation). Close the PR, or run the
+reset, when you are done.
 
 ## 12. Local development worker
 
@@ -290,8 +285,9 @@ by your laptop, with hot reload, without deploying anything.
   `b_…`), creates its AgentCore endpoint and makes it current. Open pull
   requests stay pinned to the version that started them; after a reset,
   `make prune` removes the endpoints no workflow uses any more.
-- `make destroy` removes the AWS resources, after a confirmation, and
-  deletes the GitHub App secret. The OpenTofu state bucket, its KMS key,
-  the demo repository and the GitHub App remain: delete the app in the
-  GitHub settings, and register a new one with `make github-app` the next
-  time.
+- `make destroy` stops the sessions, removes the AWS resources (every
+  secret included) after a confirmation, then deletes the Temporal Worker
+  Deployment and the AgentCore log groups. The OpenTofu state bucket, its
+  KMS key, the demo repository and the GitHub App remain: delete the app in
+  the GitHub settings, and register a new one with `make github-app` the
+  next time.

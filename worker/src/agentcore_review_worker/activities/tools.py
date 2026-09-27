@@ -1,19 +1,20 @@
 """Glob, Grep and Read: the agents' navigation tools, run as activities named like Claude Code's tools.
 
 Workflow modules import this module through the sandbox passthrough, to wrap these functions with
-activity_as_tool; it therefore keeps boto3 and the GitHub client out of its module-level imports.
-Beyond 200 MB there is no snapshot (key None): Glob reads the git tree, Read the contents API, and
-Grep is unavailable.
+activity_as_tool. Beyond 200 MB there is no snapshot (key None): Glob reads the git tree, Read the
+contents API, and Grep is unavailable.
 """
 
 import asyncio
 from pathlib import PurePosixPath
 from urllib.parse import quote
 
+from agentcore_review_shared.github import GitHubError
 from temporalio import activity
 
 from ..models import SnapshotRef
 from ..navigation import glob_files, glob_paths, grep_files, read_file, render_file
+from .github_api import get, github_errors, repo_path
 from .snapshot_cache import local_root
 
 GREP_UNAVAILABLE = (
@@ -24,7 +25,9 @@ GREP_UNAVAILABLE = (
 
 @activity.defn(name="Glob")
 async def glob_tool(snapshot: SnapshotRef, pattern: str, path: str | None = None) -> str:
-    """Find files by glob pattern. Returns the matching paths, relative to the repository root and sorted (at most 500).
+    """Find files by glob pattern.
+
+    Returns the matching paths, relative to the repository root and sorted (at most 500).
 
     Args:
         pattern: Glob pattern, e.g. "app/**/*.py"; "**" matches any number of directories.
@@ -64,40 +67,27 @@ async def read_tool(
         return await asyncio.to_thread(read_file, await local_root(snapshot), file_path, offset, limit)
     if file_path.startswith("/") or ".." in PurePosixPath(file_path).parts:
         return f"Error: path {file_path!r} is outside the repository."
-    data = await _contents(snapshot, file_path)
+    with github_errors():
+        data = await _contents(snapshot, file_path)
     return f"Error: file {file_path!r} not found." if data is None else render_file(file_path, data, offset, limit)
 
 
 async def _tree_paths(snapshot: SnapshotRef) -> list[str]:
-    from ..errors import github_errors
-    from ..github_client import github
-
     with github_errors():
-        response = await github().request(
-            snapshot.installation_id,
-            "GET",
-            f"/repos/{snapshot.owner}/{snapshot.repo}/git/trees/{snapshot.sha}",
-            params={"recursive": "1"},
-        )
-    return [entry["path"] for entry in response.json()["tree"] if entry["type"] == "blob"]
+        tree = await get(snapshot, f"{repo_path(snapshot)}/git/trees/{snapshot.sha}", {"recursive": "1"})
+    return [entry["path"] for entry in tree["tree"] if entry["type"] == "blob"]
 
 
 async def _contents(snapshot: SnapshotRef, file_path: str) -> bytes | None:
-    from agentcore_review_shared.github import GitHubError
-
-    from ..errors import github_application_error
-    from ..github_client import github
-
+    """The file's raw bytes at the snapshot's SHA, or None when it does not exist."""
     try:
-        response = await github().request(
-            snapshot.installation_id,
-            "GET",
-            f"/repos/{snapshot.owner}/{snapshot.repo}/contents/{quote(file_path.strip('/'))}",
-            params={"ref": snapshot.sha},
+        return await get(
+            snapshot,
+            f"{repo_path(snapshot)}/contents/{quote(file_path.strip('/'))}",
+            {"ref": snapshot.sha},
             accept="application/vnd.github.raw+json",
         )
     except GitHubError as error:
         if error.status == 404:
             return None
-        raise github_application_error(error) from error
-    return response.content
+        raise

@@ -10,17 +10,18 @@ from agentcore_review_shared.contract import (
     Finding,
     FixRequested,
     PullRequestState,
-    ReviewerReport,
-    ReviewSummary,
 )
 
-from agentcore_review_worker.findings import assign_ids, fallback_merge, sort_key
-from agentcore_review_worker.models import SynthesisInput
+from agentcore_review_worker.models import ReviewerReport, ReviewSummary, SynthesisInput
 
 Action = Literal["close", "review", "fix"]
 
 MAX_FIX_DELIVERIES = 50
 """Fix request deliveries remembered for deduplication; redeliveries come within minutes, not 50 requests later."""
+
+
+def sort_key(finding: Finding) -> tuple:
+    return (finding.severity.rank, finding.path, finding.line, finding.id)
 
 
 def review_pending(state: PullRequestState) -> bool:
@@ -71,7 +72,9 @@ def clean_report(report: ReviewerReport, category: Category, open_ids: list[str]
 
 def number_findings(reports: list[ReviewerReport], next_number: int) -> tuple[list[Finding], int]:
     """Stable IDs in report order; the reports come in a fixed order (category, then batch)."""
-    return assign_ids([draft for report in reports for draft in report.findings], next_number)
+    drafts = [draft for report in reports for draft in report.findings]
+    findings = [Finding(**draft.model_dump(), id=f"F-{next_number + i:03d}") for i, draft in enumerate(drafts)]
+    return findings, next_number + len(drafts)
 
 
 def resolved_ids(reports: list[ReviewerReport]) -> list[str]:
@@ -95,7 +98,12 @@ def apply_summary(new: list[Finding], summary: ReviewSummary) -> list[Finding]:
 
 def fallback_summary(input: SynthesisInput) -> ReviewSummary:
     """Deterministic stand-in for the synthesis agent: sort by severity, deduplicate by path and line."""
-    merged = fallback_merge(input.new_findings)
+    most_severe: dict[tuple[str, int], Finding] = {}
+    for f in input.new_findings:
+        key = (f.path, f.line)
+        if key not in most_severe or f.severity.rank < most_severe[key].severity.rank:
+            most_severe[key] = f
+    merged = sorted(most_severe.values(), key=sort_key)
     kept = {f.id for f in merged}
     if merged:
         listed = ", ".join(f"{f.id} ({f.severity})" for f in merged)
@@ -103,8 +111,6 @@ def fallback_summary(input: SynthesisInput) -> ReviewSummary:
         text = f"{len(merged)} new finding{plural} in this round, most severe first: {listed}."
     else:
         text = "No new finding in this round."
-    if input.resolved_ids:
-        text += f"\n\nResolved: {', '.join(input.resolved_ids)}."
     return ReviewSummary(
         summary_markdown=text,
         ordered_ids=[f.id for f in merged],

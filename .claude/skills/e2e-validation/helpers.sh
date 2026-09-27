@@ -1,7 +1,8 @@
 # Helpers of the e2e-validation skill (sourced, never executed).
 #
-# Every step of SKILL.md runs in its own `bash <<'STEP'` block that sources
-# this file first: agent shells keep no state between commands, so the
+# Every step of SKILL.md runs in its own `bash` block, fed by a `<<'STEP'`
+# heredoc, that sources this file first: agent shells keep no state between
+# commands, so the
 # settings are re-read from the Makefile (which applies .env and its
 # defaults) and the run state from $E2E_DIR/state.env.
 #
@@ -34,6 +35,7 @@ SCENARIO_TITLE="Add customer search & order history"
   print-TEMPORAL_DEPLOYMENT_NAME print-AGENTCORE_IDLE_TIMEOUT print-DEMO_REPO print-GITHUB_OWNER)
 export TEMPORAL_NAMESPACE TEMPORAL_ADDRESS AWS_REGION
 export AWS_DEFAULT_REGION="$AWS_REGION"
+export TF_VAR_region="$AWS_REGION"
 REPO="$OWNER/$DEMO_REPO"
 
 if [[ -L "$E2E_ROOT/current" ]]; then
@@ -236,6 +238,26 @@ demo_refs_ok() {
     { echo "dev/customer-search is not on scenario/customer-search" >&2; return 1; }
 }
 
+# reset_and_wait MAX_SECONDS QUEUE...: resets the demo repository, then checks
+# that no pull request is open, that no PullRequestWorkflow runs on any QUEUE
+# (waiting up to MAX_SECONDS) and that the refs are back on their tags.
+reset_and_wait() {
+  local max="$1" open
+  shift
+  local queues="$*"
+  _no_pr_workflow() {
+    local queue
+    for queue in $queues; do
+      [[ "$(running_pr_workflows "$queue")" == 0 ]] || return 1
+    done
+  }
+  reset_demo || return 1
+  open=$(gh pr list -R "$REPO" --state open --json number --jq length) || return 1
+  [[ "$open" == 0 ]] || { echo "$open pull request(s) still open after the reset" >&2; return 1; }
+  wait_until "$max" "PR workflows closed on $queues" _no_pr_workflow || return 1
+  demo_refs_ok
+}
+
 # --- Checks shared by several steps --------------------------------------------
 
 # check_coverage LABEL: E2E-04 on the round 1 reviewers of $WF, against expected-findings.yaml.
@@ -265,8 +287,7 @@ collect() {
     tcli workflow describe -w "$wf" -o json >"$dir/describe-$wf.json" 2>&1
   done
   tcli task-queue describe --task-queue "$TASK_QUEUE" -o json >"$dir/task-queue.json" 2>&1
-  aws logs tail "${ROUTER_LOG_GROUP:-/aws/lambda/agentcore-review-demo-router}" --since 30m --format short \
-    >"$dir/router.log" 2>&1
+  aws logs tail "$ROUTER_LOG_GROUP" --since 30m --format short >"$dir/router.log" 2>&1
   grep -i webhook "$dir/router.log" >"$dir/webhook-deliveries.log"
   if [[ -n "${RUNTIME_ID:-}" ]]; then
     aws logs tail "/aws/bedrock-agentcore/runtimes/$RUNTIME_ID-$BUILD" --since 30m --format short \
