@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from temporalio.client import Client
 
 from . import runtime, temporal_ops
-from .routing import RunCommand
+from .routing import CommentKind, RunCommand
 from .rules import (
     DEV_KILL_REPLY,
     NO_REVIEW_REPLY,
@@ -45,6 +45,8 @@ class KillFollowup(BaseModel):
     router_task: Literal["kill"] = "kill"
     pr: PrRef
     comment_id: int
+    # The default keeps valid the follow-ups an older router version queued without this field.
+    comment_kind: CommentKind = "issue"
     delivery_id: str
     sessions: list[AgentCoreSession]
     tally: KillTally
@@ -55,7 +57,7 @@ async def run(command: RunCommand, client: Client, deadline: float) -> str:
     fields = {"delivery": command.delivery_id, "workflow_id": command.workflow_id}
     permission = await _permission(app, command.pr, command.author)
     if not can_run_commands(permission):
-        await _best_effort(_react(app, command.pr, command.comment_id, REACTION_DENIED), fields)
+        await _best_effort(_react(app, command.pr, command.comment_kind, command.comment_id, REACTION_DENIED), fields)
         return f"/{command.command} refused: {command.author or 'unknown user'} has {permission or 'no'} access"
     if command.command == "fix":
         return await _fix(command, client, app, fields)
@@ -68,14 +70,14 @@ async def finish_kill(event: dict, deadline: float) -> None:
     fields = {"delivery": followup.delivery_id}
     outcomes = await _stop(followup.sessions, deadline, fields)
     tally = followup.tally.add(outcomes.values())
-    await _kill_feedback(runtime.github(), followup.pr, followup.comment_id, tally, fields)
+    await _kill_feedback(runtime.github(), followup.pr, followup.comment_kind, followup.comment_id, tally, fields)
     logger.info("kill follow-up", extra=fields | {"outcome": kill_comment(tally)})
 
 
 async def _fix(command: RunCommand, client: Client, app: GitHubApp, fields: dict[str, Any]) -> str:
     requested = FixRequested(requested_by=command.author, delivery_id=command.delivery_id)
     if await temporal_ops.signal(client, command.workflow_id, SIGNAL_FIX_REQUESTED, requested):
-        await _best_effort(_react(app, command.pr, command.comment_id, REACTION_FIX), fields)
+        await _best_effort(_react(app, command.pr, command.comment_kind, command.comment_id, REACTION_FIX), fields)
         return f"signal {SIGNAL_FIX_REQUESTED} to {command.workflow_id}"
     await _best_effort(_reply(app, command.pr, NO_REVIEW_REPLY), fields)
     return "/fix: no review in progress"
@@ -99,6 +101,7 @@ async def _kill(command: RunCommand, client: Client, app: GitHubApp, deadline: f
         followup = KillFollowup(
             pr=command.pr,
             comment_id=command.comment_id,
+            comment_kind=command.comment_kind,
             delivery_id=command.delivery_id,
             sessions=leftover,
             tally=tally,
@@ -111,7 +114,7 @@ async def _kill(command: RunCommand, client: Client, app: GitHubApp, deadline: f
         except Exception:
             logger.exception("asynchronous /kill follow-up not sent", extra=fields)
             tally = tally.add(["failed"] * len(leftover))
-    await _kill_feedback(app, command.pr, command.comment_id, tally, fields)
+    await _kill_feedback(app, command.pr, command.comment_kind, command.comment_id, tally, fields)
     return f"/kill: {kill_comment(tally)}"
 
 
@@ -124,8 +127,10 @@ async def _stop(
     )
 
 
-async def _kill_feedback(app: GitHubApp, pr: PrRef, comment_id: int, tally: KillTally, fields: dict[str, Any]) -> None:
-    await _best_effort(_react(app, pr, comment_id, REACTION_KILL), fields)
+async def _kill_feedback(
+    app: GitHubApp, pr: PrRef, comment_kind: CommentKind, comment_id: int, tally: KillTally, fields: dict[str, Any]
+) -> None:
+    await _best_effort(_react(app, pr, comment_kind, comment_id, REACTION_KILL), fields)
     await _best_effort(_reply(app, pr, kill_comment(tally)), fields)
 
 
@@ -141,8 +146,11 @@ async def _permission(app: GitHubApp, pr: PrRef, user: str) -> str | None:
     return response.json().get("permission")
 
 
-async def _react(app: GitHubApp, pr: PrRef, comment_id: int, content: str) -> None:
-    path = f"/repos/{pr.owner}/{pr.repo}/issues/comments/{comment_id}/reactions"
+async def _react(app: GitHubApp, pr: PrRef, comment_kind: CommentKind, comment_id: int, content: str) -> None:
+    if comment_kind == "review":
+        path = f"/repos/{pr.owner}/{pr.repo}/pulls/comments/{comment_id}/reactions"
+    else:
+        path = f"/repos/{pr.owner}/{pr.repo}/issues/comments/{comment_id}/reactions"
     await app.request(pr.installation_id, "POST", path, json={"content": content})
 
 

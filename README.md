@@ -14,8 +14,9 @@ conference demo that makes durable execution visible on stage.
 - **Durability**: a `/kill` comment stops the AgentCore sessions
   mid-review; the review resumes on a new session without repeating
   finished LLM calls.
-- **Human in the loop**: a `/fix` comment lets an agent push a fix, then an
-  incremental review turns the `AI Review` check green.
+- **Human in the loop**: a `/fix` comment, on the PR or in reply to a
+  finding, lets an agent push a fix, then an incremental review turns the
+  `AI Review` check green.
 
 [DEMO.md](DEMO.md) is the timed run-through of the talk, with its
 checklist and plan B.

@@ -23,7 +23,7 @@ PERMISSIONS = {
     "issues": "read",
     "metadata": "read",
 }
-EVENTS = ["pull_request", "issue_comment"]
+EVENTS = ["pull_request", "issue_comment", "pull_request_review_comment"]
 ACCEPT = {"Accept": "application/vnd.github+json"}
 SECRET_TAGS = [{"Key": "Project", "Value": "code-review-agentcore-temporal"}]
 

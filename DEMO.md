@@ -92,9 +92,10 @@ Talking points:
   and up, a summary, and a red `AI Review` check that blocks the merge.
   The workflow waits for a signal; its memo shows its state without any
   worker, and a minute later no worker listens on the queue.
-- **6:30, `/fix`.** 👀 on the comment. A worker starts on demand (cold if
-  the session expired); the fixer child workflow plans the change and the
-  bot pushes one commit.
+- **6:30, `/fix`.** Post it as a PR comment or as a reply to a finding
+  (either way, the fixer handles all findings). 👀 on the comment. A worker
+  starts on demand (cold if the session expired); the fixer child workflow
+  plans the change and the bot pushes one commit.
 - **7:30, long-lived workflow.** The commit triggers round 2 on the delta
   only: fixed threads are resolved, the check turns green.
 - **9:00, lifecycle.** Merge: the workflow ends with its

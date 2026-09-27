@@ -10,6 +10,10 @@ from temporalio.common import WorkflowIDReusePolicy
 
 COMMANDS: dict[str, Literal["fix", "kill"]] = {"/fix": "fix", "/kill": "kill"}
 
+# Where a command was posted: "issue" for the PR's Conversation tab (issue_comment), "review" for a review
+# thread, such as a reply to a finding (pull_request_review_comment). GitHub reacts on each through its own endpoint.
+CommentKind = Literal["issue", "review"]
+
 
 @dataclass(frozen=True)
 class RouterConfig:
@@ -41,6 +45,7 @@ class RunCommand:
     workflow_id: str
     pr: PrRef
     comment_id: int
+    comment_kind: CommentKind
     author: str
     delivery_id: str
 
@@ -57,7 +62,9 @@ def route(event: str, payload: dict, delivery_id: str, config: RouterConfig) -> 
     if event == "pull_request":
         return _route_pull_request(payload, delivery_id, config)
     if event == "issue_comment":
-        return _route_comment(payload, delivery_id, config)
+        return _route_issue_comment(payload, delivery_id, config)
+    if event == "pull_request_review_comment":
+        return _route_review_comment(payload, delivery_id, config)
     return Ignore(f"event {event} is not handled")
 
 
@@ -104,12 +111,21 @@ def _route_pull_request(payload: dict, delivery_id: str, config: RouterConfig) -
     return Ignore(f"pull_request action {action} is not handled")
 
 
-def _route_comment(payload: dict, delivery_id: str, config: RouterConfig) -> Action:
-    if payload.get("action") != "created":
-        return Ignore("comment was not created")
+def _route_issue_comment(payload: dict, delivery_id: str, config: RouterConfig) -> Action:
     issue = payload["issue"]
     if not issue.get("pull_request"):
         return Ignore("comment on an issue, not on a pull request")
+    return _route_command(payload, issue["number"], "issue", delivery_id, config)
+
+
+def _route_review_comment(payload: dict, delivery_id: str, config: RouterConfig) -> Action:
+    return _route_command(payload, payload["pull_request"]["number"], "review", delivery_id, config)
+
+
+def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: str, config: RouterConfig) -> Action:
+    """Both comment events share the same shape for the fields a command needs: action, comment and sender."""
+    if payload.get("action") != "created":
+        return Ignore("comment was not created")
     comment = payload["comment"]
     sender = payload.get("sender") or {}
     if sender.get("login") == f"{config.app_slug}[bot]":
@@ -118,6 +134,13 @@ def _route_comment(payload: dict, delivery_id: str, config: RouterConfig) -> Act
     command = COMMANDS.get(words[0]) if words else None
     if command is None:
         return Ignore("not a command")
-    ref = _pr_ref(payload, issue["number"])
-    workflow_id = pr_workflow_id(ref.owner, ref.repo, ref.number)
-    return RunCommand(command, workflow_id, ref, comment["id"], sender.get("login", ""), delivery_id)
+    ref = _pr_ref(payload, number)
+    return RunCommand(
+        command=command,
+        workflow_id=pr_workflow_id(ref.owner, ref.repo, ref.number),
+        pr=ref,
+        comment_id=comment["id"],
+        comment_kind=kind,
+        author=sender.get("login", ""),
+        delivery_id=delivery_id,
+    )

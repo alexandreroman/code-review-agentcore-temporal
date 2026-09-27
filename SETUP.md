@@ -177,11 +177,12 @@ A browser page opens: click **Create GitHub App**. The app is named
 or set `GITHUB_APP_NAME` in `.env`; GitHub caps the name at 34 characters).
 The terminal then prints `Registered GitHub App <slug> ...`. The app has
 the permissions `pull_requests: write`, `checks: write`, `contents: write`,
-`issues: read` and `metadata: read`, listens to `pull_request` and
-`issue_comment`, and sends its webhooks to the router: its Lambda Function
-URL, or the [custom domain](#custom-domain-cloudflare-optional) when one is
-set. Its credentials go straight to Secrets Manager, in a secret that
-`make destroy` keeps.
+`issues: read` and `metadata: read`, listens to `pull_request`,
+`issue_comment` and `pull_request_review_comment` (replies to a finding),
+and sends its webhooks to the router: its Lambda Function URL, or the
+[custom domain](#custom-domain-cloudflare-optional) when one is set. Its
+credentials go straight to Secrets Manager, in a secret that `make destroy`
+keeps.
 
 ## 9. Second deployment and app installation
 
