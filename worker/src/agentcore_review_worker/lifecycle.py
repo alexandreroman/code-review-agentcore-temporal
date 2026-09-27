@@ -7,17 +7,31 @@ from typing import Literal
 
 from agentcore_review_shared.contract import (
     Category,
+    CommentPosted,
+    DismissedFinding,
     Finding,
     FixRequested,
     PullRequestState,
 )
 
-from agentcore_review_worker.models import ReviewerReport, ReviewSummary, SynthesisInput
+from agentcore_review_worker.models import ReviewerReport, ReviewSummary, SynthesisInput, ThreadComment
 
-Action = Literal["close", "review", "fix"]
+Action = Literal["close", "review", "fix", "reply"]
 
 MAX_FIX_DELIVERIES = 50
 """Fix request deliveries remembered for deduplication; redeliveries come within minutes, not 50 requests later."""
+
+MAX_PENDING_REPLIES = 20
+"""Replies queued behind a review or a fix; beyond that, the oldest are dropped."""
+
+MAX_DISMISSED = 50
+"""Dismissed findings remembered, and shown to later reviewers so they do not report them again."""
+
+MAX_RESOLVED_THREADS = 50
+"""Threads of resolved findings remembered, so that a late reply there still gets an answer."""
+
+MAX_BOT_REPLIES_PER_THREAD = 3
+"""The bot's answers in one thread before it hands over to a human: keeps a discussion from looping."""
 
 
 def sort_key(finding: Finding) -> tuple:
@@ -29,13 +43,15 @@ def review_pending(state: PullRequestState) -> bool:
 
 
 def next_action(state: PullRequestState, closed: bool) -> Action | None:
-    """Close first, then a pending review, then a pending fix."""
+    """Close first, then a pending review, then a pending fix, then a pending reply."""
     if closed:
         return "close"
     if review_pending(state):
         return "review"
     if state.pending_fix is not None:
         return "fix"
+    if state.pending_replies:
+        return "reply"
     return None
 
 
@@ -52,13 +68,98 @@ def record_head(state: PullRequestState, head_sha: str, reviewing_sha: str | Non
 
 
 def record_fix_request(state: PullRequestState, request: FixRequested) -> bool:
-    """Record a fix request as the pending fix, unless its webhook delivery was already seen."""
+    """Record a fix request as the pending fix, unless its webhook delivery was already seen.
+
+    A request made while a fix is pending merges into it: the pending fix targets every open finding
+    as soon as one of the requests does, otherwise the findings of all the requests' threads.
+    """
     if request.delivery_id in state.fix_deliveries:
         return False
     recent = state.fix_deliveries + [request.delivery_id]
     state.fix_deliveries = recent[-MAX_FIX_DELIVERIES:]
+    if state.pending_fix is None:
+        state.pending_fix_roots = None if request.thread_root_id is None else [request.thread_root_id]
+    elif state.pending_fix_roots is None or request.thread_root_id is None:
+        state.pending_fix_roots = None
+    elif request.thread_root_id not in state.pending_fix_roots:
+        state.pending_fix_roots = state.pending_fix_roots + [request.thread_root_id]
     state.pending_fix = request
     return True
+
+
+def record_reply(state: PullRequestState, reply: CommentPosted) -> bool:
+    """Queue a reply to a finding, unless its webhook delivery was already seen; the oldest replies are dropped."""
+    if reply.delivery_id in state.reply_deliveries:
+        return False
+    recent = state.reply_deliveries + [reply.delivery_id]
+    state.reply_deliveries = recent[-MAX_FIX_DELIVERIES:]
+    queued = state.pending_replies + [reply]
+    state.pending_replies = queued[-MAX_PENDING_REPLIES:]
+    return True
+
+
+def fix_targets(state: PullRequestState, thread_root_ids: list[int] | None) -> list[Finding]:
+    """Every open finding (None), or only those whose review threads the /fix requests were posted in."""
+    if thread_root_ids is None:
+        return list(state.open_findings)
+    return [f for f in state.open_findings if f.comment_id in thread_root_ids]
+
+
+def reply_target(state: PullRequestState, thread_root_id: int) -> Finding | None:
+    """The open finding whose review thread starts with this comment."""
+    for f in state.open_findings:
+        if f.comment_id == thread_root_id:
+            return f
+    return None
+
+
+def was_finding_thread(state: PullRequestState, thread_root_id: int) -> str | None:
+    """The ID of the dismissed or resolved finding whose thread this is, so a late reply gets a short answer."""
+    for dismissed in state.dismissed_findings:
+        if dismissed.finding.comment_id == thread_root_id:
+            return dismissed.finding.id
+    return state.resolved_threads.get(thread_root_id)
+
+
+def record_resolved(state: PullRequestState, finding_ids: list[str]) -> None:
+    """Remember the threads of the open findings a round resolved; call it before they leave the open ones."""
+    threads = dict(state.resolved_threads)
+    for f in state.open_findings:
+        if f.id in finding_ids and f.comment_id is not None:
+            threads[f.comment_id] = f.id
+    recent = list(threads.items())[-MAX_RESOLVED_THREADS:]
+    state.resolved_threads = dict(recent)
+
+
+def dismiss(state: PullRequestState, finding_id: str, reason: str, by: str) -> None:
+    """Move an open finding to the dismissed ones; unknown IDs are ignored."""
+    for f in state.open_findings:
+        if f.id == finding_id:
+            state.open_findings = [other for other in state.open_findings if other.id != finding_id]
+            entry = DismissedFinding(finding=f, reason=reason, dismissed_by=by)
+            recent = state.dismissed_findings + [entry]
+            state.dismissed_findings = recent[-MAX_DISMISSED:]
+            return
+
+
+def reply_budget_left(bot_answers: int) -> bool:
+    return bot_answers < MAX_BOT_REPLIES_PER_THREAD
+
+
+def discussion_thread(
+    comments: list[ThreadComment], bot_login: str, author: str, up_to_comment_id: int
+) -> list[ThreadComment]:
+    """What the discussion agent reads: the bot's comments and the author's, up to the reply it answers.
+
+    Anyone else's comments stay out: on a public repository, a bystander could otherwise speak to the agent.
+    """
+    kept: list[ThreadComment] = []
+    for comment in comments:
+        if comment.author in (bot_login, author):
+            kept.append(comment)
+        if comment.id == up_to_comment_id:
+            break
+    return kept
 
 
 def clean_report(report: ReviewerReport, category: Category, open_ids: list[str]) -> ReviewerReport:

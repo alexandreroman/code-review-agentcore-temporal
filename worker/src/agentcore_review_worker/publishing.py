@@ -1,8 +1,10 @@
-"""What the bot writes on GitHub: review comments and body, check output, closing comment, fixer changes.
+"""What the bot writes on GitHub: review comments and body, check output, thread replies, closing comment, fixer
+changes.
 
 Pure functions: the activities call them with data they fetched, the workflow with its state.
 """
 
+import re
 from pathlib import PurePosixPath
 from typing import Literal
 
@@ -10,14 +12,16 @@ from agentcore_review_shared.contract import Finding
 from pydantic import BaseModel
 
 from agentcore_review_worker.hunks import is_commentable
-from agentcore_review_worker.lifecycle import sort_key
-from agentcore_review_worker.markers import finding_marker
-from agentcore_review_worker.models import FileChange, ReviewContent
+from agentcore_review_worker.lifecycle import MAX_BOT_REPLIES_PER_THREAD, sort_key
+from agentcore_review_worker.markers import finding_marker, has_reply_marker
+from agentcore_review_worker.models import DiscussionReply, FileChange, ReviewContent, ThreadComment
 
 MAX_INLINE_COMMENTS = 20
 MAX_BODY_CHARS = 60_000  # GitHub rejects review bodies over 65,536 characters
 MAX_LISTED_FILES = 30
 PROTECTED_DIR = ".github"  # the app has no workflows permission, and the fixer must not touch CI
+
+_VERDICT_LINE = re.compile(r"\*\*F-\d+ (stays open|dismissed)\.\*\*")  # how reply_body starts
 
 
 class InlineComment(BaseModel):
@@ -143,6 +147,39 @@ def unavailable_check_output(round_number: int, unavailable: list[str]) -> tuple
         "so this head was not reviewed. Push a commit to retry."
     )
     return "Review unavailable", summary
+
+
+def reply_body(finding_id: str, reply: DiscussionReply, marker: str) -> str:
+    """The discussion agent's answer, after a verdict line that tells at a glance whether the finding stays."""
+    verdict = "dismissed" if reply.verdict == "dismiss" else "stays open"
+    return f"**{finding_id} {verdict}.** {reply.answer.strip()}\n\n{marker}"
+
+
+def no_longer_open_reply(finding_id: str, marker: str) -> str:
+    return f"{finding_id} is no longer open: nothing left to discuss here.\n\n{marker}"
+
+
+def budget_reply(marker: str) -> str:
+    return (
+        f"I have answered {MAX_BOT_REPLIES_PER_THREAD} times in this thread: let's leave the rest to a human "
+        f"reviewer. Comment `/fix` here to fix this finding.\n\n{marker}"
+    )
+
+
+def failed_reply(marker: str) -> str:
+    return f"I could not answer this time. Reply again to retry.\n\n{marker}"
+
+
+def bot_answers(thread: list[ThreadComment], bot_login: str) -> int:
+    """The discussion agent's answers in a thread: the bot's replies that start with a verdict line.
+
+    The finding itself and the bot's other replies (failure, budget reached, no longer open) do not count.
+    """
+    return sum(
+        1
+        for comment in thread
+        if comment.author == bot_login and has_reply_marker(comment.body) and _VERDICT_LINE.match(comment.body)
+    )
 
 
 def closing_comment(closed_by: str | None, open_findings: list[Finding]) -> str:

@@ -8,6 +8,8 @@ from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, 
 from pydantic import BaseModel
 from temporalio.common import WorkflowIDReusePolicy
 
+from .rules import is_bot_login
+
 COMMANDS: dict[str, Literal["fix", "kill"]] = {"/fix": "fix", "/kill": "kill"}
 
 # Where a command was posted: "issue" for the PR's Conversation tab (issue_comment), "review" for a review
@@ -48,6 +50,21 @@ class RunCommand:
     comment_kind: CommentKind
     author: str
     delivery_id: str
+    # The first comment of the review thread the command was posted in; None outside a thread.
+    thread_root_id: int | None = None
+
+
+@dataclass(frozen=True)
+class ForwardReply:
+    """A plain reply in a review thread: forwarded only when the thread is a finding (bot_login wrote its root)."""
+
+    workflow_id: str
+    pr: PrRef
+    comment_id: int
+    thread_root_id: int
+    author: str
+    delivery_id: str
+    bot_login: str
 
 
 @dataclass(frozen=True)
@@ -55,7 +72,7 @@ class Ignore:
     reason: str
 
 
-Action = StartOrSignal | SendSignal | RunCommand | Ignore
+Action = StartOrSignal | SendSignal | RunCommand | ForwardReply | Ignore
 
 
 def route(event: str, payload: dict, delivery_id: str, config: RouterConfig) -> Action:
@@ -123,24 +140,44 @@ def _route_review_comment(payload: dict, delivery_id: str, config: RouterConfig)
 
 
 def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: str, config: RouterConfig) -> Action:
-    """Both comment events share the same shape for the fields a command needs: action, comment and sender."""
+    """Both comment events share the same shape for the fields a command needs: action, comment and sender.
+
+    A review comment may also be a plain reply in a thread, which the worker answers when the thread is a finding.
+    """
     if payload.get("action") != "created":
         return Ignore("comment was not created")
     comment = payload["comment"]
     sender = payload.get("sender") or {}
-    if sender.get("login") == f"{config.app_slug}[bot]":
+    bot_login = f"{config.app_slug}[bot]"
+    if is_bot_login(sender.get("login"), bot_login):
         return Ignore("comment from the bot itself")
     words = (comment.get("body") or "").split()
-    command = COMMANDS.get(words[0]) if words else None
-    if command is None:
-        return Ignore("not a command")
+    if not words:
+        return Ignore("empty comment")
+    # Only review comments belong to a thread; a top-level review comment has no in_reply_to_id.
+    thread_root_id = comment.get("in_reply_to_id") if kind == "review" else None
     ref = _pr_ref(payload, number)
-    return RunCommand(
-        command=command,
-        workflow_id=pr_workflow_id(ref.owner, ref.repo, ref.number),
+    workflow_id = pr_workflow_id(ref.owner, ref.repo, ref.number)
+    command = COMMANDS.get(words[0])
+    if command is not None:
+        return RunCommand(
+            command=command,
+            workflow_id=workflow_id,
+            pr=ref,
+            comment_id=comment["id"],
+            comment_kind=kind,
+            author=sender.get("login", ""),
+            delivery_id=delivery_id,
+            thread_root_id=thread_root_id,
+        )
+    if thread_root_id is None:
+        return Ignore("not a command")
+    return ForwardReply(
+        workflow_id=workflow_id,
         pr=ref,
         comment_id=comment["id"],
-        comment_kind=kind,
+        thread_root_id=thread_root_id,
         author=sender.get("login", ""),
         delivery_id=delivery_id,
+        bot_login=bot_login,
     )

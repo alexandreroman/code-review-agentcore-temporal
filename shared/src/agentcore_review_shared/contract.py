@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 SIGNAL_PR_UPDATED = "pr_updated"
 SIGNAL_FIX_REQUESTED = "fix_requested"
+SIGNAL_COMMENT_POSTED = "comment_posted"
 SIGNAL_PR_CLOSED = "pr_closed"
 PULL_REQUEST_WORKFLOW = "PullRequestWorkflow"
 
@@ -85,6 +86,17 @@ class PrUpdated(BaseModel):
 class FixRequested(BaseModel):
     requested_by: str
     delivery_id: str
+    # The finding's comment when /fix is posted in its review thread; None fixes every open finding.
+    thread_root_id: int | None = None
+
+
+class CommentPosted(BaseModel):
+    """A plain reply in a finding's review thread; the worker reads the thread itself, so the body stays out."""
+
+    comment_id: int
+    thread_root_id: int
+    author: str
+    delivery_id: str
 
 
 class PrClosed(BaseModel):
@@ -112,15 +124,31 @@ class Finding(FindingDraft):
     comment_id: int | None = None
 
 
+class DismissedFinding(BaseModel):
+    finding: Finding
+    reason: str
+    dismissed_by: str
+
+
 class PullRequestState(BaseModel):
     last_reviewed_sha: str | None = None
     pending_head_sha: str | None = None
     pending_fix: FixRequested | None = None
+    # The findings' comments the pending fix targets, merged across requests; None: every open finding.
+    pending_fix_roots: list[int] | None = None
     # Delivery IDs of the latest fix requests: GitHub redelivers webhooks, and a repeat must not fix twice.
     fix_deliveries: list[str] = Field(default_factory=list)
+    pending_replies: list[CommentPosted] = Field(default_factory=list)
+    reply_deliveries: list[str] = Field(default_factory=list)
     open_findings: list[Finding] = Field(default_factory=list)
+    dismissed_findings: list[DismissedFinding] = Field(default_factory=list)
+    # Finding ID by the comment starting its thread, for the latest findings a round resolved.
+    resolved_threads: dict[int, str] = Field(default_factory=dict)
+    # The round whose check covers last_reviewed_sha: a dismissal updates that check.
+    last_reviewed_round: int | None = None
     round: int = 0
     fix_count: int = 0
+    discussion_count: int = 0
     next_finding_number: int = 1
 
 

@@ -1,5 +1,6 @@
 """The /fix and /kill commands: permission check, a Temporal signal or AgentCore session stops, then feedback on
-the pull request (a reaction or a short comment).
+the pull request (a reaction or a short comment). Plain replies to a finding go through the same permission check
+before reaching the pull request workflow, which answers them.
 
 A /kill whose stops are not all confirmed within the webhook's budget hands the rest to an asynchronous
 invocation of this same Lambda, which finishes the stops and posts the comment.
@@ -10,13 +11,20 @@ import logging
 from collections.abc import Awaitable
 from typing import Any, Literal
 
-from agentcore_review_shared.contract import SIGNAL_FIX_REQUESTED, AgentCoreSession, FixRequested, PrRef
+from agentcore_review_shared.contract import (
+    SIGNAL_COMMENT_POSTED,
+    SIGNAL_FIX_REQUESTED,
+    AgentCoreSession,
+    CommentPosted,
+    FixRequested,
+    PrRef,
+)
 from agentcore_review_shared.github import GitHubApp, GitHubError
 from pydantic import BaseModel
 from temporalio.client import Client
 
 from . import runtime, temporal_ops
-from .routing import CommentKind, RunCommand
+from .routing import CommentKind, ForwardReply, RunCommand
 from .rules import (
     DEV_KILL_REPLY,
     NO_REVIEW_REPLY,
@@ -27,6 +35,7 @@ from .rules import (
     KillTally,
     StopOutcome,
     can_run_commands,
+    is_bot_login,
     kill_comment,
     kill_targets,
 )
@@ -64,6 +73,30 @@ async def run(command: RunCommand, client: Client, deadline: float) -> str:
     return await _kill(command, client, app, deadline, fields)
 
 
+async def forward_reply(action: ForwardReply, client: Client) -> str:
+    """A plain reply in a finding's thread: checked like a command, then queued in the workflow, which answers."""
+    app = runtime.github()
+    fields = {"delivery": action.delivery_id, "workflow_id": action.workflow_id}
+    # Checked here rather than in the workflow: a human thread gets neither 👀 nor a signal.
+    if not is_bot_login(await _comment_author(app, action.pr, action.thread_root_id), action.bot_login):
+        return "reply in a thread that is not a finding"
+    permission = await _permission(app, action.pr, action.author)
+    if not can_run_commands(permission):
+        # Unlike a command, a plain reply is not addressed to the bot: no 😕 reaction.
+        return f"reply ignored: {action.author or 'unknown user'} has {permission or 'no'} access"
+    posted = CommentPosted(
+        comment_id=action.comment_id,
+        thread_root_id=action.thread_root_id,
+        author=action.author,
+        delivery_id=action.delivery_id,
+    )
+    # No "no review in progress" comment here: a plain reply is not addressed to the bot.
+    if not await temporal_ops.signal(client, action.workflow_id, SIGNAL_COMMENT_POSTED, posted):
+        return "reply ignored: no review in progress"
+    await _best_effort(_react(app, action.pr, "review", action.comment_id, REACTION_FIX), fields)
+    return f"signal {SIGNAL_COMMENT_POSTED} to {action.workflow_id}"
+
+
 async def finish_kill(event: dict, deadline: float) -> None:
     """Asynchronous self-invocation: stops the sessions the webhook invocation could not confirm in time."""
     followup = KillFollowup.model_validate(event)
@@ -75,7 +108,9 @@ async def finish_kill(event: dict, deadline: float) -> None:
 
 
 async def _fix(command: RunCommand, client: Client, app: GitHubApp, fields: dict[str, Any]) -> str:
-    requested = FixRequested(requested_by=command.author, delivery_id=command.delivery_id)
+    requested = FixRequested(
+        requested_by=command.author, delivery_id=command.delivery_id, thread_root_id=command.thread_root_id
+    )
     if await temporal_ops.signal(client, command.workflow_id, SIGNAL_FIX_REQUESTED, requested):
         await _best_effort(_react(app, command.pr, command.comment_kind, command.comment_id, REACTION_FIX), fields)
         return f"signal {SIGNAL_FIX_REQUESTED} to {command.workflow_id}"
@@ -144,6 +179,19 @@ async def _permission(app: GitHubApp, pr: PrRef, user: str) -> str | None:
             return None
         raise
     return response.json().get("permission")
+
+
+async def _comment_author(app: GitHubApp, pr: PrRef, comment_id: int) -> str | None:
+    """The author of a review comment, or None when it was deleted."""
+    try:
+        response = await app.request(
+            pr.installation_id, "GET", f"/repos/{pr.owner}/{pr.repo}/pulls/comments/{comment_id}"
+        )
+    except GitHubError as error:
+        if error.status == 404:
+            return None
+        raise
+    return (response.json().get("user") or {}).get("login")
 
 
 async def _react(app: GitHubApp, pr: PrRef, comment_kind: CommentKind, comment_id: int, content: str) -> None:

@@ -8,7 +8,7 @@ Four moments, in this order:
 | 1 | Scale from zero   | No worker at rest; Temporal starts one on AgentCore  |
 | 2 | Parallel agents   | Three reviewers as child workflows, then a synthesis |
 | 3 | Durability        | `/kill` stops the sessions; the review resumes       |
-| 4 | Human in the loop | `/fix`: an agent pushes a fix, the check turns green |
+| 4 | Human in the loop | Agent answers in a thread; `/fix` turns check green  |
 
 `<owner>` below is the owner of the demo repository
 `agentcore-review-demo-app`.
@@ -36,7 +36,9 @@ On a stable network, never on conference Wi-Fi:
    outlast the talk), `gh auth status`.
 3. **`make up`**: it must be a no-op ("already in ECR", "already the
    current version"). If it starts building an image, stop it (`Ctrl-C`)
-   and keep the deployed build.
+   and keep the deployed build. After any `make deploy`, demo on a fresh
+   PR only: a PR whose workflow started on an older build keeps the older
+   behaviour until its workflow moves to the new build.
 4. **Reset**: Actions, **Reset demo**, **Run workflow**, or
    `gh workflow run reset-demo.yml --repo <owner>/agentcore-review-demo-app`.
    Wait for the green run.
@@ -62,17 +64,18 @@ On a stable network, never on conference Wi-Fi:
 
 ## Run-through (15 minutes)
 
-| Time | Do                   | Show                                  | Moment |
-|------|----------------------|---------------------------------------|--------|
-| 0:00 | Architecture slide   | GitHub, router, Temporal, AgentCore   | —      |
-| 2:00 | Open the PR          | Workflow starts, then a session       | 1      |
-| 3:00 | Open the workflow    | Three reviewers in parallel           | 2      |
-| 4:00 | Comment `/kill`      | Sessions stop, work resumes           | 3      |
-| 5:30 | Back to GitHub       | Review, red `AI Review`, idle queue   | 4, 1   |
-| 6:30 | Comment `/fix`       | Cold start, the fixer pushes a commit | 4      |
-| 7:30 | Watch the new commit | Round 2, threads resolved, green      | —      |
-| 9:00 | Merge the PR         | Workflow completes with its outcome   | —      |
-| 9:30 | Buffer               | Code tour, questions                  | —      |
+| Time  | Do                   | Show                                | Moment |
+|-------|----------------------|-------------------------------------|--------|
+| 0:00  | Architecture slide   | GitHub, router, Temporal, AgentCore | —      |
+| 2:00  | Open the PR          | Workflow starts, then a session     | 1      |
+| 3:00  | Open the workflow    | Three reviewers in parallel         | 2      |
+| 4:00  | Comment `/kill`      | Sessions stop, work resumes         | 3      |
+| 5:30  | Back to GitHub       | Review, red `AI Review`, idle queue | 4, 1   |
+| 6:30  | Reply to a finding   | Cold start, an answer in the thread | 4, 1   |
+| 7:30  | Comment `/fix`       | The fixer pushes a commit           | 4      |
+| 8:30  | Watch the new commit | Round 2, threads resolved, green    | —      |
+| 10:00 | Merge the PR         | Workflow completes with its outcome | —      |
+| 10:30 | Buffer               | Code tour, questions                | —      |
 
 Talking points:
 
@@ -92,13 +95,21 @@ Talking points:
   and up, a summary, and a red `AI Review` check that blocks the merge.
   The workflow waits for a signal; its memo shows its state without any
   worker, and a minute later no worker listens on the queue.
-- **6:30, `/fix`.** Post it as a PR comment or as a reply to a finding
-  (either way, the fixer handles all findings). 👀 on the comment. A worker
-  starts on demand (cold if the session expired); the fixer child workflow
-  plans the change and the bot pushes one commit.
-- **7:30, long-lived workflow.** The commit triggers round 2 on the delta
+- **6:30, discussion.** Reply in the thread of the SQL injection finding:
+  "Why is this a problem? The input is validated upstream." 👀 on the
+  reply. A worker starts on demand; in Temporal UI, a `…-discussion-1`
+  child workflow checks the claim against the code with the same tools.
+  The bot answers in the thread with evidence, starting with
+  "**F-00x stays open.**" An agent may also dismiss a finding when the
+  code proves the human right; on stage, a question on a real defect keeps
+  the answer predictable.
+- **7:30, `/fix`.** Post it as a PR comment: the fixer handles every open
+  finding (in a finding's thread, `/fix` fixes that finding only). 👀 on
+  the comment. The fixer child workflow plans the change and the bot
+  pushes one commit.
+- **8:30, long-lived workflow.** The commit triggers round 2 on the delta
   only: fixed threads are resolved, the check turns green.
-- **9:00, lifecycle.** Merge: the workflow ends with its
+- **10:00, lifecycle.** Merge: the workflow ends with its
   `PullRequestOutcome` (merged, by whom, rounds, findings still open) and
   deletes the PR's snapshots.
 
@@ -142,5 +153,6 @@ Everything it needs is in the pre-stage checklist.
 | No workflow after the PR       | App settings, Recent Deliveries: Redeliver |
 | No worker 30 s after the start | Plan B                                     |
 | `/kill` answers nothing        | Carry on: the review completes anyway      |
+| No answer to the reply in 90 s | Skip it: comment `/fix` on the PR          |
 | Check red after `/fix`         | Admin merge: the outcome records it        |
 | Review slower than 3 minutes   | Tour the history meanwhile                 |

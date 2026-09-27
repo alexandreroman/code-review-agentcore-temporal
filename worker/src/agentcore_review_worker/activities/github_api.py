@@ -27,6 +27,7 @@ WRITE_SPACING_SECONDS = 1.0  # content creation is capped at 80 per minute and 5
 
 _secret_id: str | None = None
 _app: GitHubApp | None = None
+_slug: str | None = None
 _write_lock = asyncio.Lock()
 _last_write = 0.0
 
@@ -41,13 +42,20 @@ def configure(secret_id: str) -> None:
 
 def github() -> GitHubApp:
     """The process's GitHub App client, built on first use from Secrets Manager."""
-    global _app
+    global _app, _slug
     if _app is None:
         if _secret_id is None:
             raise RuntimeError("github_api.configure() was not called")
         secret = GitHubAppSecret.model_validate_json(read_secret(_secret_id))
         _app = GitHubApp(secret.client_id, secret.private_key)
+        _slug = secret.slug
     return _app
+
+
+def bot_login() -> str:
+    """The login on the app's own comments: "<app slug>[bot]"."""
+    github()  # reads the secret on first use
+    return f"{_slug}[bot]"
 
 
 # --- request helpers ---

@@ -1,4 +1,5 @@
-"""Review side effects on GitHub: the AI Review check, the round's review, thread resolution, the closing comment.
+"""Review side effects on GitHub: the AI Review check, the round's review, thread resolution and replies, the
+closing comment.
 
 Each one is idempotent: a hidden marker or the check run's external ID identifies what an earlier
 attempt already wrote.
@@ -10,9 +11,19 @@ from temporalio import activity
 
 from ..hunks import commentable_lines
 from ..markers import closing_marker, extract_finding_ids, round_marker
-from ..models import CheckInput, ClosingInput, PublishInput, ResolveInput
+from ..models import (
+    CheckInput,
+    ClosingInput,
+    PublishInput,
+    ResolveInput,
+    ThreadComment,
+    ThreadInput,
+    ThreadRead,
+    ThreadReplyInput,
+)
 from ..publishing import build_review
 from .github_api import (
+    bot_login,
     get,
     get_pages,
     github,
@@ -129,6 +140,40 @@ async def _review_threads(pr: PrRef) -> list[dict]:
         if not page["pageInfo"]["hasNextPage"]:
             return threads
         after = page["pageInfo"]["endCursor"]
+
+
+@activity.defn(name="read_thread")
+async def read_thread(input: ThreadInput) -> ThreadRead:
+    """A finding's review thread, oldest first: GitHub points every reply's in_reply_to_id at the thread's root."""
+    pr = input.pr
+    with github_errors():
+        comments = await get_pages(pr, f"{repo_path(pr)}/pulls/{pr.number}/comments")
+        login = bot_login()
+    thread = [c for c in comments if input.thread_root_id in (c["id"], c.get("in_reply_to_id"))]
+    thread.sort(key=lambda c: (c["created_at"], c["id"]))
+    return ThreadRead(
+        comments=[
+            ThreadComment(id=c["id"], author=(c.get("user") or {}).get("login", ""), body=c.get("body") or "")
+            for c in thread
+        ],
+        bot_login=login,
+    )
+
+
+@activity.defn(name="post_thread_reply")
+async def post_thread_reply(input: ThreadReplyInput) -> None:
+    """Reply in a finding's thread once: a retry finds the marker of the earlier attempt among the PR's comments."""
+    pr = input.pr
+    with github_errors():
+        comments = await get_pages(pr, f"{repo_path(pr)}/pulls/{pr.number}/comments")
+        if any(input.marker in (c.get("body") or "") for c in comments):
+            return
+        await send(
+            pr,
+            "POST",
+            f"{repo_path(pr)}/pulls/{pr.number}/comments/{input.thread_root_id}/replies",
+            {"body": input.body},
+        )
 
 
 @activity.defn(name="post_closing_comment")

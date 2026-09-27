@@ -3,7 +3,7 @@ name: e2e-validation
 description: >-
   End-to-end validation of Code Review with AgentCore x Temporal
   against the real AWS, Temporal Cloud and GitHub resources. Mode smoke
-  (default, 6 to 8 min) after a change to the worker, the router or the
+  (default, 8 to 10 min) after a change to the worker, the router or the
   infrastructure; mode full (about 30 min) before a conference. It opens,
   comments on and merges pull requests in the demo repository and spends
   Anthropic tokens.
@@ -18,12 +18,13 @@ anything else, or nothing, selects `smoke` (after a change).
 
 | Mode    | Target       | Steps, in run order                                 |
 | ------- | ------------ | --------------------------------------------------- |
-| `smoke` | 6 to 8 min   | P-0, Setup, 01-06, Report                           |
+| `smoke` | 8 to 10 min  | P-0, Setup, 01-06, Report                           |
 | `full`  | About 30 min | P-0, Setup, 01-06, reset, 04 x2, 06b, 07-09, Report |
 
 The smoke run walks one pull request through its whole life: opened
 (E2E-01), `/kill` during the review (E2E-02), round published (E2E-03),
-defects found (E2E-04), `/fix` (E2E-05), merge (E2E-06).
+defects found (E2E-04), a question in a finding's thread (E2E-04b), `/fix`
+(E2E-05), merge (E2E-06). The range 01-06 includes 04b.
 
 ## Rules
 
@@ -122,6 +123,10 @@ runs on the production queue, `main` is on `baseline` and both scenario
 branches on `scenario/customer-search`, `make kill-sessions` exited 0.
 **Stop** on failure.
 
+After a `make deploy`, always validate on a fresh pull request, as this
+run does: a pull request whose workflow started on an older build keeps
+the older behaviour until its workflow moves to the new build.
+
 ## E2E-01 — Scale-from-zero (timeout 180000)
 
 Requires Setup. Opens the pull request from `feature/customer-search`.
@@ -218,7 +223,7 @@ round1=("$WF" "$WF-r1-security" "$WF-r1-performance" "$WF-r1-maintainability" "$
 if ! wait_until 360 "round 1 published" round_published "$WF" 1; then
   if [[ -n "${KILL_AT:-}" ]]; then result E2E-02 FAIL "skipped: round 1 not published"; fi
   result E2E-03 FAIL "round 1 not published 6 min after the PR"
-  for step in E2E-04 E2E-05 E2E-06; do result "$step" FAIL "skipped: round 1 not published"; done
+  for step in E2E-04 E2E-04b E2E-05 E2E-06; do result "$step" FAIL "skipped: round 1 not published"; done
   collect "${round1[@]}"
   exit 1
 fi
@@ -295,6 +300,47 @@ a `-b<n>` suffix.
 Success: every defect found. On failure the step prints every finding: a
 finding on the right function just outside the range means line drift in
 the demo repository (compare with the tag), otherwise a reviewer missed it.
+
+## E2E-04b — Discussion in a finding's thread (timeout 180000)
+
+Requires E2E-03. Replies with a question in the thread of the round's first
+inline finding; the bot must answer in that thread within 90 s, either
+verdict.
+
+```bash
+bash <<'STEP'
+source .claude/skills/e2e-validation/helpers.sh
+fail() { result E2E-04b FAIL "$1"; collect "$WF" "$WF-discussion-1"; exit 1; }
+root=$(gh api "repos/$REPO/pulls/$PR/comments?per_page=100" --jq '[.[] | select(.user.type == "Bot"
+  and .in_reply_to_id == null and (.body | contains("<!-- finding:F-")))][0].id // empty')
+[[ -n "$root" ]] || fail "no inline finding on PR #$PR"
+asked=$(now)
+cid=$(gh api "repos/$REPO/pulls/$PR/comments/$root/replies" --jq .id \
+  -f body="Why is this a problem? The input is validated upstream.") || fail "reply not posted"
+answer() {
+  gh api "repos/$REPO/pulls/$PR/comments?per_page=100" --jq "[.[] | select(.user.type == \"Bot\"
+    and .in_reply_to_id == $root and (.body | contains(\"<!-- reply:$WF:\")))][0].body // empty"
+}
+answered() { [[ -n "$(answer)" ]]; }
+wait_until 90 "bot answer in the thread" answered || fail "no bot answer 90 s after the reply"
+answer_s=$(($(now) - asked))
+eyes=$(gh api "repos/$REPO/pulls/comments/$cid/reactions" --jq 'map(.content) | index("eyes") != null')
+verdict=$(answer | head -n 1 | grep -oE '^\*\*F-[0-9]+ (stays open|dismissed)\.\*\*' || true)
+child=$(describe "$WF-discussion-1" 2>/dev/null | jq -r '.workflowExecutionInfo.type.name // empty')
+if [[ "$eyes" == true && -n "$verdict" && "$child" == DiscussionWorkflow ]]; then
+  result E2E-04b ok "answered in ${answer_s}s: $verdict, child $WF-discussion-1"
+else
+  fail "eyes=$eyes, verdict line '${verdict:-none}', child '${child:-none}'"
+fi
+STEP
+```
+
+Success: 👀 (`eyes`) on the reply; within 90 s, a bot reply in the same
+thread carries a `<!-- reply:<workflow id>:<comment id> -->` marker (the
+comment ID of the reply) and starts with `**F-<n> stays open.**` or
+`**F-<n> dismissed.**`; the workflow has a `<workflow id>-discussion-1`
+child of type `DiscussionWorkflow`. A dismissal is valid: E2E-05 then
+fixes the findings left open.
 
 ## E2E-05 — `/fix` (timeout 600000)
 
@@ -628,6 +674,7 @@ drain by themselves, and the next run's Setup resets the demo repository
 | Workflow started, no task  | Current version, queue attachment            |
 | E2E-04 misses a defect     | Printed findings: line drift or a real miss  |
 | No fix commit              | Fixer history; "branch changed" comment      |
+| No answer in the thread    | `router.log` for the reply; discussion child |
 
 A delivery that never reached the router appears in the app's settings
 (Advanced, Recent Deliveries); ask the human to redeliver it there.

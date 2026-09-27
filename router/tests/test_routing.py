@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 from agentcore_review_router.routing import (
+    ForwardReply,
     Ignore,
     RouterConfig,
     RunCommand,
@@ -120,17 +121,54 @@ def test_commands_in_reply_to_a_review_comment(body, command):
     assert result.pr.number == 3
 
 
+def test_fix_in_a_review_thread_carries_the_thread_root():
+    result = route("pull_request_review_comment", load("pull_request_review_comment"), "d", CONFIG)
+    assert isinstance(result, RunCommand) and result.thread_root_id == 666
+
+
+def test_fix_as_a_top_level_review_comment_fixes_everything():
+    payload = load("pull_request_review_comment")
+    del payload["comment"]["in_reply_to_id"]
+    result = route("pull_request_review_comment", payload, "d", CONFIG)
+    assert isinstance(result, RunCommand) and result.thread_root_id is None
+
+
+def test_fix_in_the_conversation_fixes_everything():
+    result = route("issue_comment", load("issue_comment"), "d", CONFIG)
+    assert isinstance(result, RunCommand) and result.thread_root_id is None
+
+
+@pytest.mark.parametrize("body", ["Why? The input is validated upstream.", "please /fix", "/FIX"])
+def test_plain_replies_in_a_review_thread_are_forwarded(body):
+    payload = load("pull_request_review_comment")
+    payload["comment"]["body"] = body
+    result = route("pull_request_review_comment", payload, "d", CONFIG)
+    assert isinstance(result, ForwardReply)
+    assert (result.workflow_id, result.comment_id, result.thread_root_id, result.author, result.delivery_id) == (
+        WF,
+        777,
+        666,
+        "octocat",
+        "d",
+    )
+    assert result.bot_login == "tar-bot[bot]"
+    assert result.pr.number == 3
+
+
 @pytest.mark.parametrize("event", COMMENT_EVENTS)
 @pytest.mark.parametrize("body", ["/fixit", "please /fix", "/FIX", "", "LGTM", "/review"])
-def test_non_commands_are_ignored(event, body):
+def test_non_commands_outside_a_review_thread_are_ignored(event, body):
     payload = load(event)
     payload["comment"]["body"] = body
+    payload["comment"].pop("in_reply_to_id", None)
     assert isinstance(route(event, payload, "d", CONFIG), Ignore)
 
 
 @pytest.mark.parametrize("event", COMMENT_EVENTS)
-def test_bot_comments_are_ignored_by_login(event):
+@pytest.mark.parametrize("body", ["/fix", "Why?"])
+def test_bot_comments_are_ignored_by_login(event, body):
     payload = load(event)
+    payload["comment"]["body"] = body
     payload["sender"] = {"login": "tar-bot[bot]"}
     assert isinstance(route(event, payload, "d", CONFIG), Ignore)
 

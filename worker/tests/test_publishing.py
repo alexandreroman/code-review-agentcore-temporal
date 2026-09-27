@@ -1,12 +1,19 @@
-from agentcore_review_shared.contract import Finding
-from agentcore_review_worker.models import FileChange, ReviewContent
+from agentcore_review_shared.contract import Finding, PullRequestState
+from agentcore_review_worker.lifecycle import dismiss
+from agentcore_review_worker.markers import reply_marker
+from agentcore_review_worker.models import DiscussionReply, FileChange, ReviewContent, ThreadComment
 from agentcore_review_worker.publishing import (
     MAX_BODY_CHARS,
     MAX_INLINE_COMMENTS,
+    bot_answers,
+    budget_reply,
     build_review,
     check_output,
     closing_comment,
     comment_body,
+    failed_reply,
+    no_longer_open_reply,
+    reply_body,
     split_changes,
     unavailable_check_output,
 )
@@ -111,6 +118,14 @@ def test_check_output_names_the_unavailable_reviewers():
     assert "maintainability" in summary
 
 
+def test_dismissing_the_last_blocking_finding_turns_the_check_green():
+    state = PullRequestState(open_findings=[finding("F-001"), finding("F-002", severity="low")])
+    assert check_output(state.open_findings, [])[0] == "failure"
+    dismiss(state, "F-001", "not reachable", "alice")
+    conclusion, title, _ = check_output(state.open_findings, [])
+    assert conclusion == "success" and title == "1 open finding, 0 blocking"
+
+
 def test_unavailable_check_output_lists_every_reviewer():
     title, summary = unavailable_check_output(3, ["security", "performance", "maintainability"])
     assert title == "Review unavailable"
@@ -127,6 +142,31 @@ def test_closing_comment_calls_out_a_bypass():
 
 def test_closing_comment_without_blocking_findings():
     assert closing_comment(None, [finding("F-002", severity="low")]) == "Merged with 1 open finding: F-002 (low)."
+
+
+def test_a_thread_reply_starts_with_the_verdict_and_ends_with_its_marker():
+    keep = reply_body(
+        "F-004", DiscussionReply(verdict="keep", answer=" The query is still built by hand. "), "<!-- m -->"
+    )
+    assert keep == "**F-004 stays open.** The query is still built by hand.\n\n<!-- m -->"
+    dismissed = reply_body("F-004", DiscussionReply(verdict="dismiss", answer="Right."), "<!-- m -->")
+    assert dismissed.startswith("**F-004 dismissed.** Right.")
+
+
+def test_only_the_agents_answers_count_toward_the_budget():
+    marker = reply_marker("pr-o-r-3", 777)
+    answer = reply_body("F-001", DiscussionReply(verdict="keep", answer="Still unsafe."), marker)
+    thread = [
+        ThreadComment(id=1, author="bot[bot]", body=comment_body(finding("F-001"))),
+        ThreadComment(id=2, author="alice", body="why?"),
+        ThreadComment(id=3, author="bot[bot]", body=answer),
+        ThreadComment(id=4, author="bot[bot]", body=failed_reply(marker)),
+        ThreadComment(id=5, author="bot[bot]", body=budget_reply(marker)),
+        ThreadComment(id=6, author="bot[bot]", body=no_longer_open_reply("F-001", marker)),
+        ThreadComment(id=7, author="alice", body=answer),
+    ]
+    assert bot_answers(thread, "bot[bot]") == 1
+    assert bot_answers([], "bot[bot]") == 0
 
 
 def test_split_changes_rejects_protected_and_escaping_paths():

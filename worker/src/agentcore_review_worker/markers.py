@@ -3,6 +3,7 @@
 import re
 
 _FINDING = re.compile(r"<!-- finding:(F-\d+) -->")
+_REPLY = re.compile(r"<!-- reply:\S+:\d+ -->")
 
 
 def finding_marker(finding_id: str) -> str:
@@ -15,6 +16,15 @@ def round_marker(workflow_id: str, round_number: int) -> str:
 
 def closing_marker(workflow_id: str) -> str:
     return f"<!-- closing:{workflow_id} -->"
+
+
+def reply_marker(workflow_id: str, comment_id: int) -> str:
+    """Marks the bot's reply to one human comment: posted once, whatever the retries."""
+    return f"<!-- reply:{workflow_id}:{comment_id} -->"
+
+
+def has_reply_marker(text: str) -> bool:
+    return _REPLY.search(text) is not None
 
 
 def fix_trailer(workflow_id: str, fix_number: int) -> str:

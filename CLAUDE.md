@@ -35,7 +35,7 @@ make up        # deploy everything (AWS, worker, GitHub)
 
 The `e2e-validation` project skill
 (`.claude/skills/e2e-validation/`) validates the deployed demo end to end:
-`/e2e-validation` (smoke, 6 to 8 minutes) after a change to the worker,
+`/e2e-validation` (smoke, 8 to 10 minutes) after a change to the worker,
 the router or the infrastructure, `/e2e-validation full` (about 30
 minutes) before a conference. It uses real resources, opens pull requests
 in the demo repository and spends Anthropic tokens: run it only when asked.

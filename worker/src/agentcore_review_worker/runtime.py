@@ -14,13 +14,21 @@ from .activities.pulls import PullActivities
 from .activities.snapshots import SnapshotActivities
 from .agent_model import strands_plugin
 from .settings import AppSettings, WorkerSettings
+from .workflows.discussion import DiscussionWorkflow
 from .workflows.fixer import FixerWorkflow
 from .workflows.ping import PingWorkflow
 from .workflows.pull_request import PullRequestWorkflow
 from .workflows.reviewer import ReviewerWorkflow
 from .workflows.synthesis import SynthesisWorkflow
 
-WORKFLOWS: list[type] = [PingWorkflow, PullRequestWorkflow, ReviewerWorkflow, SynthesisWorkflow, FixerWorkflow]
+WORKFLOWS: list[type] = [
+    PingWorkflow,
+    PullRequestWorkflow,
+    ReviewerWorkflow,
+    SynthesisWorkflow,
+    FixerWorkflow,
+    DiscussionWorkflow,
+]
 
 
 def activities(settings: AppSettings, identity: str) -> list[Callable]:
@@ -36,6 +44,8 @@ def activities(settings: AppSettings, identity: str) -> list[Callable]:
         reviews.set_check,
         reviews.publish_review,
         reviews.resolve_threads,
+        reviews.read_thread,
+        reviews.post_thread_reply,
         reviews.post_closing_comment,
         commits.commit_changes,
         tools.glob_tool,

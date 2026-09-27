@@ -2,7 +2,7 @@
 
 It handles metadata only (paths, SHAs, snapshot keys, findings); patches and file contents stay in the
 agents' child workflows. Continue-as-new happens between two rounds only, since it would terminate
-running children, and carries the pending push and fix request over.
+running children, and carries the pending push, fix request and thread replies over.
 """
 
 import asyncio
@@ -11,6 +11,7 @@ from temporalio import workflow
 from temporalio.exceptions import ActivityError, ChildWorkflowError
 
 from agentcore_review_worker.workflows import policies
+from agentcore_review_worker.workflows.discussion import DiscussionWorkflow
 from agentcore_review_worker.workflows.fixer import FixerWorkflow
 from agentcore_review_worker.workflows.reviewer import ReviewerWorkflow
 from agentcore_review_worker.workflows.synthesis import SynthesisWorkflow
@@ -18,17 +19,19 @@ from agentcore_review_worker.workflows.synthesis import SynthesisWorkflow
 with workflow.unsafe.imports_passed_through():
     from agentcore_review_shared.contract import (
         PULL_REQUEST_WORKFLOW,
+        SIGNAL_COMMENT_POSTED,
         SIGNAL_FIX_REQUESTED,
         SIGNAL_PR_CLOSED,
         SIGNAL_PR_UPDATED,
         Category,
+        CommentPosted,
         FixRequested,
         PrClosed,
         PrUpdated,
         PullRequestInput,
     )
 
-    from agentcore_review_worker import lifecycle, publishing
+    from agentcore_review_worker import lifecycle, markers, publishing
     from agentcore_review_worker.batching import make_batches
     from agentcore_review_worker.models import (
         BatchInput,
@@ -36,6 +39,8 @@ with workflow.unsafe.imports_passed_through():
         CheckInput,
         ClosingInput,
         CommitResult,
+        DiscussionInput,
+        DiscussionReply,
         FixerInput,
         ListFilesInput,
         PublishInput,
@@ -48,6 +53,9 @@ with workflow.unsafe.imports_passed_through():
         SnapshotInput,
         SnapshotRef,
         SynthesisInput,
+        ThreadInput,
+        ThreadRead,
+        ThreadReplyInput,
     )
 
 
@@ -64,6 +72,10 @@ def _fixer_workflow_id(pr_id: str, fix_number: int) -> str:
     return f"{pr_id}-fix{fix_number}"
 
 
+def _discussion_workflow_id(pr_id: str, discussion_number: int) -> str:
+    return f"{pr_id}-discussion-{discussion_number}"
+
+
 @workflow.defn(name=PULL_REQUEST_WORKFLOW)
 class PullRequestWorkflow:
     @workflow.init
@@ -73,6 +85,7 @@ class PullRequestWorkflow:
         self._state = input.state
         self._closed: PrClosed | None = None
         self._reviewing_sha: str | None = None
+        self._phase = ""  # the memo's state, restored once a reply is answered
 
     @workflow.run
     async def run(self, input: PullRequestInput) -> PullRequestOutcome:
@@ -87,8 +100,10 @@ class PullRequestWorkflow:
                 return await self._finish()
             if action == "review":
                 await self._review()
-            else:
+            elif action == "fix":
                 await self._fix()
+            else:
+                await self._reply()
 
     @workflow.signal(name=SIGNAL_PR_UPDATED)
     def pr_updated(self, update: PrUpdated) -> None:
@@ -99,6 +114,16 @@ class PullRequestWorkflow:
     def fix_requested(self, request: FixRequested) -> None:
         if not lifecycle.record_fix_request(self._state, request):
             workflow.logger.info("fix request ignored: delivery %s already seen", request.delivery_id)
+
+    @workflow.signal(name=SIGNAL_COMMENT_POSTED)
+    def comment_posted(self, reply: CommentPosted) -> None:
+        queue_full = len(self._state.pending_replies) >= lifecycle.MAX_PENDING_REPLIES
+        if lifecycle.record_reply(self._state, reply):
+            if queue_full:
+                workflow.logger.warning("reply queue full: the oldest queued reply is dropped")
+            workflow.logger.info("reply by %s queued (thread %d)", reply.author, reply.thread_root_id)
+        else:
+            workflow.logger.info("reply ignored: delivery %s already seen", reply.delivery_id)
 
     @workflow.signal(name=SIGNAL_PR_CLOSED)
     def pr_closed(self, closed: PrClosed) -> None:
@@ -112,6 +137,7 @@ class PullRequestWorkflow:
         return lifecycle.next_action(self._state, self._closed is not None)
 
     def _memo(self, phase: str) -> None:
+        self._phase = phase
         workflow.upsert_memo(lifecycle.memo(phase, self._state))
 
     async def _continue_as_new_if_needed(self) -> None:
@@ -176,6 +202,7 @@ class PullRequestWorkflow:
         state, number = self._state, self._state.round
         if not change.files:
             state.last_reviewed_sha = change.head_sha
+            state.last_reviewed_round = number
             await self._complete_check(check, *publishing.check_output(state.open_findings, []))
             return True
         snapshot = await self._snapshot(change.head_sha)
@@ -212,8 +239,10 @@ class PullRequestWorkflow:
             PublishInput(pr=self._pr, head_sha=change.head_sha, workflow_id=self._id, content=content)
         )
         state.next_finding_number = next_finding_number
+        lifecycle.record_resolved(state, resolved)
         state.open_findings = still_open + [f.model_copy(update={"comment_id": comment_ids.get(f.id)}) for f in kept]
         state.last_reviewed_sha = change.head_sha
+        state.last_reviewed_round = number
         if resolved:
             await self._resolve(resolved)
         await self._complete_check(check, *publishing.check_output(state.open_findings, unavailable))
@@ -226,6 +255,7 @@ class PullRequestWorkflow:
         jobs: list[tuple[str, str, ReviewerInput]] = []
         for category in Category:
             open_in_category = [f for f in self._state.open_findings if f.category == category]
+            dismissed_in_category = [d for d in self._state.dismissed_findings if d.finding.category == category]
             for index, batch in enumerate(batches, start=1):
                 batch_number = index if len(batches) > 1 else None
                 label = str(category) if batch_number is None else f"{category} (batch {index})"
@@ -236,6 +266,7 @@ class PullRequestWorkflow:
                         pr=self._pr, diff_base=change.diff_base, head_sha=change.head_sha, paths=[f.path for f in batch]
                     ),
                     open_findings=open_in_category,
+                    dismissed_findings=dismissed_in_category,
                 )
                 jobs.append((_reviewer_workflow_id(self._id, number, category, batch_number), label, reviewer))
         slots = asyncio.Semaphore(change.max_parallel_agents)
@@ -330,8 +361,16 @@ class PullRequestWorkflow:
     async def _fix(self) -> None:
         state = self._state
         request, state.pending_fix = state.pending_fix, None
+        thread_root_ids, state.pending_fix_roots = state.pending_fix_roots, None
         assert request is not None
-        if not state.open_findings or state.last_reviewed_sha is None:
+        findings = lifecycle.fix_targets(state, thread_root_ids)
+        if thread_root_ids is not None:
+            targeted = {f.comment_id for f in findings}
+            for root in thread_root_ids:
+                if root not in targeted:
+                    # Keyed on the thread: a /fix in a closed thread gets this answer once.
+                    await self._answer_closed_thread(root, markers.reply_marker(self._id, root))
+        if not findings or state.last_reviewed_sha is None:
             workflow.logger.info("fix requested by %s ignored: no open finding", request.requested_by)
             return
         state.fix_count += 1
@@ -344,7 +383,7 @@ class PullRequestWorkflow:
                 fix_number=state.fix_count,
                 expected_head_sha=state.last_reviewed_sha,
                 snapshot=snapshot,
-                findings=state.open_findings,
+                findings=findings,
             )
             result: CommitResult = await workflow.execute_child_workflow(
                 FixerWorkflow.run,
@@ -359,6 +398,91 @@ class PullRequestWorkflow:
         except (ActivityError, ChildWorkflowError) as error:
             workflow.logger.error("fix %d failed: %s", state.fix_count, error.cause or error)
             self._memo("fix failed, waiting for changes")
+
+    # --- discussion in a finding's thread ---
+
+    async def _reply(self) -> None:
+        """Answer the oldest queued reply; a dismissal also resolves the thread and recomputes the check."""
+        state = self._state
+        reply = state.pending_replies.pop(0)
+        marker = markers.reply_marker(self._id, reply.comment_id)
+        finding = lifecycle.reply_target(state, reply.thread_root_id)
+        if finding is None:
+            await self._answer_closed_thread(reply.thread_root_id, marker)
+            return
+        phase = self._phase
+        self._memo(f"answering @{reply.author} on {finding.id}")
+        try:
+            thread: ThreadRead = await workflow.execute_activity(
+                "read_thread",
+                ThreadInput(pr=self._pr, thread_root_id=reply.thread_root_id),
+                result_type=ThreadRead,
+                **policies.READ_THREAD,
+            )
+            if not lifecycle.reply_budget_left(publishing.bot_answers(thread.comments, thread.bot_login)):
+                await self._post_reply(reply.thread_root_id, publishing.budget_reply(marker), marker)
+                return
+            assert state.last_reviewed_sha is not None  # a finding exists only after a published round
+            snapshot = await self._snapshot(state.last_reviewed_sha)
+            comments = lifecycle.discussion_thread(thread.comments, thread.bot_login, reply.author, reply.comment_id)
+            state.discussion_count += 1
+            number = state.discussion_count
+            try:
+                answer: DiscussionReply = await workflow.execute_child_workflow(
+                    DiscussionWorkflow.run,
+                    DiscussionInput(finding=finding, thread=comments, author=reply.author, snapshot=snapshot),
+                    id=_discussion_workflow_id(self._id, number),
+                    run_timeout=policies.CHILD_RUN_TIMEOUT,
+                    static_summary="discussion",
+                )
+            except ChildWorkflowError as error:
+                workflow.logger.error("discussion %d failed: %s", number, error.cause or error)
+                await self._post_reply(reply.thread_root_id, publishing.failed_reply(marker), marker)
+                return
+            await self._post_reply(reply.thread_root_id, publishing.reply_body(finding.id, answer, marker), marker)
+            if answer.verdict == "dismiss":
+                lifecycle.dismiss(state, finding.id, answer.answer, reply.author)
+                await self._resolve([finding.id])
+                await self._refresh_check()
+        except ActivityError as error:
+            workflow.logger.error("reply to %s on %s failed: %s", reply.author, finding.id, error.cause or error)
+        finally:
+            self._memo(phase)
+
+    async def _answer_closed_thread(self, thread_root_id: int, marker: str) -> None:
+        """A reply or /fix in the thread of a dismissed or resolved finding: a short answer, no agent.
+
+        Any other thread is not a finding of this pull request: it is left alone.
+        """
+        finding_id = lifecycle.was_finding_thread(self._state, thread_root_id)
+        if finding_id is None:
+            return
+        try:
+            await self._post_reply(thread_root_id, publishing.no_longer_open_reply(finding_id, marker), marker)
+        except ActivityError as error:
+            workflow.logger.warning("no-longer-open answer not posted: %s", error.cause or error)
+
+    async def _post_reply(self, thread_root_id: int, body: str, marker: str) -> None:
+        await workflow.execute_activity(
+            "post_thread_reply",
+            ThreadReplyInput(pr=self._pr, thread_root_id=thread_root_id, body=body, marker=marker),
+            **policies.POST_THREAD_REPLY,
+        )
+
+    async def _refresh_check(self) -> None:
+        """Recompute the last round's check after a dismissal: it turns green once no blocking finding is left."""
+        state = self._state
+        # A state carried over from a version without last_reviewed_round leaves the check as it is.
+        if state.last_reviewed_sha is None or state.last_reviewed_round is None:
+            return
+        check = CheckInput(
+            pr=self._pr,
+            head_sha=state.last_reviewed_sha,
+            external_id=f"{self._id}:{state.last_reviewed_round}",
+            status="in_progress",
+        )
+        # The round's "reviewers unavailable" note drops out of the check here: accepted, for simplicity.
+        await self._complete_check(check, *publishing.check_output(state.open_findings, []))
 
     # --- end ---
 

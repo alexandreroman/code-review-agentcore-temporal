@@ -13,7 +13,7 @@ from typing import Any
 from agentcore_review_shared.secrets import GitHubAppSecret
 
 from . import commands, runtime, temporal_ops
-from .routing import Ignore, RouterConfig, RunCommand, SendSignal, StartOrSignal, load_payload, route
+from .routing import ForwardReply, Ignore, RouterConfig, RunCommand, SendSignal, StartOrSignal, load_payload, route
 from .signature import decode_body, verify_signature
 
 logger = logging.getLogger(__name__)
@@ -87,7 +87,9 @@ def _load_router_config(fields: dict[str, Any]) -> tuple[GitHubAppSecret, Router
         return None
 
 
-async def _act(action: StartOrSignal | SendSignal | RunCommand, fields: dict[str, Any], deadline: float) -> Reply:
+async def _act(
+    action: StartOrSignal | SendSignal | RunCommand | ForwardReply, fields: dict[str, Any], deadline: float
+) -> Reply:
     client = await runtime.temporal_client()
     if isinstance(action, StartOrSignal):
         fields["task_queue"] = action.task_queue
@@ -98,6 +100,8 @@ async def _act(action: StartOrSignal | SendSignal | RunCommand, fields: dict[str
         if await temporal_ops.signal(client, action.workflow_id, action.signal_name, action.payload):
             return 202, f"signal {action.signal_name} to {action.workflow_id}"
         return 204, "no running workflow"
+    if isinstance(action, ForwardReply):
+        return 202, await commands.forward_reply(action, client)
     return 202, await commands.run(action, client, deadline)
 
 

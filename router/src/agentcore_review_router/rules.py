@@ -1,4 +1,5 @@
-"""Pure command rules: who may run /fix and /kill, which sessions /kill targets, and what the bot answers."""
+"""Pure command rules: who may run /fix and /kill, which threads are findings, which sessions /kill targets, and
+what the bot answers."""
 
 from collections import Counter
 from collections.abc import Iterable
@@ -26,6 +27,11 @@ RETRYABLE_STOP_ERRORS = frozenset({"ConflictException", "ThrottlingException", "
 def can_run_commands(permission: str | None) -> bool:
     """author_association is not enough (MEMBER does not grant write): the collaborator permission decides."""
     return permission in WRITE_PERMISSIONS
+
+
+def is_bot_login(login: str | None, bot_login: str) -> bool:
+    """The GitHub App comments as "<app slug>[bot]"; a human may pick the bare slug as a user name."""
+    return login == bot_login
 
 
 def kill_targets(identities: Iterable[str]) -> list[AgentCoreSession]:

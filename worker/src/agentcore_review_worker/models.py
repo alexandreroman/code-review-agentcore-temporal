@@ -6,7 +6,7 @@ contents appear only in the reviewer and fixer children.
 
 from typing import Literal
 
-from agentcore_review_shared.contract import Category, Finding, FindingDraft, PrRef
+from agentcore_review_shared.contract import Category, DismissedFinding, Finding, FindingDraft, PrRef
 from pydantic import BaseModel, Field
 
 # Here rather than in agent_model so that workflow code can import it without agent_model's I/O libraries.
@@ -70,6 +70,7 @@ class ReviewerInput(BaseModel):
     snapshot: SnapshotRef
     batch: BatchInput
     open_findings: list[Finding] = Field(default_factory=list)
+    dismissed_findings: list[DismissedFinding] = Field(default_factory=list)
 
 
 class SynthesisInput(BaseModel):
@@ -88,7 +89,20 @@ class FixerInput(BaseModel):
     findings: list[Finding]
 
 
-# Structured outputs of the reviewer, synthesis and fixer agents: the field descriptions reach the model.
+class ThreadComment(BaseModel):
+    id: int
+    author: str
+    body: str
+
+
+class DiscussionInput(BaseModel):
+    finding: Finding
+    thread: list[ThreadComment]  # the bot's comments and the author's, up to the reply to answer
+    author: str  # the human to answer
+    snapshot: SnapshotRef
+
+
+# Structured outputs of the reviewer, synthesis, fixer and discussion agents: the field descriptions reach the model.
 
 
 class ReviewerReport(BaseModel):
@@ -114,6 +128,13 @@ class FixPlan(BaseModel):
     commit_message: str = Field(
         description="Imperative subject of at most 50 characters, a blank line, then one line per fixed finding"
     )
+
+
+class DiscussionReply(BaseModel):
+    verdict: Literal["keep", "dismiss"] = Field(
+        description="dismiss only when the code shows the finding is wrong or does not apply"
+    )
+    answer: str = Field(description="Markdown answer to the human, about 150 words at most")
 
 
 class CheckInput(BaseModel):
@@ -153,6 +174,23 @@ class ClosingInput(BaseModel):
     pr: PrRef
     workflow_id: str
     body: str
+
+
+class ThreadInput(BaseModel):
+    pr: PrRef
+    thread_root_id: int
+
+
+class ThreadRead(BaseModel):
+    comments: list[ThreadComment]  # the finding first, then the replies in order
+    bot_login: str  # "<app slug>[bot]": tells the bot's replies from the humans'
+
+
+class ThreadReplyInput(BaseModel):
+    pr: PrRef
+    thread_root_id: int
+    body: str
+    marker: str  # idempotence: nothing is posted when a comment of the pull request already carries it
 
 
 class CommitInput(BaseModel):
