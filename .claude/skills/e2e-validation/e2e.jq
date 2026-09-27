@@ -57,10 +57,19 @@ def resumed_starts($killed):
             and (.identity as $i | $killed | index($i) | not))
    | .started];
 
+# Decode a json/plain payload ({metadata, data}) into the value it carries;
+# any other object passes through unchanged. `temporal ... -o json` leaves
+# payloads base64-encoded, it does not decode them.
+def decoded:
+  if (.metadata.encoding? // "") == "anNvbi9wbGFpbg==" and (.data | type) == "string"
+  then (.data | @base64d | fromjson)
+  else . end;
+
 # Value returned by a completed execution: the first object of the completion
-# event that has every key of $keys (the CLI decodes json/plain payloads).
+# event that has every key of $keys, decoding json/plain payloads first.
 def result_with($keys):
   [.events[] | select(.workflowExecutionCompletedEventAttributes) | .. | objects
+   | decoded | .. | objects
    | select(. as $o | all($keys[]; . as $k | $o | has($k)))]
   | first;
 
