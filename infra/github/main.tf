@@ -46,6 +46,13 @@ variable "demo_repo" {
   default = "agentcore-review-demo-app"
 }
 
+# The rulesets name the app as a bypass actor, which GitHub accepts only
+# once the app is installed on the repository; `make github` sets this.
+variable "app_installed" {
+  type    = bool
+  default = false
+}
+
 provider "aws" {
   region = var.region
   default_tags {
@@ -82,6 +89,7 @@ resource "github_repository" "demo" {
 }
 
 resource "github_repository_ruleset" "main" {
+  count       = var.app_installed ? 1 : 0
   name        = "main"
   repository  = github_repository.demo.name
   target      = "branch"
@@ -122,6 +130,7 @@ resource "github_repository_ruleset" "main" {
 # The scenario tags anchor the review batches (plan 5): once pushed, they must
 # stay in place, so a reset can't silently drift the demo.
 resource "github_repository_ruleset" "tags" {
+  count       = var.app_installed ? 1 : 0
   name        = "tags"
   repository  = github_repository.demo.name
   target      = "tag"

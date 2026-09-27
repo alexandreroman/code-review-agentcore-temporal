@@ -183,6 +183,8 @@ require-github-app:
 github: infra-init require-github-app ## Apply the github stack (demo repository, ruleset, Actions secrets)
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
 	GITHUB_TOKEN=$$(gh auth token) TF_VAR_github_owner=$(GITHUB_OWNER) \
+		TF_VAR_app_installed=$$($(TOOLS).github_app installation-id --owner $(GITHUB_OWNER) --repo $(DEMO_REPO) \
+			>/dev/null 2>&1 && echo true || echo false) \
 		$(TOFU_GITHUB) apply -input=false -auto-approve
 
 .PHONY: deploy

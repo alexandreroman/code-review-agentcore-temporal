@@ -186,8 +186,7 @@ credentials go straight to Secrets Manager.
 make up
 ```
 
-This run creates the public repository `agentcore-review-demo-app`, its
-ruleset on `main` (required `AI Review` check, admin and app bypass) and
+This run creates the public repository `agentcore-review-demo-app` and
 the Actions secrets of the reset workflow, then prints (on one line):
 
 ```text
@@ -195,9 +194,14 @@ Action needed: install GitHub App <slug> on <owner>/agentcore-review-demo-app:
 https://github.com/apps/<slug>/installations/new
 ```
 
+GitHub only accepts an app as a ruleset bypass actor once it is installed
+on the repository, so the rulesets wait for the next run.
+
 Open the link, choose **Only select repositories**, pick
-`agentcore-review-demo-app`, and install. Run `make up` once more: it ends
-with `GitHub App <slug> is installed on <owner>/agentcore-review-demo-app.`
+`agentcore-review-demo-app`, and install. Run `make up` once more: it adds
+the ruleset on `main` (required `AI Review` check, admin and app bypass)
+and the ruleset on the `baseline` and `scenario/*` tags, then ends with
+`GitHub App <slug> is installed on <owner>/agentcore-review-demo-app.`
 
 ## 10. Push the demo repository
 
