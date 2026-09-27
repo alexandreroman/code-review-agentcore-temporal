@@ -9,7 +9,7 @@ set -euo pipefail
 
 source scripts/lib.sh
 
-PREFIX="temporal-agentcore-review-demo"
+PREFIX="code-review-agentcore-temporal"
 
 require_pem() {
   local path="$1" var_name="$2"

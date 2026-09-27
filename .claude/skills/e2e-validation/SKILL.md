@@ -1,7 +1,7 @@
 ---
 name: e2e-validation
 description: >-
-  End-to-end validation of Agentic Code Review with AgentCore x Temporal
+  End-to-end validation of Code Review with AgentCore x Temporal
   against the real AWS, Temporal Cloud and GitHub resources. Mode smoke
   (default, 6 to 8 min) after a change to the worker, the router or the
   infrastructure; mode full (about 30 min) before a conference. It opens,

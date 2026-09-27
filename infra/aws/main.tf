@@ -1,7 +1,7 @@
 data "aws_caller_identity" "current" {}
 
 locals {
-  name             = "temporal-agentcore-review-demo"
+  name             = "code-review-agentcore-temporal"
   component_prefix = "agentcore-review-demo"
   account_id       = data.aws_caller_identity.current.account_id
   deployed         = var.build_id != ""

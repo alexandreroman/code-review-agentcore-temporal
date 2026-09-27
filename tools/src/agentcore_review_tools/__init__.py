@@ -1,1 +1,1 @@
-"""Deployment tooling of temporal-agentcore-review-demo, driven by the Makefile."""
+"""Deployment tooling of code-review-agentcore-temporal, driven by the Makefile."""

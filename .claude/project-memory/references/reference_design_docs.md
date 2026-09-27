@@ -6,7 +6,7 @@ type: reference
 
 # Design docs location
 
-The design spec (`specs/2026-09-25-temporal-agentcore-review-demo-design.md`),
+The design spec (`specs/2026-09-25-code-review-agentcore-temporal-design.md`),
 the implementation plans, `DECISIONS.md` and the spike results live in
 `docs/superpowers/`, on the maintainer's machine only. The whole `docs/`
 directory is git-ignored: these documents are never committed. The public

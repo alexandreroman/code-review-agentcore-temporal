@@ -28,7 +28,7 @@
 - [Makefile as the single entry point](references/feedback_makefile_only.md) — make targets delegate to scripts/*.sh; logic never in recipes
 - [Ask before implementing](references/feedback_ask_before_implementing.md) — present a plan and wait for approval before carrying it out
 - [English only for generated text](references/feedback_english_only.md) — all generated text (code, docs, commits, memory) is in English
-- [Project title and code name](references/project_naming.md) — title in human-facing docs, temporal-agentcore-review-demo in code
+- [Project title and code name](references/project_naming.md) — title in docs, code-review-agentcore-temporal in code, app name for GitHub
 - [Amend unpushed commits instead of stacking fixes](references/feedback_amend_unpushed.md) — fold fixes into the unpushed commit they correct
 - [Placeholders for account identifiers](references/feedback_no_real_identifiers.md) — real namespace/account/app IDs only in .env, never tracked
 - [No maintainer specifics in public files](references/feedback_no_maintainer_specifics.md) — generic docker, no Casper in public files

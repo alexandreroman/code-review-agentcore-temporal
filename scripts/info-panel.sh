@@ -43,7 +43,7 @@ render() {
   runtime_id=$(value "$AWS_JSON" runtime_id)
   slug=$(value "$GITHUB_JSON" app_slug)
 
-  echo "# Agentic Code Review with AgentCore x Temporal"
+  echo "# Code Review with AgentCore x Temporal"
   echo
   echo "## Webhook"
   echo

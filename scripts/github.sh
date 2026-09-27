@@ -13,7 +13,7 @@ source scripts/lib.sh
 
 : "${GITHUB_OWNER:?GITHUB_OWNER is not set}"
 
-if ! aws secretsmanager get-secret-value --secret-id temporal-agentcore-review-demo/github-app \
+if ! aws secretsmanager get-secret-value --secret-id code-review-agentcore-temporal/github-app \
   --query ARN --output text >/dev/null 2>&1; then
   die "The GitHub App is not registered yet: run make github-app, then make up again."
 fi

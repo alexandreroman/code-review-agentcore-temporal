@@ -1,4 +1,4 @@
-# Agentic Code Review with AgentCore x Temporal
+# Code Review with AgentCore x Temporal
 
 AI agents review GitHub pull requests, orchestrated by Temporal and run as
 Serverless Workers on Amazon Bedrock AgentCore. Built as a 15-minute
@@ -69,8 +69,8 @@ graph LR
 ## Getting started
 
 ```bash
-git clone https://github.com/<owner>/temporal-agentcore-review-demo.git
-cd temporal-agentcore-review-demo
+git clone https://github.com/<owner>/code-review-agentcore-temporal.git
+cd code-review-agentcore-temporal
 make install
 make check
 ```

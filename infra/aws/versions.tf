@@ -16,7 +16,7 @@ terraform {
 
   encryption {
     key_provider "aws_kms" "state" {
-      kms_key_id = "alias/temporal-agentcore-review-demo-tfstate"
+      kms_key_id = "alias/code-review-agentcore-temporal-tfstate"
       region     = var.region
       key_spec   = "AES_256"
     }
@@ -37,7 +37,7 @@ terraform {
 provider "aws" {
   region = var.region
   default_tags {
-    tags = { Project = "temporal-agentcore-review-demo" }
+    tags = { Project = "code-review-agentcore-temporal" }
   }
 }
 

@@ -25,7 +25,7 @@ PERMISSIONS = {
 }
 EVENTS = ["pull_request", "issue_comment"]
 ACCEPT = {"Accept": "application/vnd.github+json"}
-SECRET_TAGS = [{"Key": "Project", "Value": "temporal-agentcore-review-demo"}]
+SECRET_TAGS = [{"Key": "Project", "Value": "code-review-agentcore-temporal"}]
 
 
 def build_manifest(name: str, webhook_url: str, callback_url: str) -> dict:

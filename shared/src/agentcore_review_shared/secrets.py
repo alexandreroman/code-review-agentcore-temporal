@@ -4,8 +4,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, StringConstraints
 
-GITHUB_APP_SECRET = "temporal-agentcore-review-demo/github-app"
-ANTHROPIC_SECRET = "temporal-agentcore-review-demo/anthropic-api-key"
+GITHUB_APP_SECRET = "code-review-agentcore-temporal/github-app"
+ANTHROPIC_SECRET = "code-review-agentcore-temporal/anthropic-api-key"
 
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 

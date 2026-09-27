@@ -1,8 +1,8 @@
 # Setup
 
-Step-by-step installation of **Agentic Code Review with AgentCore x
-Temporal**, from empty accounts to a first reviewed pull request. Plan about
-an hour; most of it is the first image push and the waits for AWS.
+Step-by-step installation of **Code Review with AgentCore x Temporal**, from
+empty accounts to a first reviewed pull request. Plan about an hour; most of
+it is the first image push and the waits for AWS.
 
 Commands run from the repository root unless stated otherwise. Values in
 angle brackets and `your-namespace.a1b2c` are placeholders for your own
@@ -44,8 +44,8 @@ host; on a Linux x86 host, install QEMU and binfmt support first.
 ## 2. Clone and install
 
 ```bash
-git clone https://github.com/<owner>/temporal-agentcore-review-demo.git
-cd temporal-agentcore-review-demo
+git clone https://github.com/<owner>/code-review-agentcore-temporal.git
+cd code-review-agentcore-temporal
 make install
 make check
 ```
@@ -172,7 +172,9 @@ The GitHub App is not registered yet: run make github-app, then make up again.
 make github-app
 ```
 
-A browser page opens: click **Create GitHub App** (you may rename the app).
+A browser page opens: click **Create GitHub App**. The app is named
+*Code Review w/AgentCore x Temporal* by default (you may rename the app,
+or set `GITHUB_APP_NAME` in `.env`; GitHub caps the name at 34 characters).
 The terminal then prints `Registered GitHub App <slug> ...`. The app has
 the permissions `pull_requests: write`, `checks: write`, `contents: write`,
 `issues: read` and `metadata: read`, listens to `pull_request` and
@@ -218,7 +220,7 @@ git fetch origin 'refs/tags/*:refs/tags/*'
 git remote set-url origin https://github.com/<owner>/agentcore-review-demo-app.git
 git push origin 'baseline^{commit}:refs/heads/main'
 git push origin refs/tags/baseline refs/tags/scenario/customer-search
-cd ../temporal-agentcore-review-demo
+cd ../code-review-agentcore-temporal
 ```
 
 GitHub may report a bypassed rule on `main`: you are an admin, a bypass
@@ -336,6 +338,6 @@ While `DOMAIN_NAME` is set, the deployment targets stop at once if
 
   ```bash
   aws secretsmanager delete-secret \
-    --secret-id temporal-agentcore-review-demo/github-app \
+    --secret-id code-review-agentcore-temporal/github-app \
     --force-delete-without-recovery
   ```

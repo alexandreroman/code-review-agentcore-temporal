@@ -14,7 +14,7 @@ terraform {
 
   encryption {
     key_provider "aws_kms" "state" {
-      kms_key_id = "alias/temporal-agentcore-review-demo-tfstate"
+      kms_key_id = "alias/code-review-agentcore-temporal-tfstate"
       region     = var.region
       key_spec   = "AES_256"
     }
@@ -62,7 +62,7 @@ provider "github" {
 }
 
 data "aws_secretsmanager_secret_version" "github_app" {
-  secret_id = "temporal-agentcore-review-demo/github-app"
+  secret_id = "code-review-agentcore-temporal/github-app"
 }
 
 locals {
@@ -74,7 +74,7 @@ locals {
 # and scenario tags).
 resource "github_repository" "demo" {
   name                   = var.demo_repo
-  description            = "Demo application reviewed by Agentic Code Review with AgentCore x Temporal"
+  description            = "Demo application reviewed by Code Review with AgentCore x Temporal"
   visibility             = "public"
   has_issues             = false
   has_projects           = false

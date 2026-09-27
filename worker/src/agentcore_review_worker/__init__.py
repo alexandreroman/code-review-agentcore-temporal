@@ -1,1 +1,1 @@
-"""Temporal worker of temporal-agentcore-review-demo."""
+"""Temporal worker of code-review-agentcore-temporal."""

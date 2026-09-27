@@ -16,14 +16,14 @@ variable "region" {
 provider "aws" {
   region = var.region
   default_tags {
-    tags = { Project = "temporal-agentcore-review-demo" }
+    tags = { Project = "code-review-agentcore-temporal" }
   }
 }
 
 data "aws_caller_identity" "current" {}
 
 locals {
-  name = "temporal-agentcore-review-demo"
+  name = "code-review-agentcore-temporal"
 }
 
 resource "aws_kms_key" "state" {

@@ -1,1 +1,1 @@
-"""Webhook router of temporal-agentcore-review-demo."""
+"""Webhook router of code-review-agentcore-temporal."""

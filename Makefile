@@ -22,7 +22,7 @@ ANTHROPIC_MODEL ?= claude-opus-5
 ANTHROPIC_EFFORT ?= high
 MAX_PARALLEL_AGENTS ?= 3
 DEMO_REPO ?= agentcore-review-demo-app
-GITHUB_APP_NAME ?= temporal-agentcore-review-demo
+GITHUB_APP_NAME ?= Code Review w/AgentCore x Temporal
 AGENTCORE_IDLE_TIMEOUT ?= 120
 GITHUB_APP_CALLBACK_PORT ?= 8765
 DOMAIN_NAME ?=
@@ -63,7 +63,7 @@ export TF_VAR_domain_name = $(DOMAIN_NAME)
 export TF_VAR_subdomain = $(SUBDOMAIN)
 export TF_VAR_cloudflare_zone_id = $(CLOUDFLARE_ZONE_ID)
 
-PROJECT := temporal-agentcore-review-demo
+PROJECT := code-review-agentcore-temporal
 NAMESPACE_PLACEHOLDER := your-namespace.a1b2c
 GITHUB_APP := uv run --quiet python -m agentcore_review_tools.github_app
 TOFU_AWS := tofu -chdir=infra/aws
@@ -159,7 +159,7 @@ secrets: ## Push the Anthropic key and the mTLS certificates from .env to Secret
 .PHONY: github-app
 github-app: infra-init ## Register the GitHub App through the manifest flow (interactive, once)
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
-	$(GITHUB_APP) register --owner $(GITHUB_OWNER) --name $(GITHUB_APP_NAME) \
+	$(GITHUB_APP) register --owner $(GITHUB_OWNER) --name "$(GITHUB_APP_NAME)" \
 		--port $(GITHUB_APP_CALLBACK_PORT) --webhook-url "$$($(TOFU_AWS) output -raw webhook_url)" \
 		$(if $(FORCE),--force)
 
