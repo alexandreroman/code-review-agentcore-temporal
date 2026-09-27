@@ -35,9 +35,10 @@ graph LR
 ```
 
 1. The **GitHub App** sends pull request and comment webhooks to a
-   **Lambda router** (Function URL). The router checks the signature and
-   turns each event into a Temporal signal; `/kill` also stops the
-   AgentCore sessions.
+   **Lambda router**, through its Function URL or, on an optional custom
+   domain, through API Gateway. The router checks the signature and turns
+   each event into a Temporal signal; `/kill` also stops the AgentCore
+   sessions.
 2. One long-lived **`PullRequestWorkflow`** per pull request runs on
    **Temporal Cloud** (mTLS). Each new head commit starts a review round;
    the workflow ends when the pull request is merged or closed.
@@ -89,12 +90,14 @@ Develop:
 
 Operate:
 
-- `make up`: deploy everything, in order (idempotent).
+- `make up`: deploy everything, in order (idempotent), and point the
+  GitHub App's webhook at the router.
 - `make deploy`: build, push and activate a new worker version.
 - `make ping`: run the Ping workflow on AgentCore (scale from zero).
 - `make kill-sessions`: stop the AgentCore sessions of the task queue.
 - `make prune`: remove the endpoints no workflow uses any more.
-- `make destroy`: destroy the AWS resources, after a confirmation.
+- `make destroy`: destroy the AWS resources, after a confirmation; the
+  GitHub App and its credentials stay for the next `make up`.
 
 `make help` lists every target with its description.
 
@@ -104,6 +107,11 @@ Copy [`.env.example`](.env.example) to `.env` and set `TEMPORAL_NAMESPACE`
 and `ANTHROPIC_API_KEY`; the file documents every other setting with its
 default. The Makefile loads `.env` for every target. Both `.env` and the
 `certs/` directory are git-ignored.
+
+Optionally, `DOMAIN_NAME`, `SUBDOMAIN`, `CLOUDFLARE_ZONE_ID` and
+`CLOUDFLARE_API_TOKEN` serve the webhook on a custom domain of a
+Cloudflare zone, such as `codereview.example.com`: see
+[SETUP.md](SETUP.md#custom-domain-cloudflare-optional).
 
 ## Validation
 

@@ -1,4 +1,4 @@
-"""Lambda entry point behind the Function URL: verifies, routes and acts on GitHub webhooks.
+"""Lambda entry point behind the Function URL or API Gateway: verifies, routes and acts on GitHub webhooks.
 
 Replies 202 (action taken), 204 (event ignored), 400 (signed body that is not a webhook payload), 401 (invalid
 signature), 500 (Temporal or GitHub error; GitHub never redelivers on its own) or 503 (the GitHub App secret does

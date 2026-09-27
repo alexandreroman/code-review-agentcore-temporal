@@ -65,3 +65,21 @@ variable "retained_endpoints" {
   type        = map(string)
   default     = {}
 }
+
+variable "domain_name" {
+  description = "Cloudflare zone of the webhook's custom domain (e.g. example.com); empty to use the Function URL"
+  type        = string
+  default     = ""
+}
+
+variable "subdomain" {
+  description = "Subdomain of the webhook's custom domain (codereview for codereview.example.com)"
+  type        = string
+  default     = "codereview"
+}
+
+variable "cloudflare_zone_id" {
+  description = "ID of the Cloudflare zone named by domain_name"
+  type        = string
+  default     = ""
+}

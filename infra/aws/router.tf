@@ -46,7 +46,7 @@ resource "aws_iam_role_policy" "router" {
       {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
-        Resource = [aws_secretsmanager_secret.github_app.arn, aws_secretsmanager_secret.router_cert.arn]
+        Resource = [local.github_app_secret_arn_pattern, aws_secretsmanager_secret.router_cert.arn]
       },
       { Effect = "Allow", Action = ["bedrock-agentcore:StopRuntimeSession"], Resource = [local.runtime_arn_pattern] },
       # Asynchronous self-invocation that finishes a /kill.
@@ -78,7 +78,7 @@ resource "aws_lambda_function" "router" {
 
   environment {
     variables = {
-      GITHUB_APP_SECRET_ARN    = aws_secretsmanager_secret.github_app.arn
+      GITHUB_APP_SECRET_ARN    = local.github_app_secret_name
       TEMPORAL_CERT_SECRET_ARN = aws_secretsmanager_secret.router_cert.arn
       TEMPORAL_ADDRESS         = var.temporal_address
       TEMPORAL_NAMESPACE       = var.temporal_namespace

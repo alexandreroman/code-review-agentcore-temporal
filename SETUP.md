@@ -110,8 +110,10 @@ Set at least:
 Optional: `GITHUB_OWNER` when the demo repository belongs to an
 organization (the default is the account logged in to `gh`),
 `AWS_REGION` for another region, `TEMPORAL_TLS_CERT_PATH` and
-`TEMPORAL_TLS_KEY_PATH` for certificates outside `certs/`. Plain
-`KEY=value` lines, no quotes: the Makefile includes the file.
+`TEMPORAL_TLS_KEY_PATH` for certificates outside `certs/`, and the
+settings of a [custom domain](#custom-domain-cloudflare-optional) for the
+webhook. Plain `KEY=value` lines, no quotes: the Makefile includes the
+file.
 [`.env.example`](.env.example) documents every variable and its default.
 
 ## 5. AWS credentials
@@ -151,12 +153,12 @@ make up
 
 `make up` chains `bootstrap` (OpenTofu state bucket and KMS key), `infra`
 (Lambda router, ECR repository, IAM roles, secret containers, snapshots
-bucket), `secrets` (Anthropic key and certificates into Secrets Manager)
-and `deploy` (image build and push, AgentCore runtime and endpoint,
-Temporal Worker Deployment Version). The AgentCore runtime only exists once
-there is a build to run: `infra` alone never creates it. The first image
-push uploads about 95 MB: on a slow uplink it takes a long time; later
-pushes only send the changed layers.
+bucket, optional custom domain), `secrets` (Anthropic key and certificates
+into Secrets Manager) and `deploy` (image build and push, AgentCore runtime
+and endpoint, Temporal Worker Deployment Version). The AgentCore runtime
+only exists once there is a build to run: `infra` alone never creates it.
+The first image push uploads about 95 MB: on a slow uplink it takes a long
+time; later pushes only send the changed layers.
 
 This first run stops on purpose:
 
@@ -174,8 +176,10 @@ A browser page opens: click **Create GitHub App** (you may rename the app).
 The terminal then prints `Registered GitHub App <slug> ...`. The app has
 the permissions `pull_requests: write`, `checks: write`, `contents: write`,
 `issues: read` and `metadata: read`, listens to `pull_request` and
-`issue_comment`, and sends its webhooks to the router's Function URL. Its
-credentials go straight to Secrets Manager.
+`issue_comment`, and sends its webhooks to the router: its Lambda Function
+URL, or the [custom domain](#custom-domain-cloudflare-optional) when one is
+set. Its credentials go straight to Secrets Manager, in a secret that
+`make destroy` keeps.
 
 ## 9. Second deployment and app installation
 
@@ -258,6 +262,38 @@ the `review-dev` task queue. The router sends every pull request opened
 from a `dev/` branch there, so a PR from `dev/customer-search` is reviewed
 by your laptop, with hot reload, without deploying anything.
 
+## Custom domain (Cloudflare, optional)
+
+By default, GitHub sends the webhooks to the router's Lambda Function URL,
+a generated `https://<id>.lambda-url.<region>.on.aws/` address. To use your
+own hostname instead, such as `codereview.example.com`, you need a zone on
+your Cloudflare account and a Cloudflare API token with the **Zone > DNS >
+Edit** permission on that zone. Add to `.env`:
+
+```text
+DOMAIN_NAME=example.com
+SUBDOMAIN=codereview
+CLOUDFLARE_ZONE_ID=<zone-id>
+CLOUDFLARE_API_TOKEN=<api-token>
+```
+
+`SUBDOMAIN` defaults to `codereview`; the zone ID is on the zone's overview
+page in the Cloudflare dashboard. The next `make up` creates, in the aws
+stack:
+
+- an ACM certificate for the hostname, validated through a DNS record in
+  the Cloudflare zone;
+- an API Gateway HTTP API in front of the router, with a custom domain on
+  that certificate (a Function URL only answers to its own hostname);
+- a DNS-only CNAME record (Cloudflare proxy off) from the hostname to API
+  Gateway.
+
+`make up` then points the app's webhook at the new URL by itself: an app
+registered earlier switches over without a visit to its settings, and
+emptying `DOMAIN_NAME` switches it back to the Function URL the same way.
+While `DOMAIN_NAME` is set, the deployment targets stop at once if
+`CLOUDFLARE_ZONE_ID` or `CLOUDFLARE_API_TOKEN` is missing.
+
 ## Troubleshooting
 
 - **No review, no workflow in Temporal UI**: the webhook was lost or
@@ -285,9 +321,21 @@ by your laptop, with hot reload, without deploying anything.
   `b_…`), creates its AgentCore endpoint and makes it current. Open pull
   requests stay pinned to the version that started them; after a reset,
   `make prune` removes the endpoints no workflow uses any more.
-- `make destroy` stops the sessions, removes the AWS resources (every
-  secret included) after a confirmation, then deletes the Temporal Worker
-  Deployment and the AgentCore log groups. The OpenTofu state bucket, its
-  KMS key, the demo repository and the GitHub App remain: delete the app in
-  the GitHub settings, and register a new one with `make github-app` the
-  next time.
+- `make destroy` stops the sessions, removes the AWS resources after a
+  confirmation, then deletes the Temporal Worker Deployment and the
+  AgentCore log groups. The OpenTofu state bucket, its KMS key, the demo
+  repository, the GitHub App and its credentials in Secrets Manager
+  remain, so the next `make up` redeploys with the same app. With a custom
+  domain, the certificate and the DNS records go too and come back under
+  the same hostname; without one, the recreated Function URL gets a new
+  address. Either way, `make up` repoints the app's webhook if its URL
+  differs.
+- To delete the GitHub App for good, delete it in the GitHub settings
+  (`https://github.com/settings/apps/<slug>`, **Advanced**), then its
+  credentials; `make github-app` registers a new app afterwards:
+
+  ```bash
+  aws secretsmanager delete-secret \
+    --secret-id temporal-agentcore-review-demo/github-app \
+    --force-delete-without-recovery
+  ```

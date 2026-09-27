@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Applies the github stack: demo repository, rulesets, Actions secrets
-# (make github).
+# (make github), then points the GitHub App's webhook at the aws stack's
+# webhook_url, so a custom domain switched on or off never needs a manual
+# edit in the app settings.
 #
 # The GitHub App must be registered first (make github-app). The rulesets
 # are only created once the app is installed on the demo repository, so the
@@ -27,3 +29,7 @@ export GITHUB_TOKEN
 export TF_VAR_github_owner="$GITHUB_OWNER"
 export TF_VAR_app_installed="$APP_INSTALLED"
 tofu -chdir=infra/github apply -input=false -auto-approve
+
+# A plain assignment, so that set -e stops here if the output is missing.
+WEBHOOK_URL=$(tofu -chdir="$AWS_STACK" output -raw webhook_url)
+uv run --quiet python -m agentcore_review_tools.github_app sync-webhook --url "$WEBHOOK_URL"

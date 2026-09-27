@@ -11,6 +11,8 @@ set -euo pipefail
 
 source scripts/lib.sh
 
+require_cloudflare
+
 BUILD_ID="${1:-}"
 if [[ $# -gt 0 ]]; then
   shift

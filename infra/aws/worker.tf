@@ -59,7 +59,7 @@ resource "aws_iam_role_policy" "agentcore" {
         Effect = "Allow"
         Action = ["secretsmanager:GetSecretValue"]
         Resource = [
-          aws_secretsmanager_secret.github_app.arn,
+          local.github_app_secret_arn_pattern,
           aws_secretsmanager_secret.anthropic.arn,
           aws_secretsmanager_secret.worker_cert.arn,
         ]
@@ -101,7 +101,7 @@ resource "aws_bedrockagentcore_agent_runtime" "worker" {
     TEMPORAL_BUILD_ID        = var.build_id
     TEMPORAL_CERT_SECRET_ARN = aws_secretsmanager_secret.worker_cert.arn
     ANTHROPIC_SECRET_ARN     = aws_secretsmanager_secret.anthropic.arn
-    GITHUB_APP_SECRET_ARN    = aws_secretsmanager_secret.github_app.arn
+    GITHUB_APP_SECRET_ARN    = local.github_app_secret_name
     SNAPSHOTS_BUCKET         = aws_s3_bucket.snapshots.bucket
     ANTHROPIC_MODEL          = var.anthropic_model
     ANTHROPIC_EFFORT         = var.anthropic_effort

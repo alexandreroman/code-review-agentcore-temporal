@@ -25,6 +25,10 @@ DEMO_REPO ?= agentcore-review-demo-app
 GITHUB_APP_NAME ?= temporal-agentcore-review-demo
 AGENTCORE_IDLE_TIMEOUT ?= 120
 GITHUB_APP_CALLBACK_PORT ?= 8765
+DOMAIN_NAME ?=
+SUBDOMAIN ?= codereview
+CLOUDFLARE_ZONE_ID ?=
+CLOUDFLARE_API_TOKEN ?=
 
 # Derived defaults, also applied when .env sets these to an empty value.
 ifeq ($(strip $(TEMPORAL_ADDRESS)),)
@@ -39,10 +43,10 @@ endif
 # a bare `export` would expand $(GITHUB_OWNER), hence run gh, for every recipe.
 export AWS_REGION TEMPORAL_NAMESPACE TEMPORAL_ADDRESS TEMPORAL_TLS_CERT_PATH TEMPORAL_TLS_KEY_PATH \
 	TEMPORAL_DEPLOYMENT_NAME TASK_QUEUE DEV_TASK_QUEUE ANTHROPIC_API_KEY ANTHROPIC_MODEL \
-	ANTHROPIC_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO
+	ANTHROPIC_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO DOMAIN_NAME CLOUDFLARE_ZONE_ID CLOUDFLARE_API_TOKEN
 export AWS_DEFAULT_REGION = $(AWS_REGION)
 
-# OpenTofu input variables (no secret among them).
+# OpenTofu input variables (no secret among them: the Cloudflare provider reads CLOUDFLARE_API_TOKEN itself).
 export TF_VAR_region = $(AWS_REGION)
 export TF_VAR_temporal_address = $(TEMPORAL_ADDRESS)
 export TF_VAR_temporal_namespace = $(TEMPORAL_NAMESPACE)
@@ -55,6 +59,9 @@ export TF_VAR_anthropic_effort = $(ANTHROPIC_EFFORT)
 export TF_VAR_max_parallel_agents = $(MAX_PARALLEL_AGENTS)
 export TF_VAR_idle_timeout = $(AGENTCORE_IDLE_TIMEOUT)
 export TF_VAR_demo_repo = $(DEMO_REPO)
+export TF_VAR_domain_name = $(DOMAIN_NAME)
+export TF_VAR_subdomain = $(SUBDOMAIN)
+export TF_VAR_cloudflare_zone_id = $(CLOUDFLARE_ZONE_ID)
 
 PROJECT := temporal-agentcore-review-demo
 NAMESPACE_PLACEHOLDER := your-namespace.a1b2c
@@ -153,11 +160,11 @@ secrets: ## Push the Anthropic key and the mTLS certificates from .env to Secret
 github-app: infra-init ## Register the GitHub App through the manifest flow (interactive, once)
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
 	$(GITHUB_APP) register --owner $(GITHUB_OWNER) --name $(GITHUB_APP_NAME) \
-		--port $(GITHUB_APP_CALLBACK_PORT) --webhook-url "$$($(TOFU_AWS) output -raw router_url)" \
+		--port $(GITHUB_APP_CALLBACK_PORT) --webhook-url "$$($(TOFU_AWS) output -raw webhook_url)" \
 		$(if $(FORCE),--force)
 
 .PHONY: github
-github: infra-init ## Apply the github stack (demo repository, ruleset, Actions secrets)
+github: infra-init ## Apply the github stack (demo repository, ruleset, Actions secrets), sync the app webhook
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
 	@GITHUB_OWNER=$(GITHUB_OWNER) scripts/github.sh
 

@@ -2,6 +2,11 @@ output "router_url" {
   value = aws_lambda_function_url.router.function_url
 }
 
+# The URL the GitHub App sends its webhooks to (make github-app, make github).
+output "webhook_url" {
+  value = local.use_custom_domain ? "https://${local.webhook_fqdn}/" : aws_lambda_function_url.router.function_url
+}
+
 output "router_log_group" {
   value = aws_cloudwatch_log_group.router.name
 }

@@ -2,20 +2,30 @@
 # Destroys the AWS resources (make destroy), then cleans up the Temporal
 # Worker Deployment and the AgentCore log groups it leaves behind.
 #
-# The GitHub side, the state bucket and its KMS key stay: only the aws
-# stack and the Worker Deployment are torn down. Everything after the
-# `tofu destroy` is best effort: the AWS side is already gone by then, so
-# a failure here only prints a warning instead of aborting.
+# The GitHub side, the GitHub App secret (created outside the stack), the
+# state bucket and its KMS key stay: only the aws stack and the Worker
+# Deployment are torn down. Everything after the `tofu destroy` is best
+# effort: the AWS side is already gone by then, so a failure here only
+# prints a warning instead of aborting.
 set -euo pipefail
 
 source scripts/lib.sh
+
+require_cloudflare
 
 BUILDS=$(jq -r '.endpoints.value // {} | keys[]' <<<"$(aws_outputs)")
 
 scripts/kill-sessions.sh || true
 
-echo "Destroying the AWS resources. The secrets go too: afterwards make github-app registers a NEW app (delete the" \
-  "old one in the GitHub settings). The demo repository and the state bucket stay."
+# `tofu destroy` ignores the removed block of secrets.tf: a stack last applied
+# while it still managed the GitHub App secret would delete it. Forget the
+# secret first, as the next apply would.
+if tofu -chdir="$AWS_STACK" state list aws_secretsmanager_secret.github_app >/dev/null 2>&1; then
+  tofu -chdir="$AWS_STACK" state rm aws_secretsmanager_secret.github_app >/dev/null
+fi
+
+echo "Destroying the AWS resources. The GitHub App credentials stay in Secrets Manager: the next make up reuses the" \
+  "same app (and, with a custom domain, the same webhook URL). The demo repository and the state bucket stay."
 
 # Interactive: tofu asks for confirmation. A refusal exits non-zero here,
 # and set -e stops the script before the Temporal cleanup below.

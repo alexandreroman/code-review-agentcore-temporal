@@ -1,4 +1,4 @@
-"""GitHub webhook signature verification over the raw Function URL body."""
+"""GitHub webhook signature verification over the raw request body."""
 
 import base64
 import binascii

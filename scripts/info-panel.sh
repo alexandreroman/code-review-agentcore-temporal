@@ -36,9 +36,9 @@ AWS_JSON=$(stack_outputs infra/aws)
 GITHUB_JSON=$(stack_outputs infra/github)
 
 render() {
-  local router_url build runtime_id slug router_log_group
+  local webhook_url build runtime_id slug router_log_group
 
-  router_url=$(value "$AWS_JSON" router_url)
+  webhook_url=$(value "$AWS_JSON" webhook_url)
   build=$(value "$AWS_JSON" current_build)
   runtime_id=$(value "$AWS_JSON" runtime_id)
   slug=$(value "$GITHUB_JSON" app_slug)
@@ -47,8 +47,8 @@ render() {
   echo
   echo "## Webhook"
   echo
-  if [[ -n "$router_url" ]]; then
-    echo "\`$router_url\`"
+  if [[ -n "$webhook_url" ]]; then
+    echo "\`$webhook_url\`"
   else
     echo "Not deployed yet: run \`make up\`."
   fi

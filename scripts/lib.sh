@@ -11,6 +11,15 @@ aws_outputs() {
   tofu -chdir="$AWS_STACK" output -json
 }
 
+# require_cloudflare: stops when a custom domain is set without the Cloudflare
+# settings its DNS records need (every plan of the aws stack, destroy included).
+require_cloudflare() {
+  [[ -n "${DOMAIN_NAME:-}" ]] || return 0
+  if [[ -z "${CLOUDFLARE_API_TOKEN:-}" || -z "${CLOUDFLARE_ZONE_ID:-}" ]]; then
+    die "DOMAIN_NAME is set: the custom domain also needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ZONE_ID in .env."
+  fi
+}
+
 # tcli ...: runs the temporal CLI with explicit mTLS flags. This build of the
 # CLI ignores the TEMPORAL_TLS_CLIENT_CERT_PATH / TEMPORAL_TLS_CLIENT_KEY_PATH
 # environment variables (the handshake fails silently), so every call goes

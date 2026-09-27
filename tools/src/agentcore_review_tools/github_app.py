@@ -1,4 +1,4 @@
-"""GitHub App manifest flow (make github-app), installation check (make up) and ID (make review-pr)."""
+"""GitHub App manifest flow (make github-app), webhook sync and installation check (make up), ID (make review-pr)."""
 
 import argparse
 import html
@@ -25,6 +25,7 @@ PERMISSIONS = {
 }
 EVENTS = ["pull_request", "issue_comment"]
 ACCEPT = {"Accept": "application/vnd.github+json"}
+SECRET_TAGS = [{"Key": "Project", "Value": "temporal-agentcore-review-demo"}]
 
 
 def build_manifest(name: str, webhook_url: str, callback_url: str) -> dict:
@@ -96,11 +97,13 @@ def is_organization(http: httpx.Client, owner: str) -> bool:
     return response.json().get("type") == "Organization"
 
 
+def app_headers(app: GitHubAppSecret) -> dict[str, str]:
+    """Headers that authenticate as the app itself (not as one of its installations)."""
+    return {**ACCEPT, "Authorization": f"Bearer {app_jwt(app.client_id, app.private_key)}"}
+
+
 def installation_id(http: httpx.Client, app: GitHubAppSecret, owner: str, repo: str) -> int | None:
-    token = app_jwt(app.client_id, app.private_key)
-    response = http.get(
-        f"{API_URL}/repos/{owner}/{repo}/installation", headers={**ACCEPT, "Authorization": f"Bearer {token}"}
-    )
+    response = http.get(f"{API_URL}/repos/{owner}/{repo}/installation", headers=app_headers(app))
     if response.status_code == 404:
         return None
     response.raise_for_status()
@@ -154,6 +157,17 @@ def _registered_app(client) -> GitHubAppSecret | None:
     return GitHubAppSecret.model_validate_json(value)
 
 
+def _store_app(client, app: GitHubAppSecret) -> None:
+    """Create the secret on the first registration, else store a new version of it."""
+    # The secret lives outside the aws stack, so make destroy keeps it and the next make up reuses the app.
+    try:
+        client.create_secret(Name=GITHUB_APP_SECRET, SecretString=app.model_dump_json(), Tags=SECRET_TAGS)
+    except ClientError as error:
+        if error.response["Error"]["Code"] != "ResourceExistsException":
+            raise
+        client.put_secret_value(SecretId=GITHUB_APP_SECRET, SecretString=app.model_dump_json())
+
+
 def _require_registered_app() -> GitHubAppSecret:
     app = _registered_app(boto3.client("secretsmanager"))
     if app is None:
@@ -177,7 +191,7 @@ def register(args: argparse.Namespace) -> None:
 
         def on_code(code: str) -> str:
             app = convert(http, code)
-            client.put_secret_value(SecretId=GITHUB_APP_SECRET, SecretString=app.model_dump_json())
+            _store_app(client, app)
             print(f"Registered GitHub App {app.slug} (stored in {GITHUB_APP_SECRET}).")
             print("Next: make up creates the demo repository and prints the link to install the app on it.")
             slug = html.escape(app.slug)
@@ -193,6 +207,22 @@ def register(args: argparse.Namespace) -> None:
             sys.exit(
                 f"make github-app: cannot listen on localhost:{args.port} ({error}); change GITHUB_APP_CALLBACK_PORT"
             )
+
+
+def sync_webhook(args: argparse.Namespace) -> None:
+    """Point the app's webhook at the router's current URL (Function URL or custom domain)."""
+    app = _require_registered_app()
+    headers = app_headers(app)
+    with httpx.Client(timeout=20) as http:
+        response = http.get(f"{API_URL}/app/hook/config", headers=headers)
+        response.raise_for_status()
+        current = response.json().get("url")
+        if current == args.url:
+            print(f"GitHub App {app.slug} webhook is up to date: {current}")
+            return
+        response = http.patch(f"{API_URL}/app/hook/config", headers=headers, json={"url": args.url})
+        response.raise_for_status()
+    print(f"GitHub App {app.slug} webhook: {current} -> {args.url}")
 
 
 def check_install(args: argparse.Namespace) -> None:
@@ -222,6 +252,8 @@ def main() -> None:
     reg.add_argument("--port", type=int, required=True)
     reg.add_argument("--webhook-url", required=True)
     reg.add_argument("--force", action="store_true")
+    sync = commands.add_parser("sync-webhook", help="point the app's webhook at the given URL if it differs")
+    sync.add_argument("--url", required=True)
     check = commands.add_parser("check-install", help="tell whether the app is installed on the demo repository")
     check.add_argument("--owner", required=True)
     check.add_argument("--repo", required=True)
@@ -229,7 +261,12 @@ def main() -> None:
     installation.add_argument("--owner", required=True)
     installation.add_argument("--repo", required=True)
     args = parser.parse_args()
-    handlers = {"register": register, "check-install": check_install, "installation-id": print_installation_id}
+    handlers = {
+        "register": register,
+        "sync-webhook": sync_webhook,
+        "check-install": check_install,
+        "installation-id": print_installation_id,
+    }
     try:
         handlers[args.command](args)
     except KeyboardInterrupt:

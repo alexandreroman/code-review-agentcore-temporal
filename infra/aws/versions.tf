@@ -1,9 +1,10 @@
 terraform {
   required_version = ">= 1.12.0"
   required_providers {
-    aws     = { source = "hashicorp/aws", version = "6.66.0" }
-    random  = { source = "hashicorp/random", version = "3.9.1" }
-    archive = { source = "hashicorp/archive", version = "2.8.1" }
+    aws        = { source = "hashicorp/aws", version = "6.66.0" }
+    random     = { source = "hashicorp/random", version = "3.9.1" }
+    archive    = { source = "hashicorp/archive", version = "2.8.1" }
+    cloudflare = { source = "cloudflare/cloudflare", version = "5.26.0" }
   }
 
   # bucket and region come from `tofu init -backend-config=...` (make infra-init).
@@ -39,3 +40,6 @@ provider "aws" {
     tags = { Project = "temporal-agentcore-review-demo" }
   }
 }
+
+# Reads CLOUDFLARE_API_TOKEN from the environment; only used with a custom domain (dns.tf).
+provider "cloudflare" {}
