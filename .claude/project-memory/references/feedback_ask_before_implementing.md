@@ -12,4 +12,7 @@ user's explicit approval.
 **Why:** the user wants to control when implementation starts.
 
 **How to apply:** once a plan is written, stop and ask for the go-ahead; a
-direct request to apply changes counts as that approval.
+direct request to apply changes counts as that approval. Answers to
+design-choice questions (options picked in a question prompt) settle the
+plan, not its execution: present the final plan and wait for an explicit
+go-ahead before delegating or editing anything.
