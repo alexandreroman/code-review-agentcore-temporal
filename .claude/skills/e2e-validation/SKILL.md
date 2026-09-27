@@ -372,7 +372,7 @@ wait_until 120 "workflow completed" completed || { result E2E-06 FAIL "workflow 
 outcome=$(jqe -c 'include "e2e"; result_with(["merged", "rounds"])' "$(fetch_history "$WF")")
 threads=$(review_threads "$PR")
 keys=$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "$(lower "$OWNER")/$(lower "$DEMO_REPO")/pr-$PR/" \
-  --query KeyCount --output text)
+  --query 'length(Contents || `[]`)' --output text)
 login=$(gh api user --jq .login)
 echo "outcome: $outcome"
 echo "threads: $threads"
