@@ -18,10 +18,7 @@ conference demo that makes durable execution visible on stage.
   agent, which may dismiss the finding when the human is right. A `/fix`
   comment lets an agent push a fix, for every open finding on the PR or
   for that finding only in its thread; an incremental review then turns
-  the `AI Review` check green. `/fix F-001 F-003` fixes only the findings
-  it names. The bot fixes nothing and explains why when an argument is
-  not a finding ID, a named finding is not open, or a thread's `/fix`
-  names another finding.
+  the `AI Review` check green.
 - **Durable timers**: a pull request idle for 10 minutes gets a warning
   comment, then the bot closes it 5 minutes later; the countdown survives
   worker restarts and deploys (`PR_IDLE_WARNING_SECONDS`,
@@ -82,7 +79,7 @@ graph LR
 ## Getting started
 
 ```bash
-git clone https://github.com/<owner>/code-review-agentcore-temporal.git
+git clone https://github.com/<this-repo-owner>/code-review-agentcore-temporal.git
 cd code-review-agentcore-temporal
 make install
 make check
@@ -131,7 +128,7 @@ Cloudflare zone, such as `codereview.example.com`: see
 `make check` runs the unit tests (review logic, routing, contract) and the
 static checks. The end-to-end validation runs against the real
 infrastructure as a [Claude Code](https://claude.com/claude-code) project
-skill: `/e2e-validation` (smoke, 6 to 8 minutes) or `/e2e-validation full`
+skill: `/e2e-validation` (smoke, 8 to 10 minutes) or `/e2e-validation full`
 (about 30 minutes, before a talk). It opens, fixes and merges pull requests
 in the demo repository and reports each step.
 

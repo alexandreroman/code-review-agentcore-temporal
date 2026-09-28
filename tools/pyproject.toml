@@ -5,6 +5,7 @@ requires-python = ">=3.14"
 dependencies = [
     "agentcore-review-shared",
     "boto3==1.43.103",
+    "httpx2==2.13.1",
 ]
 
 [tool.uv.sources]

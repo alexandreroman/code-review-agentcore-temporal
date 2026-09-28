@@ -6,7 +6,8 @@ it is the first image push and the waits for AWS.
 
 Commands run from the repository root unless stated otherwise. Values in
 angle brackets and `your-namespace.a1b2c` are placeholders for your own
-identifiers: `<owner>` owns your demo repository, `<your-org>` names your
+identifiers: `<this-repo-owner>` owns the copy of this repository you
+clone, `<owner>` owns your demo repository, `<your-org>` names your
 organization in the certificates, `<upstream-owner>` owns the upstream demo
 repository and `<profile>` is your AWS CLI profile.
 
@@ -44,7 +45,7 @@ host; on a Linux x86 host, install QEMU and binfmt support first.
 ## 2. Clone and install
 
 ```bash
-git clone https://github.com/<owner>/code-review-agentcore-temporal.git
+git clone https://github.com/<this-repo-owner>/code-review-agentcore-temporal.git
 cd code-review-agentcore-temporal
 make install
 make check
@@ -206,7 +207,7 @@ Open the link, choose **Only select repositories**, pick
 `agentcore-review-demo-app`, and install. Run `make up` once more: it adds
 the ruleset on `main` (required `AI Review` check, admin and app bypass)
 and the ruleset on the `baseline` and `scenario/*` tags, then ends with
-`GitHub App <slug> is installed on <owner>/agentcore-review-demo-app.`
+`GitHub App is installed on <owner>/agentcore-review-demo-app.`
 
 ## 10. Push the demo repository
 

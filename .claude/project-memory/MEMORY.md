@@ -24,7 +24,7 @@
 - [Project objective](references/project_objective.md) — 15-min talk, two screens, four moments; stage reliability first
 - [Stack choices](references/project_stack.md) — mTLS, Anthropic API (no Bedrock), Python, and why
 - [Local dev uses Temporal Cloud](references/project_dev_on_temporal_cloud.md) — no local Temporal server; make dev targets Cloud
-- [Design docs location](references/reference_design_docs.md) — spec, plans, decisions and spike results in git-ignored docs/
+- [Design docs location](references/reference_design_docs.md) — specs, plans, decisions, status and spike results in git-ignored docs/
 - [Makefile as the single entry point](references/feedback_makefile_only.md) — make targets delegate to scripts/*.sh; logic never in recipes
 - [Ask before implementing](references/feedback_ask_before_implementing.md) — present a plan and wait for approval before carrying it out
 - [English only for generated text](references/feedback_english_only.md) — all generated text (code, docs, commits, memory) is in English
@@ -32,6 +32,6 @@
 - [Amend unpushed commits instead of stacking fixes](references/feedback_amend_unpushed.md) — fold fixes into the unpushed commit they correct
 - [Placeholders for account identifiers](references/feedback_no_real_identifiers.md) — real namespace/account/app IDs only in .env, never tracked
 - [No maintainer specifics in public files](references/feedback_no_maintainer_specifics.md) — generic docker, no Casper in public files
-- [Tests cover business logic only](references/feedback_tests_business_only.md) — pure review/routing logic only; no plumbing or constant tests
+- [Tests cover business logic only](references/feedback_tests_business_only.md) — pure review, routing and contract rules; no plumbing tests
 - [Lean, optimized artifacts](references/feedback_lean_artifacts.md) — small images/zips from the start, few moving parts
 - [Temporal UI labels and details](references/project_temporal_ui_labels.md) — short activity type names, summaries hold the detail only

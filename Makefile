@@ -1,6 +1,6 @@
 # Developer task runner. Run `make` (or `make help`) to list the targets.
-# Compatible with GNU Make 3.81 (the macOS default): each recipe line runs
-# in its own shell, so multi-line logic joins lines with `\`.
+# Compatible with GNU Make 3.81 (the macOS default): no `.ONESHELL` in 3.81,
+# so each recipe line runs in its own shell and logic lives in scripts/.
 
 .DEFAULT_GOAL := help
 SHELL := /bin/bash
@@ -44,8 +44,9 @@ endif
 # Settings read by the worker, the tools and the CLIs. The list is explicit:
 # a bare `export` would expand $(GITHUB_OWNER), hence run gh, for every recipe.
 export AWS_REGION TEMPORAL_NAMESPACE TEMPORAL_ADDRESS TEMPORAL_TLS_CERT_PATH TEMPORAL_TLS_KEY_PATH \
-	TEMPORAL_DEPLOYMENT_NAME TASK_QUEUE DEV_TASK_QUEUE ANTHROPIC_API_KEY ANTHROPIC_MODEL \
-	ANTHROPIC_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO DOMAIN_NAME CLOUDFLARE_ZONE_ID CLOUDFLARE_API_TOKEN
+	TEMPORAL_DEPLOYMENT_NAME TASK_QUEUE DEV_TASK_QUEUE PR_IDLE_WARNING_SECONDS PR_IDLE_CLOSE_SECONDS \
+	ANTHROPIC_API_KEY ANTHROPIC_MODEL ANTHROPIC_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO DOMAIN_NAME \
+	CLOUDFLARE_ZONE_ID CLOUDFLARE_API_TOKEN
 export AWS_DEFAULT_REGION = $(AWS_REGION)
 
 # OpenTofu input variables (no secret among them: the Cloudflare provider reads CLOUDFLARE_API_TOKEN itself).
@@ -104,9 +105,8 @@ review-pr: ## Drive a pull request's workflow by hand: PR=<n> [ACTION=update|fix
 	scripts/review-pr.sh "$(GITHUB_OWNER)" "$(DEMO_REPO)" "$(PR)" "$(ACTION)" "$(QUEUE)"
 
 .PHONY: worktree-init
-worktree-init: ## Prepare a new worktree: .env and dependencies
+worktree-init: install ## Prepare a new worktree: .env and dependencies
 	@[ -f .env ] || cp .env.example .env
-	uv sync --all-packages
 
 ##@ Quality
 
@@ -123,15 +123,9 @@ lint: ## Check formatting and lint rules
 format: ## Format the code
 	uv run ruff format .
 
-STACKS := bootstrap aws github
-
 .PHONY: infra-check
 infra-check: ## Check OpenTofu formatting and validate every stack (no AWS access needed)
-	tofu fmt -check -recursive infra
-	@for stack in $(STACKS); do \
-		TF_DATA_DIR=.terraform-validate tofu -chdir=infra/$$stack init -backend=false -input=false >/dev/null && \
-		TF_DATA_DIR=.terraform-validate tofu -chdir=infra/$$stack validate -no-color || exit 1; \
-	done
+	scripts/infra-check.sh
 
 .PHONY: check
 check: test lint infra-check ## Run tests and static checks
@@ -185,7 +179,6 @@ up: ## Deploy everything: state, AWS, secrets, worker, GitHub (idempotent, stops
 	$(MAKE) --no-print-directory secrets
 	$(MAKE) --no-print-directory deploy
 	$(MAKE) --no-print-directory github
-	$(GITHUB_APP) check-install --owner $(GITHUB_OWNER) --repo $(DEMO_REPO)
 	$(MAKE) --no-print-directory info-publish
 
 .PHONY: kill-sessions

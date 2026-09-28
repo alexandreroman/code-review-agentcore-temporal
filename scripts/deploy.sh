@@ -6,8 +6,9 @@
 # that version first polls, and Temporal Cloud never scales out an
 # unattached version. This script therefore waits for the attachment,
 # invoking the endpoint once if needed, before making the version current.
-# Re-running it on the same commit changes nothing: the image is already in
-# ECR, the apply is a no-op, and the version is already current.
+# Re-running it with unchanged, committed image inputs changes nothing: the
+# image is already in ECR, the apply is a no-op, and the version is already
+# current.
 set -euo pipefail
 
 source scripts/lib.sh

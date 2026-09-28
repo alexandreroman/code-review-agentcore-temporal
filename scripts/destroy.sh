@@ -20,8 +20,8 @@ scripts/kill-sessions.sh || true
 # `tofu destroy` ignores the removed block of secrets.tf: a stack last applied
 # while it still managed the GitHub App secret would delete it. Forget the
 # secret first, as the next apply would.
-if tofu -chdir="$AWS_STACK" state list aws_secretsmanager_secret.github_app >/dev/null 2>&1; then
-  tofu -chdir="$AWS_STACK" state rm aws_secretsmanager_secret.github_app >/dev/null
+if tofu -chdir=infra/aws state list aws_secretsmanager_secret.github_app >/dev/null 2>&1; then
+  tofu -chdir=infra/aws state rm aws_secretsmanager_secret.github_app >/dev/null
 fi
 
 echo "Destroying the AWS resources. The GitHub App credentials stay in Secrets Manager: the next make up reuses the" \
@@ -29,7 +29,7 @@ echo "Destroying the AWS resources. The GitHub App credentials stay in Secrets M
 
 # Interactive: tofu asks for confirmation. A refusal exits non-zero here,
 # and set -e stops the script before the Temporal cleanup below.
-tofu -chdir="$AWS_STACK" destroy -input=false
+tofu -chdir=infra/aws destroy -input=false
 
 warn_on_failure() {
   "$@" || echo "warning: $*" >&2

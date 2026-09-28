@@ -12,7 +12,7 @@ bucket=$(aws_outputs | jq -r '.snapshots_bucket.value // empty')
 [[ -n "$bucket" ]] || die "make dev: no snapshots bucket in the aws stack outputs (has make infra run?)"
 export SNAPSHOTS_BUCKET="$bucket"
 
-# info-panel.sh is a silent no-op outside Casper; it must never fail this target.
+# info-panel.sh is best effort; it must never fail this target.
 scripts/info-panel.sh --local-worker || true
 trap 'scripts/info-panel.sh >/dev/null 2>&1 || true' EXIT
 

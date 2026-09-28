@@ -1,4 +1,10 @@
-"""GitHub App manifest flow (make github-app), webhook sync and installation check (make up), ID (make review-pr)."""
+"""GitHub App tooling behind the Makefile.
+
+- register: creates the app through the manifest flow (make github-app)
+- sync-webhook: points the app's webhook at the router (make github, make up)
+- installation-id: prints the app's installation ID on a repository, or its install link
+  (make github, make up, make review-pr)
+"""
 
 import argparse
 import html
@@ -110,7 +116,9 @@ def installation_id(http: httpx.Client, app: GitHubAppSecret, owner: str, repo: 
     return response.json()["id"]
 
 
-def serve_once(port: int, page: str, expected_state: str, on_code: Callable[[str], str], on_ready: Callable) -> None:
+def serve_once(
+    port: int, page: str, expected_state: str, on_code: Callable[[str], str], on_ready: Callable[[], None]
+) -> None:
     """Serve the form page until a valid callback has been handled."""
     done: list[BaseException | None] = []
 
@@ -225,21 +233,12 @@ def sync_webhook(args: argparse.Namespace) -> None:
     print(f"GitHub App {app.slug} webhook: {current} -> {args.url}")
 
 
-def check_install(args: argparse.Namespace) -> None:
-    app = _require_registered_app()
-    with httpx.Client(timeout=20) as http:
-        if installation_id(http, app, args.owner, args.repo) is not None:
-            print(f"GitHub App {app.slug} is installed on {args.owner}/{args.repo}.")
-        else:
-            print(f"Action needed: install GitHub App {app.slug} on {args.owner}/{args.repo}: {install_url(app)}")
-
-
 def print_installation_id(args: argparse.Namespace) -> None:
     app = _require_registered_app()
     with httpx.Client(timeout=20) as http:
         found = installation_id(http, app, args.owner, args.repo)
     if found is None:
-        sys.exit(f"GitHub App {app.slug} is not installed on {args.owner}/{args.repo}: {install_url(app)}")
+        sys.exit(f"Action needed: install GitHub App {app.slug} on {args.owner}/{args.repo}: {install_url(app)}")
     print(found)
 
 
@@ -252,23 +251,17 @@ def main() -> None:
     reg.add_argument("--port", type=int, required=True)
     reg.add_argument("--webhook-url", required=True)
     reg.add_argument("--force", action="store_true")
+    reg.set_defaults(handler=register)
     sync = commands.add_parser("sync-webhook", help="point the app's webhook at the given URL if it differs")
     sync.add_argument("--url", required=True)
-    check = commands.add_parser("check-install", help="tell whether the app is installed on the demo repository")
-    check.add_argument("--owner", required=True)
-    check.add_argument("--repo", required=True)
+    sync.set_defaults(handler=sync_webhook)
     installation = commands.add_parser("installation-id", help="print the app's installation ID on a repository")
     installation.add_argument("--owner", required=True)
     installation.add_argument("--repo", required=True)
+    installation.set_defaults(handler=print_installation_id)
     args = parser.parse_args()
-    handlers = {
-        "register": register,
-        "sync-webhook": sync_webhook,
-        "check-install": check_install,
-        "installation-id": print_installation_id,
-    }
     try:
-        handlers[args.command](args)
+        args.handler(args)
     except KeyboardInterrupt:
         sys.exit("aborted")
 

@@ -2,9 +2,8 @@
 #
 # Every step of SKILL.md runs in its own `bash` block, fed by a `<<'STEP'`
 # heredoc, that sources this file first: agent shells keep no state between
-# commands, so the
-# settings are re-read from the Makefile (which applies .env and its
-# defaults) and the run state from $E2E_DIR/state.env.
+# commands, so the settings are re-read from the Makefile (which applies
+# .env and its defaults) and the run state from $E2E_DIR/state.env.
 #
 # No `set -e`: a failed check must still reach its `result` line.
 # Compatible with bash 3.2 (macOS /bin/bash).

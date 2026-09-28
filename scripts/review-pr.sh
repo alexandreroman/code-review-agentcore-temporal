@@ -20,7 +20,9 @@ case "$action" in
       --owner "$owner" --repo "$repo")
     input=$(jq -nc --arg owner "$owner" --arg repo "$repo" --argjson number "$number" \
       --argjson installation "$installation" \
-      '{pr: {owner: $owner, repo: $repo, number: $number, installation_id: $installation}}')
+      --argjson warning "$PR_IDLE_WARNING_SECONDS" --argjson close "$PR_IDLE_CLOSE_SECONDS" \
+      '{pr: {owner: $owner, repo: $repo, number: $number, installation_id: $installation},
+        idle_warning_seconds: $warning, idle_close_seconds: $close}')
     signal=$(jq -nc --arg sha "$head" --arg delivery "$delivery" '{head_sha: $sha, delivery_id: $delivery}')
     tcli workflow signal-with-start --type PullRequestWorkflow --task-queue "$queue" --workflow-id "$workflow_id" \
       --input "$input" --signal-name pr_updated --signal-input "$signal" \

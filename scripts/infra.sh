@@ -31,4 +31,4 @@ RETAINED=$(jq -c --arg build "$BUILD_ID" --argjson drop "$DROP" '
 ' <<<"$OUTPUTS")
 
 TF_VAR_build_id="$BUILD_ID" TF_VAR_retained_endpoints="$RETAINED" \
-  tofu -chdir="$AWS_STACK" apply -input=false -auto-approve
+  tofu -chdir=infra/aws apply -input=false -auto-approve

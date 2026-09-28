@@ -70,18 +70,18 @@ On a stable network, never on conference Wi-Fi:
 
 ## Run-through (15 minutes)
 
-| Time  | Do                   | Show                                | Moment |
-|-------|----------------------|-------------------------------------|--------|
-| 0:00  | Architecture slide   | GitHub, router, Temporal, AgentCore | —      |
-| 2:00  | Open the PR          | Workflow starts, then a session     | 1      |
-| 3:00  | Open the workflow    | Three reviewers in parallel         | 2      |
-| 4:00  | Comment `/kill`      | Sessions stop, work resumes         | 3      |
-| 5:30  | Back to GitHub       | Review, red `AI Review`, idle queue | 4, 1   |
-| 6:30  | Reply to a finding   | Cold start, an answer in the thread | 4, 1   |
-| 7:30  | Comment `/fix`       | The fixer pushes a commit           | 4      |
-| 8:30  | Watch the new commit | Round 2, threads resolved, green    | —      |
-| 10:00 | Merge the PR         | Workflow completes with its outcome | —      |
-| 10:30 | Buffer               | Code tour, questions                | —      |
+| Time  | Do                 | Show                                | Moment |
+|-------|--------------------|-------------------------------------|--------|
+| 0:00  | Architecture slide | GitHub, router, Temporal, AgentCore | —      |
+| 2:00  | Open the PR        | Workflow starts, then a session     | 1      |
+| 3:00  | Open the workflow  | Three reviewers in parallel         | 2      |
+| 4:00  | Comment `/kill`    | Sessions stop, work resumes         | 3      |
+| 5:30  | Back to GitHub     | Review, red `AI Review`, idle queue | 4, 1   |
+| 6:30  | Reply to a finding | Cold start, an answer in the thread | 4, 1   |
+| 7:30  | Comment `/fix`     | The fixer pushes a commit           | 4      |
+| 8:30  | Watch the commit   | Round 2, threads resolved, green    | —      |
+| 10:00 | Merge the PR       | Workflow completes with its outcome | —      |
+| 10:30 | Buffer             | Code tour, questions                | —      |
 
 Talking points:
 
@@ -143,8 +143,6 @@ workflow. Switch to the local worker, same Temporal Cloud namespace:
    answers "Dev worker: Ctrl-C is your friend."
 4. Scale-from-zero and the session kill are lost; everything else is
    identical.
-
-Everything it needs is in the pre-stage checklist.
 
 ## Network
 

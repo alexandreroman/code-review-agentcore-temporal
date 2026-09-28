@@ -1,14 +1,12 @@
 # Shared helpers for the deployment scripts (sourced, not executed directly).
 
-AWS_STACK="infra/aws"
-
 die() {
   echo "$*" >&2
   exit 1
 }
 
 aws_outputs() {
-  tofu -chdir="$AWS_STACK" output -json
+  tofu -chdir=infra/aws output -json
 }
 
 # require_cloudflare: stops when a custom domain is set without the Cloudflare

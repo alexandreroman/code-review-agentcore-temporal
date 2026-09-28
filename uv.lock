@@ -58,12 +58,14 @@ source = { editable = "tools" }
 dependencies = [
     { name = "agentcore-review-shared" },
     { name = "boto3" },
+    { name = "httpx2" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "agentcore-review-shared", editable = "shared" },
     { name = "boto3", specifier = "==1.43.103" },
+    { name = "httpx2", specifier = "==2.13.1" },
 ]
 
 [[package]]

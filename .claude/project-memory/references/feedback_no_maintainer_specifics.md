@@ -11,8 +11,8 @@ Scripts, Makefile targets and user-facing docs (README, SETUP, DEMO,
 to build, run and push containers. They never mention machine-specific
 setups (Podman behind a `docker` wrapper) nor Casper, `CASPER_PORT`,
 `.casper.json` or the Casper-only targets (`worktree-init`,
-`info-publish`). Casper details live only in `.casper.json`, Makefile
-comments and `scripts/info-panel.sh`.
+`info-publish`). Casper appears only in `.casper.json` and
+`scripts/info-panel.sh`.
 
 **Why:** the repository is public; readers need only a Docker-compatible
 CLI to run the demo, not the maintainer's personal tooling.
