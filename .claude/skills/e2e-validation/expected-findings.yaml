@@ -12,16 +12,16 @@
 defects:
   - id: sql-injection
     category: security
-    file: app/routers/customers.py
-    line_ranges: [[18, 23]]
-    summary: Customer search SQL built with an f-string and run through text()
+    file: src/main/java/com/example/orders/CustomerController.java
+    line_ranges: [[41, 46]]
+    summary: Customer search SQL built by string concatenation and run through JdbcClient
   - id: n-plus-one
     category: performance
-    file: app/routers/customers.py
-    line_ranges: [[41, 50]]
-    summary: Order history loads each order's lines with one query per order
+    file: src/main/java/com/example/orders/CustomerController.java
+    line_ranges: [[61, 64]]
+    summary: Order history loads each order's lines with one findByOrderId query per order
   - id: duplicated-validation
     category: maintainability
-    file: app/routers/customers.py
-    line_ranges: [[14, 17], [29, 32]]
-    summary: Identical limit/offset checks in both endpoints, and no tests
+    file: src/main/java/com/example/orders/CustomerController.java
+    line_ranges: [[35, 40], [52, 57]]
+    summary: Identical page/size checks in both endpoints, and no tests

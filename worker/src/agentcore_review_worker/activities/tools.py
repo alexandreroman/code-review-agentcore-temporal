@@ -29,7 +29,7 @@ async def glob(snapshot: SnapshotRef, pattern: str, path: str | None = None) -> 
     Returns the matching paths, relative to the repository root and sorted (at most 500).
 
     Args:
-        pattern: Glob pattern, e.g. "app/**/*.py"; "**" matches any number of directories.
+        pattern: Glob pattern, e.g. "src/**/*.java"; "**" matches any number of directories.
         path: Directory to search from, relative to the repository root (default: the root).
     """
     if snapshot.key is not None:
@@ -52,7 +52,7 @@ async def grep(snapshot: SnapshotRef, pattern: str, path: str | None = None, glo
     Args:
         pattern: Regular expression (Python syntax) searched in each line.
         path: File or directory to search, relative to the repository root (default: the root).
-        glob: Only search files matching this glob pattern, e.g. "*.py".
+        glob: Only search files matching this glob pattern, e.g. "*.java".
     """
     if snapshot.key is None:
         return GREP_UNAVAILABLE
@@ -66,7 +66,7 @@ async def read(
     """Read a file with line numbers, at most 400 lines or 40 KB at a time.
 
     Args:
-        file_path: Path relative to the repository root, e.g. "app/main.py".
+        file_path: Path relative to the repository root, e.g. "pom.xml".
         offset: First line to read, starting at 1 (default: 1).
         limit: Number of lines to read (default and maximum: 400).
     """

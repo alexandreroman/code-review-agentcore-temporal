@@ -212,9 +212,9 @@ and the ruleset on the `baseline` and `scenario/*` tags, then ends with
 
 ## 10. Push the demo repository
 
-The demo application (FastAPI, SQLAlchemy, SQLite), its tags and the
-"Reset demo" workflow come from the upstream demo repository. Copy them
-into yours, next to this repository:
+The demo application (Spring Boot, Spring Data JPA, H2), its tags and
+the "Reset demo" workflow come from the upstream demo repository. Copy
+them into yours, next to this repository:
 
 ```bash
 cd ..
