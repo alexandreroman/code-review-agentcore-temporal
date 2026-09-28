@@ -86,16 +86,16 @@ class GitHubApp:
         self._http = httpx.AsyncClient(base_url=API_URL, timeout=timeout)
         self._tokens: dict[int, _CachedToken] = {}
 
-    def jwt(self) -> str:
-        return app_jwt(self._client_id, self._private_key)
-
     async def installation_token(self, installation_id: int) -> str:
         cached = self._tokens.get(installation_id)
         if cached and cached.expires_at - TOKEN_REFRESH_MARGIN > time.time():
             return cached.token
         resp = await self._http.post(
             f"/app/installations/{installation_id}/access_tokens",
-            headers={"Authorization": f"Bearer {self.jwt()}", "Accept": "application/vnd.github+json"},
+            headers={
+                "Authorization": f"Bearer {app_jwt(self._client_id, self._private_key)}",
+                "Accept": "application/vnd.github+json",
+            },
         )
         raise_for_status(resp)
         data = resp.json()

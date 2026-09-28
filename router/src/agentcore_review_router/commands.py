@@ -30,14 +30,13 @@ from .rules import (
     FIX_USAGE_REPLY,
     NO_REVIEW_REPLY,
     NO_WORKER_REPLY,
+    REACTION_ACK,
     REACTION_DENIED,
-    REACTION_FIX,
     REACTION_KILL,
     KillTally,
     StopOutcome,
     can_run_commands,
     fix_finding_ids,
-    is_bot_login,
     kill_comment,
     kill_targets,
 )
@@ -56,16 +55,14 @@ class KillFollowup(BaseModel):
     router_task: Literal["kill"] = "kill"
     pr: PrRef
     comment_id: int
-    # The default keeps valid the follow-ups an older router version queued without this field.
-    comment_kind: CommentKind = "issue"
+    comment_kind: CommentKind
     delivery_id: str
     sessions: list[AgentCoreSession]
     tally: KillTally
 
 
-async def run(command: RunCommand, client: Client, deadline: float) -> str:
+async def run_command(command: RunCommand, client: Client, deadline: float, fields: dict[str, Any]) -> str:
     app = runtime.github()
-    fields = {"delivery": command.delivery_id, "workflow_id": command.workflow_id}
     permission = await _permission(app, command.pr, command.author)
     if not can_run_commands(permission):
         await _best_effort(_react(app, command.pr, command.comment_kind, command.comment_id, REACTION_DENIED), fields)
@@ -75,12 +72,11 @@ async def run(command: RunCommand, client: Client, deadline: float) -> str:
     return await _kill(command, client, app, deadline, fields)
 
 
-async def forward_reply(action: ForwardReply, client: Client) -> str:
+async def forward_reply(action: ForwardReply, client: Client, fields: dict[str, Any]) -> str:
     """A plain reply in a finding's thread: checked like a command, then queued in the workflow, which answers."""
     app = runtime.github()
-    fields = {"delivery": action.delivery_id, "workflow_id": action.workflow_id}
     # Checked here rather than in the workflow: a human thread gets neither 👀 nor a signal.
-    if not is_bot_login(await _comment_author(app, action.pr, action.thread_root_id), action.bot_login):
+    if await _comment_author(app, action.pr, action.thread_root_id) != action.bot_login:
         return "reply in a thread that is not a finding"
     permission = await _permission(app, action.pr, action.author)
     if not can_run_commands(permission):
@@ -95,7 +91,7 @@ async def forward_reply(action: ForwardReply, client: Client) -> str:
     # No "no review in progress" comment here: a plain reply is not addressed to the bot.
     if not await temporal_ops.signal(client, action.workflow_id, SIGNAL_COMMENT_POSTED, posted):
         return "reply ignored: no review in progress"
-    await _best_effort(_react(app, action.pr, "review", action.comment_id, REACTION_FIX), fields)
+    await _best_effort(_react(app, action.pr, "review", action.comment_id, REACTION_ACK), fields)
     return f"signal {SIGNAL_COMMENT_POSTED} to {action.workflow_id}"
 
 
@@ -122,7 +118,7 @@ async def _fix(command: RunCommand, client: Client, app: GitHubApp, fields: dict
         finding_ids=finding_ids,
     )
     if await temporal_ops.signal(client, command.workflow_id, SIGNAL_FIX_REQUESTED, requested):
-        await _best_effort(_react(app, command.pr, command.comment_kind, command.comment_id, REACTION_FIX), fields)
+        await _best_effort(_react(app, command.pr, command.comment_kind, command.comment_id, REACTION_ACK), fields)
         return f"signal {SIGNAL_FIX_REQUESTED} to {command.workflow_id}"
     await _best_effort(_reply(app, command.pr, NO_REVIEW_REPLY), fields)
     return "/fix: no review in progress"
@@ -135,8 +131,10 @@ async def _kill(command: RunCommand, client: Client, app: GitHubApp, deadline: f
     if queue == settings.dev_task_queue:
         await _best_effort(_reply(app, command.pr, DEV_KILL_REPLY), fields)
         return "/kill: dev worker"
-    targets = kill_targets(await temporal_ops.poller_identities(client, settings.task_queue))
-    if not targets or not settings.runtime_arn:
+    targets: list[AgentCoreSession] = []
+    if settings.runtime_arn:  # empty until the first make deploy: no AgentCore worker yet
+        targets = kill_targets(await temporal_ops.poller_identities(client, settings.task_queue))
+    if not targets:
         await _best_effort(_reply(app, command.pr, NO_WORKER_REPLY), fields)
         return "/kill: no active worker"
     outcomes = await _stop(targets, deadline, fields)
@@ -180,28 +178,26 @@ async def _kill_feedback(
 
 
 async def _permission(app: GitHubApp, pr: PrRef, user: str) -> str | None:
-    try:
-        response = await app.request(
-            pr.installation_id, "GET", f"/repos/{pr.owner}/{pr.repo}/collaborators/{user}/permission"
-        )
-    except GitHubError as error:
-        if error.status == 404:  # not a collaborator
-            return None
-        raise
-    return response.json().get("permission")
+    """The user's permission on the repository, or None when they are not a collaborator."""
+    collaborator = await _get_json_or_none(app, pr, f"/collaborators/{user}/permission")
+    return None if collaborator is None else collaborator.get("permission")
 
 
 async def _comment_author(app: GitHubApp, pr: PrRef, comment_id: int) -> str | None:
     """The author of a review comment, or None when it was deleted."""
+    comment = await _get_json_or_none(app, pr, f"/pulls/comments/{comment_id}")
+    return None if comment is None else (comment.get("user") or {}).get("login")
+
+
+async def _get_json_or_none(app: GitHubApp, pr: PrRef, path: str) -> dict | None:
+    """GET a path under the pull request's repository; None when GitHub answers 404."""
     try:
-        response = await app.request(
-            pr.installation_id, "GET", f"/repos/{pr.owner}/{pr.repo}/pulls/comments/{comment_id}"
-        )
+        response = await app.request(pr.installation_id, "GET", f"/repos/{pr.owner}/{pr.repo}{path}")
     except GitHubError as error:
         if error.status == 404:
             return None
         raise
-    return (response.json().get("user") or {}).get("login")
+    return response.json()
 
 
 async def _react(app: GitHubApp, pr: PrRef, comment_kind: CommentKind, comment_id: int, content: str) -> None:

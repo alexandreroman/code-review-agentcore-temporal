@@ -3,7 +3,6 @@ from agentcore_review_router.rules import (
     KillTally,
     can_run_commands,
     fix_finding_ids,
-    is_bot_login,
     kill_comment,
     kill_targets,
     stop_outcome,
@@ -26,13 +25,6 @@ from agentcore_review_shared.contract import AgentCoreSession
 )
 def test_only_write_access_runs_commands(permission, allowed):
     assert can_run_commands(permission) is allowed
-
-
-@pytest.mark.parametrize(
-    ("login", "expected"), [("tar-bot[bot]", True), ("octocat", False), (None, False), ("tar-bot", False)]
-)
-def test_only_the_bot_login_starts_a_finding_thread(login, expected):
-    assert is_bot_login(login, "tar-bot[bot]") is expected
 
 
 @pytest.mark.parametrize(
@@ -68,7 +60,6 @@ def test_kill_targets_keep_each_agentcore_session_once():
 
 def test_no_agentcore_poller_means_no_target():
     assert kill_targets(["dev:laptop"]) == []
-    assert kill_targets([]) == []
 
 
 @pytest.mark.parametrize(

@@ -1,5 +1,5 @@
-"""Pure command rules: who may run /fix and /kill, which findings /fix names, which threads are findings, which
-sessions /kill targets, and what the bot answers."""
+"""Pure command rules: who may run /fix and /kill, which findings /fix names, which sessions /kill targets, and
+what the bot answers."""
 
 import re
 from collections import Counter
@@ -9,11 +9,11 @@ from typing import Literal
 
 from agentcore_review_shared.contract import AgentCoreSession, parse_agentcore_identity
 
-# The permission endpoint answers admin, write, read or none; maintain is a role that maps to write.
+# The permission endpoint reports the maintain role as write.
 WRITE_PERMISSIONS = frozenset({"admin", "write"})
 
 REACTION_DENIED = "confused"  # 😕
-REACTION_FIX = "eyes"  # 👀
+REACTION_ACK = "eyes"  # 👀 acknowledges a /fix or a forwarded reply
 REACTION_KILL = "rocket"  # GitHub has no 💥 reaction: the /kill comment carries it
 
 NO_REVIEW_REPLY = "No review in progress."
@@ -35,11 +35,6 @@ RETRYABLE_STOP_ERRORS = frozenset({"ConflictException", "ThrottlingException", "
 def can_run_commands(permission: str | None) -> bool:
     """author_association is not enough (MEMBER does not grant write): the collaborator permission decides."""
     return permission in WRITE_PERMISSIONS
-
-
-def is_bot_login(login: str | None, bot_login: str) -> bool:
-    """The GitHub App comments as "<app slug>[bot]"; a human may pick the bare slug as a user name."""
-    return login == bot_login
 
 
 def fix_finding_ids(arguments: Iterable[str]) -> list[str] | None:

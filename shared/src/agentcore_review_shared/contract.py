@@ -162,7 +162,8 @@ class PullRequestState(BaseModel):
 class PullRequestInput(BaseModel):
     pr: PrRef
     state: PullRequestState = Field(default_factory=PullRequestState)
-    # Seconds without activity before the warning comment, then before the pull request is closed. The router
-    # sets them from its settings; the defaults apply to inputs written before they existed.
+    # Seconds without activity before the warning comment, then before the pull request is closed; the router sets
+    # them from its settings. The defaults are needed: a continue-as-new of a run started before these fields
+    # existed (812824b) carries no durations, and a manual start relies on them matching the Makefile's.
     idle_warning_seconds: int = 600
     idle_close_seconds: int = 900

@@ -1,16 +1,15 @@
 """Pure mapping from a GitHub webhook event to the action the router must perform."""
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, PrUpdated, pr_workflow_id
 from pydantic import BaseModel
 from temporalio.common import WorkflowIDReusePolicy
 
-from .rules import is_bot_login
-
-COMMANDS: dict[str, Literal["fix", "kill"]] = {"/fix": "fix", "/kill": "kill"}
+Command = Literal["fix", "kill"]
+COMMANDS: dict[str, Command] = {"/fix": "fix", "/kill": "kill"}
 
 # Where a command was posted: "issue" for the PR's Conversation tab (issue_comment), "review" for a review
 # thread, such as a reply to a finding (pull_request_review_comment). GitHub reacts on each through its own endpoint.
@@ -23,6 +22,7 @@ class RouterConfig:
     dev_queue: str
     dev_branch_prefix: str
     app_slug: str
+    webhook_secret: str = field(repr=False)  # kept out of logs
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ class SendSignal:
 
 @dataclass(frozen=True)
 class RunCommand:
-    command: Literal["fix", "kill"]
+    command: Command
     workflow_id: str
     pr: PrRef
     comment_id: int
@@ -83,7 +83,7 @@ def route(event: str, payload: dict, delivery_id: str, config: RouterConfig) -> 
     if event == "issue_comment":
         return _route_issue_comment(payload, delivery_id, config)
     if event == "pull_request_review_comment":
-        return _route_review_comment(payload, delivery_id, config)
+        return _route_command(payload, payload["pull_request"]["number"], "review", delivery_id, config)
     return Ignore(f"event {event} is not handled")
 
 
@@ -112,20 +112,30 @@ def _route_pull_request(payload: dict, delivery_id: str, config: RouterConfig) -
     ref = _pr_ref(payload, pull_request["number"])
     workflow_id = pr_workflow_id(ref.owner, ref.repo, ref.number)
     if action in ("opened", "synchronize", "reopened"):
-        dev = pull_request["head"]["ref"].startswith(config.dev_branch_prefix)
+        if pull_request["head"]["ref"].startswith(config.dev_branch_prefix):
+            task_queue = config.dev_queue
+        else:
+            task_queue = config.prod_queue
         # Reopening a closed PR asks for a fresh review, even though its previous run completed.
         if action == "reopened":
             policy = WorkflowIDReusePolicy.ALLOW_DUPLICATE
         else:
             policy = WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
-        signal = PrUpdated(head_sha=pull_request["head"]["sha"], delivery_id=delivery_id)
-        return StartOrSignal(workflow_id, config.dev_queue if dev else config.prod_queue, ref, signal, policy)
+        return StartOrSignal(
+            workflow_id=workflow_id,
+            task_queue=task_queue,
+            pr=ref,
+            signal=PrUpdated(head_sha=pull_request["head"]["sha"], delivery_id=delivery_id),
+            reuse_policy=policy,
+        )
     if action == "closed":
         merged = bool(pull_request.get("merged"))
         who = pull_request.get("merged_by") if merged else payload.get("sender")
         closed_by = (who or {}).get("login")
         return SendSignal(
-            workflow_id, SIGNAL_PR_CLOSED, PrClosed(merged=merged, closed_by=closed_by, delivery_id=delivery_id)
+            workflow_id=workflow_id,
+            signal_name=SIGNAL_PR_CLOSED,
+            payload=PrClosed(merged=merged, closed_by=closed_by, delivery_id=delivery_id),
         )
     return Ignore(f"pull_request action {action} is not handled")
 
@@ -137,10 +147,6 @@ def _route_issue_comment(payload: dict, delivery_id: str, config: RouterConfig) 
     return _route_command(payload, issue["number"], "issue", delivery_id, config)
 
 
-def _route_review_comment(payload: dict, delivery_id: str, config: RouterConfig) -> Action:
-    return _route_command(payload, payload["pull_request"]["number"], "review", delivery_id, config)
-
-
 def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: str, config: RouterConfig) -> Action:
     """Both comment events share the same shape for the fields a command needs: action, comment and sender.
 
@@ -149,9 +155,10 @@ def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: s
     if payload.get("action") != "created":
         return Ignore("comment was not created")
     comment = payload["comment"]
-    sender = payload.get("sender") or {}
+    author = (payload.get("sender") or {}).get("login", "")
+    # The GitHub App comments as "<app slug>[bot]"; a human may pick the bare slug as a user name.
     bot_login = f"{config.app_slug}[bot]"
-    if is_bot_login(sender.get("login"), bot_login):
+    if author == bot_login:
         return Ignore("comment from the bot itself")
     words = (comment.get("body") or "").split()
     if not words:
@@ -168,7 +175,7 @@ def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: s
             pr=ref,
             comment_id=comment["id"],
             comment_kind=kind,
-            author=sender.get("login", ""),
+            author=author,
             delivery_id=delivery_id,
             thread_root_id=thread_root_id,
             arguments=tuple(words[1:]),
@@ -180,7 +187,7 @@ def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: s
         pr=ref,
         comment_id=comment["id"],
         thread_root_id=thread_root_id,
-        author=sender.get("login", ""),
+        author=author,
         delivery_id=delivery_id,
         bot_login=bot_login,
     )

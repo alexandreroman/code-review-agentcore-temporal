@@ -16,7 +16,9 @@ from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed
 from temporalio.common import WorkflowIDReusePolicy
 
 FIXTURES = Path(__file__).parent / "fixtures"
-CONFIG = RouterConfig(prod_queue="review", dev_queue="review-dev", dev_branch_prefix="dev/", app_slug="tar-bot")
+CONFIG = RouterConfig(
+    prod_queue="review", dev_queue="review-dev", dev_branch_prefix="dev/", app_slug="tar-bot", webhook_secret="s"
+)
 WF = "pr-octocat-agentcore-review-demo-app-3"
 # Each comment event is loaded from the fixture of the same name.
 COMMENT_EVENTS = ["issue_comment", "pull_request_review_comment"]
@@ -103,6 +105,7 @@ def test_commands(body, command):
         "issue",
         "octocat",
     )
+    assert result.thread_root_id is None
 
 
 @pytest.mark.parametrize(("body", "command"), [("/fix", "fix"), ("/kill", "kill")])
@@ -118,23 +121,13 @@ def test_commands_in_reply_to_a_review_comment(body, command):
         "review",
         "octocat",
     )
-    assert result.pr.number == 3
-
-
-def test_fix_in_a_review_thread_carries_the_thread_root():
-    result = route("pull_request_review_comment", load("pull_request_review_comment"), "d", CONFIG)
-    assert isinstance(result, RunCommand) and result.thread_root_id == 666
+    assert result.pr.number == 3 and result.thread_root_id == 666
 
 
 def test_fix_as_a_top_level_review_comment_fixes_everything():
     payload = load("pull_request_review_comment")
     del payload["comment"]["in_reply_to_id"]
     result = route("pull_request_review_comment", payload, "d", CONFIG)
-    assert isinstance(result, RunCommand) and result.thread_root_id is None
-
-
-def test_fix_in_the_conversation_fixes_everything():
-    result = route("issue_comment", load("issue_comment"), "d", CONFIG)
     assert isinstance(result, RunCommand) and result.thread_root_id is None
 
 

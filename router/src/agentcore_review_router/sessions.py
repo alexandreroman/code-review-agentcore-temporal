@@ -1,4 +1,4 @@
-"""StopRuntimeSession on several AgentCore sessions in parallel, within a deadline, retried on a transient 409."""
+"""StopRuntimeSession on several AgentCore sessions in parallel, within a deadline, retried on transient errors."""
 
 import logging
 import time

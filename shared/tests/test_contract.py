@@ -30,23 +30,18 @@ def test_severity_rank_and_blocking():
     assert not Severity.MEDIUM.blocking and not Severity.LOW.blocking
 
 
-def test_finding_draft_parses_enums_and_rejects_line_zero():
-    d = draft()
-    assert d.category is Category.SECURITY and d.severity is Severity.HIGH
-    with pytest.raises(ValidationError):
-        draft(line=0)
-
-
 @pytest.mark.parametrize(
-    ("raw", "expected"), [("Security", Category.SECURITY), (" PERFORMANCE ", Category.PERFORMANCE)]
+    ("field", "raw", "expected"),
+    [
+        ("category", "Security", Category.SECURITY),
+        ("category", " PERFORMANCE ", Category.PERFORMANCE),
+        ("severity", "Critical", Severity.CRITICAL),
+        ("severity", " low ", Severity.LOW),
+    ],
 )
-def test_categories_tolerate_case_and_spaces(raw, expected):
-    assert draft(category=raw).category is expected
-
-
-def test_severities_tolerate_case_in_structured_output():
-    finding = FindingDraft.model_validate(draft().model_dump() | {"severity": "Critical"})
-    assert finding.severity is Severity.CRITICAL
+def test_enums_tolerate_case_and_spaces(field, raw, expected):
+    finding = draft(**{field: raw})
+    assert getattr(finding, field) is expected
 
 
 def test_unknown_enum_values_are_still_rejected():

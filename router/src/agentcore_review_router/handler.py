@@ -10,8 +10,6 @@ import logging
 import time
 from typing import Any
 
-from agentcore_review_shared.secrets import GitHubAppSecret
-
 from . import commands, runtime, temporal_ops
 from .routing import ForwardReply, Ignore, RouterConfig, RunCommand, SendSignal, StartOrSignal, load_payload, route
 from .signature import decode_body, verify_signature
@@ -45,20 +43,13 @@ async def _handle_webhook(event: dict, deadline: float) -> dict:
 
 async def _process(event: dict, headers: dict[str, str], fields: dict[str, Any], deadline: float) -> Reply:
     body = decode_body(event)
-    signature = headers.get("x-hub-signature-256")
-    loaded = _load_router_config(fields)
-    valid = loaded is not None and verify_signature(loaded[0].webhook_secret, body, signature)
-    if loaded is not None and not valid:
-        # A re-registered GitHub App rotates the webhook secret: a warm container's cache is stale
-        # exactly once, so retry against a fresh secret before answering 401 for good.
-        runtime.clear_github_app_secret()
-        loaded = _load_router_config(fields)
-        valid = loaded is not None and verify_signature(loaded[0].webhook_secret, body, signature)
-    if loaded is None:
+    try:
+        config = _signed_config(body, headers.get("x-hub-signature-256"))
+    except Exception:
+        logger.exception("router not configured (has make github-app run?)", extra=fields)
         return 503, "router not configured"
-    if not valid:
+    if config is None:
         return 401, "invalid signature"
-    config = loaded[1]
     payload = load_payload(body)
     if payload is None:
         return 400, "body is not a JSON object"
@@ -79,12 +70,19 @@ async def _process(event: dict, headers: dict[str, str], fields: dict[str, Any],
         return 500, "action failed (see the router logs)"
 
 
-def _load_router_config(fields: dict[str, Any]) -> tuple[GitHubAppSecret, RouterConfig] | None:
-    try:
-        return runtime.github_app_secret(), runtime.router_config()
-    except Exception:
-        logger.exception("router not configured (has make github-app run?)", extra=fields)
-        return None
+def _signed_config(body: bytes, signature: str | None) -> RouterConfig | None:
+    """The router config whose webhook secret signed the body, or None when the signature is invalid.
+
+    Raises when the router is not configured (the GitHub App secret does not exist yet).
+    """
+    config = runtime.router_config()
+    if verify_signature(config.webhook_secret, body, signature):
+        return config
+    # A re-registered GitHub App rotates the webhook secret: a warm container's cache is stale exactly once, so
+    # check against a fresh secret before refusing the signature for good.
+    runtime.clear_github_app_secret()
+    config = runtime.router_config()
+    return config if verify_signature(config.webhook_secret, body, signature) else None
 
 
 async def _act(
@@ -104,8 +102,8 @@ async def _act(
             return 202, f"signal {action.signal_name} to {action.workflow_id}"
         return 204, "no running workflow"
     if isinstance(action, ForwardReply):
-        return 202, await commands.forward_reply(action, client)
-    return 202, await commands.run(action, client, deadline)
+        return 202, await commands.forward_reply(action, client, fields)
+    return 202, await commands.run_command(action, client, deadline, fields)
 
 
 async def _finish_kill(event: dict, deadline: float) -> None:

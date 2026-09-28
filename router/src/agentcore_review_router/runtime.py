@@ -24,7 +24,7 @@ from .routing import RouterConfig
 
 IDENTITY = "agentcore-review-demo-router"
 GITHUB_TIMEOUT = 5.0
-# /kill must fit in the webhook's 10 s: short per-call timeouts, and no SDK retry (sessions.py retries a 409).
+# /kill must fit in the webhook's 10 s: short per-call timeouts, no SDK retry (sessions.py retries transient errors).
 STOP_CALL_CONFIG = Config(connect_timeout=2, read_timeout=5, retries={"max_attempts": 1, "mode": "standard"})
 
 
@@ -84,9 +84,7 @@ def github_app_secret() -> GitHubAppSecret:
 
 
 def clear_github_app_secret() -> None:
-    """Drops the cached secret and everything derived from it (router config, GitHub App client), so a warm
-    container picks up a freshly registered app's webhook secret and credentials instead of failing for the rest
-    of its life."""
+    """Drops the cached secret and everything derived from it, so a warm container picks up a re-registered app."""
     # Any unsigned POST triggers this refresh: one Secrets Manager call, cheap enough for the demo.
     github_app_secret.cache_clear()
     router_config.cache_clear()
@@ -101,6 +99,7 @@ def router_config() -> RouterConfig:
         dev_queue=current.dev_task_queue,
         dev_branch_prefix=current.dev_branch_prefix,
         app_slug=app.slug,
+        webhook_secret=app.webhook_secret,
     )
 
 
