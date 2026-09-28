@@ -10,6 +10,7 @@ from typing import Literal
 from agentcore_review_shared.contract import Category, CommentPosted, FixRequested, format_finding_id, parse_finding_id
 
 from agentcore_review_worker.models import (
+    ChangeSet,
     DismissedFinding,
     Finding,
     PullRequestState,
@@ -250,11 +251,29 @@ def discussion_thread(
     return kept
 
 
-def clean_report(report: ReviewerReport, category: Category, open_ids: list[str]) -> ReviewerReport:
-    """Pin every finding to the reviewer's category and keep only resolved IDs it was asked about."""
+def is_fix_round(state: PullRequestState, change: ChangeSet) -> bool:
+    """Whether the round reviews the bot's last fix alone: its head is the fix, its diff the delta since the last round.
+
+    A commit pushed after the fix moves the head, and a review of the whole pull request covers more than the fix:
+    both make a normal round.
+    """
+    is_delta = change.diff_base == state.last_reviewed_sha and change.diff_base != change.pr_base_sha
+    return change.head_sha == state.last_fix_sha and is_delta
+
+
+def clean_report(
+    report: ReviewerReport, category: Category, open_ids: list[str], fix_round: bool = False
+) -> ReviewerReport:
+    """Pin every finding to the reviewer's category and keep only resolved IDs it was asked about.
+
+    In a fix round, only critical or high findings stay: the rounds after a fix converge whatever the model reports.
+    """
     resolved = {raw.strip().upper() for raw in report.resolved_ids} & set(open_ids)
+    drafts = report.findings
+    if fix_round:
+        drafts = [draft for draft in drafts if draft.severity.blocking]
     return ReviewerReport(
-        findings=[draft.model_copy(update={"category": category}) for draft in report.findings],
+        findings=[draft.model_copy(update={"category": category}) for draft in drafts],
         resolved_ids=sorted(resolved, key=id_sort_key),
     )
 

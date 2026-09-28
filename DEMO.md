@@ -125,9 +125,12 @@ Talking points:
   finding (in a finding's thread, `/fix` fixes that finding only;
   `/fix S-01 P-02` fixes the findings it names, and nothing at all if
   one of them is not open). 👀 on the comment. The fixer child workflow
-  plans the change and the bot pushes one commit.
-- **8:30, long-lived workflow.** The commit triggers round 2 on the delta
-  only: fixed threads are resolved, the check turns green.
+  plans the smallest local change and the bot pushes one commit; a
+  finding that needs a design decision is skipped, with its reason in the
+  commit message.
+- **8:30, long-lived workflow.** The commit triggers round 2 on the fix
+  only: fixed threads are resolved, only a critical or high problem the
+  fix introduces is reported, the check turns green.
 - **10:00, lifecycle.** Merge: the workflow ends with its
   `PullRequestOutcome` (merged, by whom, rounds, findings still open) and
   deletes the PR's snapshots.

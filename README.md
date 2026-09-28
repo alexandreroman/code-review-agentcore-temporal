@@ -18,9 +18,10 @@ conference demo that makes durable execution visible on stage.
   deploys.
 - **Human in the loop**: a reply to a finding gets an answer from an
   agent, which may dismiss the finding when the human is right. A `/fix`
-  comment lets an agent push a fix, for every open finding on the PR or
-  for that finding only in its thread; an incremental review then turns
-  the `AI Review` check green.
+  comment lets an agent push the smallest local fix, for every open
+  finding on the PR or for that finding only in its thread. The next
+  round reviews the fix alone, reporting only a critical or high problem
+  it introduces, and turns the `AI Review` check green.
 
 [DEMO.md](DEMO.md) is the timed run-through of the talk, with its
 checklist and plan B.

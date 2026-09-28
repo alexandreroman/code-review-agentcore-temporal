@@ -61,6 +61,14 @@ def test_dismissed_findings_appear_with_their_reason():
     assert "dismissed" not in reviewer_prompt(Category.SECURITY, PATCHES, [], [])[2]["text"]
 
 
+def test_a_fix_round_asks_only_for_critical_or_high_problems_in_the_fix():
+    normal = reviewer_prompt(Category.SECURITY, PATCHES, [finding("S-01")], [])
+    fix = reviewer_prompt(Category.SECURITY, PATCHES, [finding("S-01")], [], fix_round=True)
+    assert fix[0] == normal[0]  # the shared diff prefix stays cacheable
+    assert "bot's fix" not in normal[2]["text"]
+    assert "bot's fix" in fix[2]["text"] and "critical or high" in fix[2]["text"]
+
+
 def test_discussion_prompt_shows_the_finding_then_the_thread_in_order():
     thread = [
         ThreadComment(id=1, author="bot[bot]", body="finding body"),

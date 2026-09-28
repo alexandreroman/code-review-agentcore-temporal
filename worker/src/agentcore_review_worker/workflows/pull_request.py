@@ -450,6 +450,9 @@ class PullRequestWorkflow:
         """One reviewer per (category, batch), at most max_parallel_agents at a time; a failed one is skipped."""
         number = self._state.round
         batches = make_batches(change.files)
+        fix_round = lifecycle.is_fix_round(self._state, change)
+        if fix_round:
+            workflow.logger.info("round %d reviews fix commit %s", number, change.head_sha)
         jobs: list[tuple[str, str, ReviewerInput]] = []
         for category in Category:
             open_in_category = [f for f in self._state.open_findings if f.category == category]
@@ -469,6 +472,7 @@ class PullRequestWorkflow:
                     ),
                     open_findings=open_in_category,
                     dismissed_findings=dismissed_in_category,
+                    fix_round=fix_round,
                 )
                 jobs.append((child_id, label, reviewer))
         slots = asyncio.Semaphore(change.max_parallel_agents)
@@ -627,7 +631,8 @@ class PullRequestWorkflow:
                 static_summary=summaries.finding_ids([f.id for f in triage.findings]),
                 static_details=summaries.finding_list(triage.findings),
             )
-            # The commit's synchronize webhook starts the next round.
+            # The commit's synchronize webhook starts the next round, which reviews this fix alone.
+            state.last_fix_sha = result.sha
             workflow.logger.info("fix %d pushed as %s (rejected: %s)", state.fix_count, result.sha, result.rejected)
             self._set_phase("fix pushed, waiting for its review")
         except (ActivityError, ChildWorkflowError) as error:

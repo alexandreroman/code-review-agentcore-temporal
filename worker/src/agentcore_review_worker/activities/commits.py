@@ -22,11 +22,16 @@ EXECUTABLE_FILE = "100755"
 async def commit_fix(input: CommitInput) -> CommitResult:
     pr = input.pr
     trailer = fix_trailer(input.workflow_id, input.fix_number)
+    if not input.plan.changes:
+        # The fixer skipped every finding: each one needs a design decision rather than a local change.
+        raise ApplicationError("the fixer skipped every finding", type="EmptyFixPlan", non_retryable=True)
     accepted, rejected = split_changes(input.plan.changes)
     if rejected:
         activity.logger.warning("%s: rejected changes to %s", trailer, rejected)
     if not accepted:
-        raise ApplicationError("the fix plan has no change the bot may push", type="EmptyFixPlan", non_retryable=True)
+        raise ApplicationError(
+            "the fix plan has no change the bot may push", type="RejectedFixPlan", non_retryable=True
+        )
     with github_errors():
         pull = await get(pr, f"{repo_path(pr)}/pulls/{pr.number}")
         head_repo = pull["head"]["repo"]  # None once the fork is deleted

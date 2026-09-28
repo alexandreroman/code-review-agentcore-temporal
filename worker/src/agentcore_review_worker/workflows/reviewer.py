@@ -28,6 +28,14 @@ class ReviewerWorkflow:
             system_prompt=prompts.REVIEWER_SYSTEM,
             tools=navigation_tools(input.snapshot),
             output=ReviewerReport,
-            prompt=prompts.reviewer_prompt(input.category, patches, input.open_findings, input.dismissed_findings),
+            prompt=prompts.reviewer_prompt(
+                input.category, patches, input.open_findings, input.dismissed_findings, input.fix_round
+            ),
         )
-        return clean_report(report, input.category, [f.id for f in input.open_findings])
+        cleaned = clean_report(report, input.category, [f.id for f in input.open_findings], input.fix_round)
+        dropped = len(report.findings) - len(cleaned.findings)
+        if dropped:
+            workflow.logger.info(
+                "%s reviewer: %d finding(s) below high dropped in a fix round", input.category, dropped
+            )
+        return cleaned

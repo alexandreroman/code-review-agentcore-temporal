@@ -67,6 +67,8 @@ class DismissedFinding(BaseModel):
 
 class PullRequestState(BaseModel):
     last_reviewed_sha: str | None = None
+    # The commit of the last fix the bot pushed: a round whose head it is reviews that fix only.
+    last_fix_sha: str | None = None
     pending_head_sha: str | None = None
     # Fix requests waiting for the next fix, in arrival order: each one is checked on its own when the fix starts.
     pending_fixes: list[FixRequested] = Field(default_factory=list)
@@ -155,6 +157,7 @@ class ReviewerInput(BaseModel):
     batch: BatchInput
     open_findings: list[Finding] = Field(default_factory=list)
     dismissed_findings: list[DismissedFinding] = Field(default_factory=list)
+    fix_round: bool = False  # the diff is the bot's last fix: only critical or high problems in it count
 
 
 class SynthesisInput(BaseModel):
@@ -208,9 +211,10 @@ class FileChange(BaseModel):
 
 
 class FixPlan(BaseModel):
-    changes: list[FileChange]
+    changes: list[FileChange] = Field(description="The changed files; empty when every finding is skipped")
     commit_message: str = Field(
-        description="Imperative subject of at most 50 characters, a blank line, then one line per fixed finding"
+        description="Imperative subject of at most 50 characters, a blank line, one line per fixed finding ID, "
+        "then one line `Skipped <ID>: <one-line reason>` per skipped finding"
     )
 
 

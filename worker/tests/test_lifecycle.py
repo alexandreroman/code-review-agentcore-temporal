@@ -17,6 +17,7 @@ from agentcore_review_worker.lifecycle import (
     dismiss,
     fallback_summary,
     idle_timer,
+    is_fix_round,
     memo,
     merge_status,
     next_action,
@@ -32,6 +33,7 @@ from agentcore_review_worker.lifecycle import (
     triage_fixes,
 )
 from agentcore_review_worker.models import (
+    ChangeSet,
     Finding,
     FindingDraft,
     PullRequestState,
@@ -298,6 +300,38 @@ def test_clean_report_pins_the_category_and_keeps_known_open_ids():
     cleaned = clean_report(report, Category.SECURITY, ["S-02", "S-10", "S-09"])
     assert [f.category for f in cleaned.findings] == [Category.SECURITY]
     assert cleaned.resolved_ids == ["S-02", "S-09", "S-10"]
+
+
+def test_a_fix_round_keeps_only_critical_or_high_findings():
+    report = ReviewerReport(findings=[draft(severity=s) for s in ("critical", "high", "medium", "low")])
+    cleaned = clean_report(report, Category.SECURITY, [], fix_round=True)
+    assert [f.severity for f in cleaned.findings] == ["critical", "high"]
+    assert len(clean_report(report, Category.SECURITY, []).findings) == 4
+
+
+def change(head_sha="fix", diff_base="reviewed", pr_base_sha="base") -> ChangeSet:
+    return ChangeSet(head_sha=head_sha, pr_base_sha=pr_base_sha, diff_base=diff_base, max_parallel_agents=3)
+
+
+def test_the_delta_up_to_the_bot_fix_is_a_fix_round():
+    state = PullRequestState(last_reviewed_sha="reviewed", last_fix_sha="fix")
+    assert is_fix_round(state, change())
+
+
+@pytest.mark.parametrize(
+    "pushed",
+    [
+        change(head_sha="user-commit"),  # a commit pushed after the fix
+        change(diff_base="base"),  # the whole pull request, when the delta is not available
+    ],
+)
+def test_a_round_covering_more_than_the_fix_is_a_normal_round(pushed):
+    state = PullRequestState(last_reviewed_sha="reviewed", last_fix_sha="fix")
+    assert not is_fix_round(state, pushed)
+
+
+def test_without_a_fix_every_round_is_normal():
+    assert not is_fix_round(PullRequestState(last_reviewed_sha="reviewed"), change())
 
 
 def test_number_findings_counts_each_category_in_report_order():

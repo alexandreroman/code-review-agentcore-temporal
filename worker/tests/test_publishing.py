@@ -245,6 +245,7 @@ def test_a_fix_refused_with_no_open_finding():
     [
         ("BranchMoved", "Fix 2 abandoned: the branch changed while it was prepared. Comment `/fix` to try again."),
         ("ForkNotSupported", "Fix 2 not pushed: this pull request comes from a fork, which the bot cannot push to."),
+        ("EmptyFixPlan", "Fix 2 pushed nothing: no finding could be fixed with a local change."),
         ("AgentUnavailable", "Fix 2 failed: nothing was pushed. Comment `/fix` to try again."),
         (None, "Fix 2 failed: nothing was pushed. Comment `/fix` to try again."),
     ],

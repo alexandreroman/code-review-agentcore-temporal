@@ -234,6 +234,8 @@ def failed_fix_comment(fix_number: int, error_type: str | None, marker: str) -> 
         text = f"Fix {fix_number} abandoned: the branch changed while it was prepared. Comment `/fix` to try again."
     elif error_type == "ForkNotSupported":
         text = f"Fix {fix_number} not pushed: this pull request comes from a fork, which the bot cannot push to."
+    elif error_type == "EmptyFixPlan":
+        text = f"Fix {fix_number} pushed nothing: no finding could be fixed with a local change."
     else:
         text = f"Fix {fix_number} failed: nothing was pushed. Comment `/fix` to try again."
     return f"{text}\n\n{marker}"

@@ -33,6 +33,7 @@ conclude.
 Rules:
 - Report only real, actionable problems in your focus area that this pull request introduces or makes worse. \
 No style nitpicks, no praise.
+- An empty report is a normal outcome: report nothing rather than weak findings.
 - Each finding points to a line of the new version of a file (right side of the diff). Prefer a line that \
 appears in the diff; if the problem lies elsewhere, point to the most relevant line.
 - Severity: critical (exploitable or data loss), high (must be fixed before merging), medium (should be fixed), \
@@ -76,11 +77,18 @@ the repository at the reviewed commit. Glob, Grep and Read let you explore it.
 Rules:
 - Read every file you change, in full, before changing it. new_content replaces the whole file: it must hold \
 the complete file with your fix applied and everything else unchanged.
-- Fix only the listed findings, with minimal changes that follow the project's conventions. Add or update \
-tests when a finding asks for them.
+- Fix only the listed findings, following the project's conventions: for each one, make the smallest local \
+change that removes its cause.
+- Never introduce a new mechanism, component, dependency or configuration (such as a rate limiter, a cache, a \
+security layer or a framework setting).
+- When a finding needs a design decision rather than a local change, leave its code unchanged and skip it. When \
+you skip every finding, submit a FixPlan with no change.
+- The security, performance and maintainability reviewers review your fix next. When it changes behaviour, add \
+or update the test covering it in the same plan, following the project's test conventions. Add or update tests \
+when a finding asks for them too.
 - Never modify files under .github/: such changes are rejected.
-- commit_message: an imperative subject of at most 50 characters, a blank line, then one line per fixed \
-finding ID.
+- commit_message: an imperative subject of at most 50 characters, a blank line, one line per fixed finding ID, \
+then one line `Skipped <ID>: <one-line reason>` per skipped finding.
 - You have {MAX_MODEL_CALLS} model turns in total. Submit your result with the FixPlan tool."""
 
 DISCUSSION_SYSTEM = f"""You are the code reviewer who wrote a finding on a GitHub pull request. A human replied \
@@ -111,8 +119,12 @@ def reviewer_prompt(
     patches: BatchPatches,
     open_findings: list[Finding],
     dismissed_findings: list[DismissedFinding],
+    fix_round: bool = False,
 ) -> list[dict]:
-    """The first message of a reviewer; the open and dismissed findings are those of its category."""
+    """The first message of a reviewer; the open and dismissed findings are those of its category.
+
+    fix_round tells that the diff is the bot's last fix: the reviewer then checks the fix rather than a new feature.
+    """
     diff = [_patch(p) for p in patches.patches]
     shared = "\n\n".join(["# Pull request diff", *diff, "# Repository top level", "\n".join(patches.tree)])
     focus = [f"# Your focus: {category}", FOCUS[category]]
@@ -127,6 +139,14 @@ def reviewer_prompt(
             f"# {category.capitalize()} findings dismissed after discussion",
             "\n".join(f"{_finding_line(d.finding)} (dismissed: {d.reason})" for d in dismissed_findings),
             "Do not report them again.",
+        ]
+    if fix_round:
+        focus += [
+            "# This diff is the bot's fix for the open findings",
+            "The review bot pushed this diff to fix open findings of earlier rounds. Put in resolved_ids the IDs of "
+            "your open findings it fixes. Report a new finding only when the fix itself introduces a critical or "
+            "high problem: a regression, a bug or a vulnerability. Report no lesser problem in the fix, and nothing "
+            "outside it.",
         ]
     focus.append(f"Review the diff for {category} problems only, then submit a ReviewerReport.")
     return [{"text": shared}, {"cachePoint": {"type": "default"}}, {"text": "\n\n".join(focus)}]
