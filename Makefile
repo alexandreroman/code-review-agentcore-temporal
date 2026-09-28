@@ -135,13 +135,15 @@ check: test lint infra-check ## Run tests and static checks
 
 .PHONY: bootstrap
 bootstrap: ## Create the OpenTofu state bucket and KMS key (once per AWS account)
-	@scripts/bootstrap.sh
+	@scripts/bootstrap.sh "$(STATE_BUCKET)"
 
+# -reconfigure: the bucket comes from the command line on every run, so a saved
+# backend configuration never needs migrating.
 .PHONY: infra-init
 infra-init: ## Initialise the OpenTofu backends (S3 state, per worktree)
-	$(TOFU_AWS) init -input=false -backend-config="bucket=$(STATE_BUCKET)" \
+	$(TOFU_AWS) init -reconfigure -input=false -backend-config="bucket=$(STATE_BUCKET)" \
 		-backend-config="region=$(AWS_REGION)" >/dev/null
-	$(TOFU_GITHUB) init -input=false -backend-config="bucket=$(STATE_BUCKET)" \
+	$(TOFU_GITHUB) init -reconfigure -input=false -backend-config="bucket=$(STATE_BUCKET)" \
 		-backend-config="region=$(AWS_REGION)" >/dev/null
 
 # infra, deploy, prune and destroy depend on router-build: every plan of the aws
@@ -152,7 +154,7 @@ infra: router-build infra-init ## Apply the aws stack (keeps the deployed build 
 	scripts/infra.sh
 
 .PHONY: secrets
-secrets: ## Push the mTLS certificates from .env to Secrets Manager
+secrets: ## Push the mTLS client certificate from .env to Secrets Manager (read by the worker and the router)
 	scripts/secrets.sh
 
 .PHONY: github-app
@@ -175,12 +177,7 @@ deploy: router-build infra-init ## Build and push the worker image, then make it
 .PHONY: up
 up: ## Deploy everything: state, AWS, secrets, worker, GitHub (idempotent, stops at a missing prerequisite)
 	$(call require_namespace)
-	$(MAKE) --no-print-directory bootstrap
-	$(MAKE) --no-print-directory infra
-	$(MAKE) --no-print-directory secrets
-	$(MAKE) --no-print-directory deploy
-	$(MAKE) --no-print-directory github
-	$(MAKE) --no-print-directory info-publish
+	$(MAKE) --no-print-directory bootstrap infra secrets deploy github info-publish
 
 .PHONY: kill-sessions
 kill-sessions: infra-init ## Stop every AgentCore session polling the production task queue

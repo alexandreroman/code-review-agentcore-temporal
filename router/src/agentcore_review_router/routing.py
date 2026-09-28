@@ -1,10 +1,16 @@
 """Pure mapping from a GitHub webhook event to the action the router must perform."""
 
-import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Literal
 
-from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, PrUpdated, pr_workflow_id
+from agentcore_review_shared.contract import (
+    SIGNAL_PR_CLOSED,
+    PrClosed,
+    PrRef,
+    PrUpdated,
+    PullRequestInput,
+    pr_workflow_id,
+)
 from pydantic import BaseModel
 from temporalio.common import WorkflowIDReusePolicy
 
@@ -24,14 +30,15 @@ class RouterConfig:
     dev_queue: str
     dev_branch_prefix: str
     app_slug: str
-    webhook_secret: str = field(repr=False)  # kept out of logs
+    idle_warning_seconds: int
+    idle_close_seconds: int
 
 
 @dataclass(frozen=True)
 class StartOrSignal:
     workflow_id: str
     task_queue: str
-    pr: PrRef
+    input: PullRequestInput  # only a new run takes it: a running workflow keeps its own
     signal: PrUpdated
     reuse_policy: WorkflowIDReusePolicy
     summary: str  # the workflow's static summary in Temporal UI: only a new run takes it
@@ -90,15 +97,6 @@ def route(event: str, payload: dict, delivery_id: str, config: RouterConfig) -> 
     return Ignore(f"event {event} is not handled")
 
 
-def load_payload(body: bytes) -> dict | None:
-    """The webhook's JSON object, or None when a correctly signed body is not one (unexpected content type)."""
-    try:
-        payload = json.loads(body)
-    except ValueError:  # JSONDecodeError and UnicodeDecodeError
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
 def workflow_summary(number: int, title: str) -> str:
     """`#3 · Add customer search`, on a single line of at most 200 bytes, cut with an ellipsis."""
     summary = " ".join(f"#{number} · {title}".split())
@@ -138,7 +136,11 @@ def _route_pull_request(payload: dict, delivery_id: str, config: RouterConfig) -
         return StartOrSignal(
             workflow_id=workflow_id,
             task_queue=task_queue,
-            pr=ref,
+            input=PullRequestInput(
+                pr=ref,
+                idle_warning_seconds=config.idle_warning_seconds,
+                idle_close_seconds=config.idle_close_seconds,
+            ),
             signal=PrUpdated(head_sha=pull_request["head"]["sha"], delivery_id=delivery_id),
             reuse_policy=policy,
             summary=workflow_summary(ref.number, pull_request["title"]),
@@ -150,7 +152,7 @@ def _route_pull_request(payload: dict, delivery_id: str, config: RouterConfig) -
         return SendSignal(
             workflow_id=workflow_id,
             signal_name=SIGNAL_PR_CLOSED,
-            payload=PrClosed(merged=merged, closed_by=closed_by, delivery_id=delivery_id),
+            payload=PrClosed(merged=merged, closed_by=closed_by),
         )
     return Ignore(f"pull_request action {action} is not handled")
 

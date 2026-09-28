@@ -1,17 +1,100 @@
-"""Worker-internal models passed between the pull request workflow, its children and the activities.
+"""Worker-internal models: findings, the pull request workflow's state, and what passes between the workflow, its
+children and the activities.
 
 The parent workflow only handles metadata (paths, SHAs, snapshot references): patches and file
 contents appear only in the reviewer and fixer children.
 """
 
+from datetime import datetime
 from typing import Literal
 
-from agentcore_review_shared.contract import Category, DismissedFinding, Finding, FindingDraft, PrRef
+from agentcore_review_shared.contract import (
+    Category,
+    CommentPosted,
+    FixRequested,
+    LenientEnum,
+    PrRef,
+    PullRequestInput,
+)
 from pydantic import BaseModel, Field
 
 # Here rather than in agent_model so that workflow code can import it without agent_model's I/O libraries.
 MODEL_NAME = "claude"
 """Name of the single model factory registered in StrandsPlugin and used by every TemporalAgent."""
+
+
+class Severity(LenientEnum):
+    CRITICAL = "critical"
+    HIGH = "high"
+    MEDIUM = "medium"
+    LOW = "low"
+
+    @property
+    def rank(self) -> int:
+        """0 is the most severe."""
+        return list(Severity).index(self)
+
+    @property
+    def blocking(self) -> bool:
+        """A blocking finding turns the AI Review check red."""
+        return self in (Severity.CRITICAL, Severity.HIGH)
+
+
+class FindingDraft(BaseModel):
+    category: Category
+    severity: Severity = Field(
+        description="critical: exploitable or data loss; high: must be fixed before merging; "
+        "medium: should be fixed; low: minor"
+    )
+    path: str = Field(description="File path relative to the repository root")
+    line: int = Field(ge=1, description="Line in the new version of the file (right side of the diff)")
+    end_line: int | None = Field(default=None, ge=1, description="Last line, when the finding spans several lines")
+    title: str = Field(description="One-line summary")
+    explanation: str = Field(description="Why this is a problem, citing what the repository shows")
+    suggestion: str | None = Field(default=None, description="A concrete fix")
+
+
+class Finding(FindingDraft):
+    id: str
+    comment_id: int | None = None
+
+
+class DismissedFinding(BaseModel):
+    finding: Finding
+    reason: str
+    dismissed_by: str
+
+
+class PullRequestState(BaseModel):
+    last_reviewed_sha: str | None = None
+    pending_head_sha: str | None = None
+    # Fix requests waiting for the next fix, in arrival order: each one is checked on its own when the fix starts.
+    pending_fixes: list[FixRequested] = Field(default_factory=list)
+    # Delivery IDs of the latest fix requests: GitHub redelivers webhooks, and a repeat must not fix twice.
+    fix_deliveries: list[str] = Field(default_factory=list)
+    pending_replies: list[CommentPosted] = Field(default_factory=list)
+    reply_deliveries: list[str] = Field(default_factory=list)
+    open_findings: list[Finding] = Field(default_factory=list)
+    dismissed_findings: list[DismissedFinding] = Field(default_factory=list)
+    # Finding ID by the comment starting its thread, for the latest findings a round resolved.
+    resolved_threads: dict[int, str] = Field(default_factory=dict)
+    # The round whose check covers last_reviewed_sha: a dismissal updates that check.
+    last_reviewed_round: int | None = None
+    round: int = 0
+    fix_count: int = 0
+    discussion_count: int = 0
+    # The last finding number used in each category, absent until its first finding: S-03 leaves 3 for security.
+    last_finding_numbers: dict[Category, int] = Field(default_factory=dict)
+    # Start of the current idle period (the end of the last action, or the last signal) and whether its warning
+    # was posted: kept in the state, so a continue-as-new does not restart the countdown.
+    idle_since: datetime | None = None
+    idle_warned: bool = False
+
+
+class PullRequestRunInput(PullRequestInput):
+    """The router's input plus the state: empty for a started run, carried over by a continue-as-new."""
+
+    state: PullRequestState = Field(default_factory=PullRequestState)
 
 
 class ChangedFile(BaseModel):
@@ -26,7 +109,8 @@ class ChangeSet(BaseModel):
     files: list[ChangedFile] = Field(default_factory=list)  # reviewable files only
     excluded: list[str] = Field(default_factory=list)
     unlisted: int = 0  # changed files beyond the ones a GitHub comparison lists
-    # A worker setting carried to workflow code, which cannot read the environment.
+    # A worker setting carried to workflow code, which cannot read the environment: riding on the ListFiles result,
+    # it is read from the history on replay, so a changed setting never changes a replayed round.
     max_parallel_agents: int
 
 
@@ -135,6 +219,14 @@ class DiscussionReply(BaseModel):
         description="dismiss only when the code shows the finding is wrong or does not apply"
     )
     answer: str = Field(description="Markdown answer to the human, about 150 words at most")
+
+
+class CheckOutput(BaseModel):
+    """What a completed check shows."""
+
+    conclusion: Literal["success", "failure"]
+    title: str
+    summary: str
 
 
 class CheckInput(BaseModel):

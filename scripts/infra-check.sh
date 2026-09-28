@@ -7,7 +7,8 @@ set -euo pipefail
 
 tofu fmt -check -recursive infra
 
+export TF_DATA_DIR=.terraform-validate
 for stack in bootstrap aws github; do
-  TF_DATA_DIR=.terraform-validate tofu -chdir="infra/$stack" init -backend=false -input=false >/dev/null
-  TF_DATA_DIR=.terraform-validate tofu -chdir="infra/$stack" validate -no-color
+  tofu -chdir="infra/$stack" init -backend=false -input=false >/dev/null
+  tofu -chdir="infra/$stack" validate -no-color
 done

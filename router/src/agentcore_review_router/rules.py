@@ -55,9 +55,9 @@ def fix_finding_ids(arguments: Iterable[str]) -> list[str] | None:
 
 
 def kill_targets(identities: Iterable[str]) -> list[AgentCoreSession]:
-    """AgentCore sessions among the pollers, once each: a worker polls both workflow and activity tasks."""
-    sessions = {session for session in map(parse_agentcore_identity, identities) if session is not None}
-    return sorted(sessions, key=lambda session: (session.endpoint, session.session_id))
+    """AgentCore sessions among the pollers, once each in first-seen order: a worker polls two task types."""
+    sessions = [parse_agentcore_identity(identity) for identity in identities]
+    return list(dict.fromkeys(session for session in sessions if session is not None))
 
 
 def stop_outcome(error_code: str | None) -> StopOutcome:

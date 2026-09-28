@@ -18,29 +18,31 @@ def test_lock_and_generated_files_are_excluded(path):
     assert is_excluded(cf(path))
 
 
-@pytest.mark.parametrize("path", ["app/search.py", "README.md", "lockfile.py", "app.js"])
+@pytest.mark.parametrize(
+    "path", ["src/main/java/com/example/orders/OrderService.java", "README.md", "OrderLock.java", "app.js"]
+)
 def test_regular_files_are_reviewed(path):
     assert not is_excluded(cf(path))
 
 
 def test_partition_keeps_order():
-    files = [cf("a.py"), cf("uv.lock"), cf("b.py"), cf("img.png", None)]
+    files = [cf("A.java"), cf("uv.lock"), cf("B.java"), cf("img.png", None)]
     reviewed, excluded = partition(files)
-    assert [f.path for f in reviewed] == ["a.py", "b.py"]
+    assert [f.path for f in reviewed] == ["A.java", "B.java"]
     assert [f.path for f in excluded] == ["uv.lock", "img.png"]
 
 
 def test_file_count_threshold():
-    files = [cf(f"f{i}.py") for i in range(MAX_BATCH_FILES + 1)]
+    files = [cf(f"F{i}.java") for i in range(MAX_BATCH_FILES + 1)]
     batches = make_batches(files)
     assert [len(b) for b in batches] == [MAX_BATCH_FILES, 1]
 
 
 def test_patch_size_threshold():
-    files = [cf("a.py", 40_000), cf("b.py", 30_000), cf("c.py", 10_000)]
-    assert [[f.path for f in b] for b in make_batches(files)] == [["a.py"], ["b.py", "c.py"]]
+    files = [cf("A.java", 40_000), cf("B.java", 30_000), cf("C.java", 10_000)]
+    assert [[f.path for f in b] for b in make_batches(files)] == [["A.java"], ["B.java", "C.java"]]
 
 
 def test_oversized_file_gets_its_own_batch():
-    files = [cf("a.py", 100), cf("big.py", MAX_BATCH_PATCH_BYTES * 2), cf("c.py", 100)]
-    assert [[f.path for f in b] for b in make_batches(files)] == [["a.py"], ["big.py"], ["c.py"]]
+    files = [cf("A.java", 100), cf("Big.java", MAX_BATCH_PATCH_BYTES * 2), cf("C.java", 100)]
+    assert [[f.path for f in b] for b in make_batches(files)] == [["A.java"], ["Big.java"], ["C.java"]]

@@ -2,8 +2,9 @@
 # Removes the endpoints (and Temporal versions) of builds no pinned
 # workflow still uses (make prune).
 #
-# An endpoint is prunable when its Worker Deployment Version is gone
-# (describe fails) or fully drained. The current build is never touched.
+# An endpoint is prunable when its Worker Deployment Version is gone or
+# fully drained. The current build is never touched; a Temporal error stops
+# the script rather than dropping an endpoint a pinned workflow may need.
 set -euo pipefail
 
 source scripts/lib.sh

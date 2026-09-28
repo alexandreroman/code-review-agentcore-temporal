@@ -8,9 +8,7 @@ caps a summary at 200 bytes. Pure formatting: workflow code calls these function
 
 from typing import Any
 
-from agentcore_review_shared.contract import Finding
-
-from agentcore_review_worker.models import SynthesisInput
+from agentcore_review_worker.models import Finding, SynthesisInput
 
 MAX_SUMMARY_CHARS = 120
 MAX_SUMMARY_BYTES = 200

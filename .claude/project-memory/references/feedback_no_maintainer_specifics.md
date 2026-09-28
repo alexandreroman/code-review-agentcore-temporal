@@ -9,9 +9,8 @@ type: feedback
 Scripts, Makefile targets and user-facing docs (README, SETUP, DEMO,
 `.env.example`, script messages) name standard tools generically: `docker`
 to build, run and push containers. They never mention machine-specific
-setups (Podman behind a `docker` wrapper) nor Casper, `CASPER_PORT`,
-`.casper.json` or the Casper-only targets (`worktree-init`,
-`info-publish`). Casper appears only in `.casper.json` and
+setups nor Casper, `.casper.json` or the Casper-only targets
+(`worktree-init`, `info-publish`). Casper appears only in `.casper.json` and
 `scripts/info-panel.sh`.
 
 **Why:** the repository is public; readers need only a Docker-compatible

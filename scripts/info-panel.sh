@@ -29,7 +29,8 @@ value() {
 log_group_url() {
   local region="$1" name="$2" encoded
   encoded=$(jq -rn --arg name "$name" '$name | @uri' | sed 's/%/$25/g')
-  echo "https://${region}.console.aws.amazon.com/cloudwatch/home?region=${region}#logsV2:log-groups/log-group/${encoded}"
+  local console="https://${region}.console.aws.amazon.com/cloudwatch/home?region=${region}"
+  echo "${console}#logsV2:log-groups/log-group/${encoded}"
 }
 
 AWS_JSON=$(stack_outputs infra/aws)
@@ -91,11 +92,4 @@ render() {
   fi
 }
 
-# BSD mktemp only replaces trailing Xs, so the .md suffix is added afterwards.
-DOCUMENT=$(mktemp)
-mv "$DOCUMENT" "${DOCUMENT}.md"
-DOCUMENT="${DOCUMENT}.md"
-trap 'rm -f "$DOCUMENT"' EXIT
-
-render >"$DOCUMENT"
-casper info set --file "$DOCUMENT" >/dev/null 2>&1 || true
+render | casper info set - >/dev/null 2>&1 || true

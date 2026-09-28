@@ -36,6 +36,7 @@ SCENARIO_TITLE="Add customer search & order history"
   print-GITHUB_OWNER)
 export TEMPORAL_NAMESPACE TEMPORAL_ADDRESS AWS_REGION
 export AWS_DEFAULT_REGION="$AWS_REGION"
+# tofu output needs it: the aws stack's state encryption reads var.region.
 export TF_VAR_region="$AWS_REGION"
 REPO="$OWNER/$DEMO_REPO"
 
@@ -156,10 +157,6 @@ round_published() {
   local file
   file=$(fetch_history "$1") || return 1
   jqe -e --argjson n "$2" 'include "e2e"; (check_updates | length) >= 2 * $n' "$file" >/dev/null
-}
-
-workflow_closed() {
-  describe "$1" | jq -e '.workflowExecutionInfo.status | ascii_downcase | test("running") | not' >/dev/null
 }
 
 workflow_completed() {

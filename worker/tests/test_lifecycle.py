@@ -1,14 +1,7 @@
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from agentcore_review_shared.contract import (
-    Category,
-    CommentPosted,
-    Finding,
-    FindingDraft,
-    FixRequested,
-    PullRequestState,
-)
+from agentcore_review_shared.contract import Category, CommentPosted, FixRequested
 from agentcore_review_worker.lifecycle import (
     MAX_DELIVERIES,
     MAX_DISMISSED,
@@ -25,6 +18,7 @@ from agentcore_review_worker.lifecycle import (
     fallback_summary,
     idle_timer,
     memo,
+    merge_status,
     next_action,
     number_findings,
     open_finding_in_thread,
@@ -37,10 +31,20 @@ from agentcore_review_worker.lifecycle import (
     start_idle,
     triage_fixes,
 )
-from agentcore_review_worker.models import ReviewerReport, ReviewSummary, SynthesisInput, ThreadComment
+from agentcore_review_worker.models import (
+    Finding,
+    FindingDraft,
+    PullRequestState,
+    ReviewerReport,
+    ReviewSummary,
+    SynthesisInput,
+    ThreadComment,
+)
+
+PATH = "src/main/java/com/example/orders/OrderRepository.java"
 
 
-def draft(category="security", severity="high", path="app/search.py", line=5, title="SQL injection") -> FindingDraft:
+def draft(category="security", severity="high", path=PATH, line=5, title="SQL injection") -> FindingDraft:
     return FindingDraft(category=category, severity=severity, path=path, line=line, title=title, explanation="why")
 
 
@@ -336,11 +340,6 @@ def test_resolved_ids_are_merged_and_sorted_by_category_then_number():
     assert resolved_ids(reports) == ["S-99", "S-100", "P-01", "M-01"]
 
 
-def test_a_legacy_finding_id_sorts_last():
-    reports = [ReviewerReport(resolved_ids=["F-003", "M-02", "S-01"])]
-    assert resolved_ids(reports) == ["S-01", "M-02", "F-003"]
-
-
 def test_apply_summary_drops_duplicates_and_follows_the_order():
     new = [finding("S-01", severity="low"), finding("S-02"), finding("S-03", severity="medium")]
     summary = ReviewSummary(summary_markdown="s", ordered_ids=["S-02", "S-404", "S-02"], duplicates=["S-03"])
@@ -372,7 +371,7 @@ def test_memo_lists_open_findings_most_severe_first():
     assert memo("waiting for changes", state) == {
         "state": "waiting for changes",
         "round": 2,
-        "open_findings": ["S-02 critical app/search.py:5 SQL injection", "S-01 low app/search.py:5 SQL injection"],
+        "open_findings": [f"S-02 critical {PATH}:5 SQL injection", f"S-01 low {PATH}:5 SQL injection"],
     }
 
 
@@ -385,13 +384,23 @@ def test_current_details_name_the_blocking_findings():
 
 
 def test_current_details_add_the_round_the_phase_does_not_name():
-    state = PullRequestState(round=3, open_findings=[finding("S-01", severity="low")])
-    assert current_details("waiting for changes", state) == (
-        "**Waiting for changes** · round 3\n\n**Mergeable**: no critical or high finding is open.\n\n1 open finding."
-    )
+    details = current_details("waiting for changes", PullRequestState(round=3))
+    assert details.startswith("**Waiting for changes** · round 3\n\n")
+    assert current_details("waiting for changes", PullRequestState()).startswith("**Waiting for changes**\n\n")
 
 
-def test_current_details_without_round_or_finding():
-    assert current_details("waiting for changes", PullRequestState()) == (
-        "**Waiting for changes**\n\n**Mergeable**: no critical or high finding is open.\n\nNo open finding."
-    )
+@pytest.mark.parametrize(
+    ("severities", "status"),
+    [
+        (
+            {"P-01": "high", "S-02": "low", "S-01": "critical"},
+            "**Merge blocked** by 2 critical or high findings: S-01, P-01.",
+        ),
+        ({"S-01": "high", "S-02": "medium"}, "**Merge blocked** by 1 critical or high finding: S-01."),
+        ({"S-01": "medium", "M-01": "low"}, "**Mergeable**: no critical or high finding is open."),
+        ({}, "**Mergeable**: no critical or high finding is open."),
+    ],
+)
+def test_only_critical_or_high_findings_block_the_merge(severities, status):
+    open_findings = [finding(finding_id, severity=severity) for finding_id, severity in severities.items()]
+    assert merge_status(open_findings) == status

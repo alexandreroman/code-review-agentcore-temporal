@@ -27,7 +27,6 @@ DROP=$(jq -nc '$ARGS.positional' --args "$@")
 RETAINED=$(jq -c --arg build "$BUILD_ID" --argjson drop "$DROP" '
   (.endpoints.value // {})
   | with_entries(select(.key != $build and (.key | IN($drop[]) | not)))
-  | map_values(.version)
 ' <<<"$OUTPUTS")
 
 TF_VAR_build_id="$BUILD_ID" TF_VAR_retained_endpoints="$RETAINED" \

@@ -1,8 +1,7 @@
-"""Identifiers, signals and models exchanged between the router and the worker."""
+"""What crosses the router/worker boundary: workflow and signal names, IDs, workflow input and signal payloads."""
 
 import re
 from dataclasses import dataclass
-from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -37,11 +36,11 @@ def parse_agentcore_identity(identity: str) -> AgentCoreSession | None:
     return AgentCoreSession(endpoint=parts[1], session_id=parts[2])
 
 
-class _LenientEnum(StrEnum):
+class LenientEnum(StrEnum):
     """Accepts case and spacing variations ("Security", " HIGH "), which agents' structured output produces."""
 
     @classmethod
-    def _missing_(cls, value: object) -> _LenientEnum | None:
+    def _missing_(cls, value: object) -> LenientEnum | None:
         if isinstance(value, str):
             wanted = value.strip().lower()
             for member in cls:
@@ -50,7 +49,7 @@ class _LenientEnum(StrEnum):
         return None
 
 
-class Category(_LenientEnum):
+class Category(LenientEnum):
     SECURITY = "security"
     PERFORMANCE = "performance"
     MAINTAINABILITY = "maintainability"
@@ -62,8 +61,6 @@ class Category(_LenientEnum):
 
 
 _CATEGORY_BY_PREFIX = {category.prefix: category for category in Category}
-if len(_CATEGORY_BY_PREFIX) != len(Category):
-    raise RuntimeError("every category needs its own first letter: finding IDs tell categories apart by it")
 
 # ASCII digits only: \d would also accept other scripts' digits, which no finding ID contains.
 FINDING_ID_PATTERN = "[" + "".join(_CATEGORY_BY_PREFIX) + "]-[0-9]+"
@@ -81,23 +78,6 @@ def parse_finding_id(text: str) -> tuple[Category, int] | None:
         return None
     prefix, _, number = text.partition("-")
     return _CATEGORY_BY_PREFIX[prefix], int(number)
-
-
-class Severity(_LenientEnum):
-    CRITICAL = "critical"
-    HIGH = "high"
-    MEDIUM = "medium"
-    LOW = "low"
-
-    @property
-    def rank(self) -> int:
-        """0 is the most severe."""
-        return list(Severity).index(self)
-
-    @property
-    def blocking(self) -> bool:
-        """A blocking finding turns the AI Review check red."""
-        return self in (Severity.CRITICAL, Severity.HIGH)
 
 
 class PrRef(BaseModel):
@@ -134,65 +114,12 @@ class CommentPosted(BaseModel):
 class PrClosed(BaseModel):
     merged: bool
     closed_by: str | None
-    delivery_id: str
-
-
-class FindingDraft(BaseModel):
-    category: Category
-    severity: Severity = Field(
-        description="critical: exploitable or data loss; high: must be fixed before merging; "
-        "medium: should be fixed; low: minor"
-    )
-    path: str = Field(description="File path relative to the repository root")
-    line: int = Field(ge=1, description="Line in the new version of the file (right side of the diff)")
-    end_line: int | None = Field(default=None, ge=1, description="Last line, when the finding spans several lines")
-    title: str = Field(description="One-line summary")
-    explanation: str = Field(description="Why this is a problem, citing what the repository shows")
-    suggestion: str | None = Field(default=None, description="A concrete fix")
-
-
-class Finding(FindingDraft):
-    id: str
-    comment_id: int | None = None
-
-
-class DismissedFinding(BaseModel):
-    finding: Finding
-    reason: str
-    dismissed_by: str
-
-
-class PullRequestState(BaseModel):
-    last_reviewed_sha: str | None = None
-    pending_head_sha: str | None = None
-    # Fix requests waiting for the next fix, in arrival order: each one is checked on its own when the fix starts.
-    pending_fixes: list[FixRequested] = Field(default_factory=list)
-    # Delivery IDs of the latest fix requests: GitHub redelivers webhooks, and a repeat must not fix twice.
-    fix_deliveries: list[str] = Field(default_factory=list)
-    pending_replies: list[CommentPosted] = Field(default_factory=list)
-    reply_deliveries: list[str] = Field(default_factory=list)
-    open_findings: list[Finding] = Field(default_factory=list)
-    dismissed_findings: list[DismissedFinding] = Field(default_factory=list)
-    # Finding ID by the comment starting its thread, for the latest findings a round resolved.
-    resolved_threads: dict[int, str] = Field(default_factory=dict)
-    # The round whose check covers last_reviewed_sha: a dismissal updates that check.
-    last_reviewed_round: int | None = None
-    round: int = 0
-    fix_count: int = 0
-    discussion_count: int = 0
-    # The last finding number used in each category, absent until its first finding: S-03 leaves 3 for security.
-    last_finding_numbers: dict[Category, int] = Field(default_factory=dict)
-    # Start of the current idle period (the end of the last action, or the last signal) and whether its warning
-    # was posted: kept in the state, so a continue-as-new does not restart the countdown.
-    idle_since: datetime | None = None
-    idle_warned: bool = False
 
 
 class PullRequestInput(BaseModel):
+    """What the router starts a pull request workflow with; the worker adds the state a continue-as-new carries."""
+
     pr: PrRef
-    state: PullRequestState = Field(default_factory=PullRequestState)
-    # Seconds without activity before the warning comment, then before the pull request is closed; the router sets
-    # them from its settings. The defaults are needed: a continue-as-new of a run started before these fields
-    # existed (812824b) carries no durations, and a manual start relies on them matching the Makefile's.
-    idle_warning_seconds: int = 600
-    idle_close_seconds: int = 900
+    # Seconds without activity before the warning comment, then before the pull request is closed.
+    idle_warning_seconds: int
+    idle_close_seconds: int

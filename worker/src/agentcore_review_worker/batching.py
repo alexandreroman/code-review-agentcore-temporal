@@ -19,8 +19,14 @@ def is_excluded(changed: ChangedFile) -> bool:
 
 
 def partition(files: list[ChangedFile]) -> tuple[list[ChangedFile], list[ChangedFile]]:
-    reviewed = [f for f in files if not is_excluded(f)]
-    excluded = [f for f in files if is_excluded(f)]
+    """The reviewed files and the excluded ones, each in the given order."""
+    reviewed: list[ChangedFile] = []
+    excluded: list[ChangedFile] = []
+    for f in files:
+        if is_excluded(f):
+            excluded.append(f)
+        else:
+            reviewed.append(f)
     return reviewed, excluded
 
 

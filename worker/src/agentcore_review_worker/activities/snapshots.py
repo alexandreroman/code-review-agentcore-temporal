@@ -11,7 +11,7 @@ from pathlib import Path
 
 import httpx2 as httpx
 from agentcore_review_shared.contract import PrRef
-from agentcore_review_shared.github import API_URL, raise_for_status
+from agentcore_review_shared.github import API_URL, GITHUB_JSON, raise_for_status
 from botocore.exceptions import ClientError
 from temporalio import activity
 from temporalio.exceptions import ApplicationError
@@ -19,7 +19,7 @@ from temporalio.exceptions import ApplicationError
 from ..aws import s3
 from ..models import SnapshotInput, SnapshotRef
 from ..settings import AppSettings
-from .github_api import GITHUB_JSON, github, github_errors, repo_path
+from .github_api import github, github_errors, repo_path
 
 MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
@@ -47,11 +47,13 @@ class SnapshotActivities:
         if await asyncio.to_thread(_exists, self._bucket, key):
             return ref
         with tempfile.TemporaryDirectory() as work:
-            archive = Path(work) / "archive.tar.gz"
-            with github_errors():
-                await _download_tarball(pr, input.sha, archive)
-            await _heartbeating(asyncio.to_thread(s3().upload_file, str(archive), self._bucket, key))
+            await _heartbeating(self._copy_to_s3(pr, input.sha, Path(work) / "archive.tar.gz", key))
         return ref
+
+    async def _copy_to_s3(self, pr: PrRef, sha: str, archive: Path, key: str) -> None:
+        with github_errors():
+            await _download_tarball(pr, sha, archive)
+        await asyncio.to_thread(s3().upload_file, str(archive), self._bucket, key)
 
     @activity.defn(name="DeleteSnapshots")
     async def delete_snapshots(self, pr: PrRef) -> int:
@@ -92,17 +94,16 @@ async def _download_tarball(pr: PrRef, sha: str, archive: Path) -> None:
                         non_retryable=True,
                     )
                 out.write(chunk)
-                activity.heartbeat(size)
 
 
 async def _heartbeating[T](work: Awaitable[T]) -> T:
-    """Await `work` while heartbeating: an upload over a slow uplink outlasts the 15 s heartbeat timeout."""
+    """Await `work` while heartbeating: a download or an upload over a slow link outlasts the 15 s heartbeat timeout."""
     task = asyncio.ensure_future(work)
     while True:
         done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_SECONDS)
         if done:
             return task.result()
-        activity.heartbeat("uploading")
+        activity.heartbeat()
 
 
 def _delete_prefix(bucket: str, prefix: str) -> int:

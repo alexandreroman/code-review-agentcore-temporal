@@ -15,7 +15,7 @@ conference demo that makes durable execution visible on stage.
   mid-review; the review resumes on a new session without repeating
   finished LLM calls. Durable timers warn on a pull request idle for 10
   minutes, then close it 5 minutes later, across worker restarts and
-  deploys (`PR_IDLE_WARNING_SECONDS`, `PR_IDLE_CLOSE_SECONDS`).
+  deploys.
 - **Human in the loop**: a reply to a finding gets an answer from an
   agent, which may dismiss the finding when the human is right. A `/fix`
   comment lets an agent push a fix, for every open finding on the PR or
@@ -63,22 +63,11 @@ graph LR
 5. Pull requests from a `dev/` branch go to a separate task queue served
    by a **local worker** (`make dev`), against the same namespace.
 
-## Prerequisites
-
-- Accounts: a Temporal Cloud namespace with Serverless Workers enabled, an
-  AWS account with access to Claude Opus 5 on Amazon Bedrock, and a GitHub
-  account.
-- To build and test: [uv](https://docs.astral.sh/uv/) (it installs Python
-  3.14 for you), GNU Make (the 3.81 shipped with macOS is enough) and
-  [OpenTofu](https://opentofu.org/) 1.12 or later.
-- To deploy: the AWS CLI v2, the [Temporal CLI](https://docs.temporal.io/cli)
-  and `tcld`, the GitHub CLI, `jq`, and Docker or a Docker-compatible CLI
-  that builds arm64 images.
-
-[SETUP.md](SETUP.md#1-accounts-and-tools) details the accounts and lists
-the tool versions the project is tested with.
-
 ## Getting started
+
+To build and test you need [uv](https://docs.astral.sh/uv/), GNU Make and
+[OpenTofu](https://opentofu.org/) 1.12+; [SETUP.md](SETUP.md) lists the
+accounts and deployment tools and walks through the whole installation.
 
 ```bash
 git clone https://github.com/<this-repo-owner>/code-review-agentcore-temporal.git
@@ -86,10 +75,6 @@ cd code-review-agentcore-temporal
 make install
 make check
 ```
-
-[SETUP.md](SETUP.md) walks through the whole installation: mTLS
-certificates, `.env`, AWS login, `make up`, the GitHub App and the demo
-repository.
 
 ## Usage
 
@@ -125,34 +110,28 @@ Optionally, `DOMAIN_NAME`, `SUBDOMAIN`, `CLOUDFLARE_ZONE_ID` and
 Cloudflare zone, such as `codereview.example.com`: see
 [SETUP.md](SETUP.md#custom-domain-cloudflare-optional).
 
-`TRACING=on` (off by default) sends traces of the worker and the router to
-CloudWatch: see [Observability](#observability).
-
 ## Observability
 
 Temporal UI shows every workflow with its activities and child workflows.
 Its Workers page lists the workers polling the task queues, on AgentCore
 and on a laptop: each one sends a heartbeat every 10 seconds.
 
-With `TRACING=on` in `.env`, the worker and the router also send
-OpenTelemetry traces to CloudWatch, through the X-Ray OTLP endpoint. Each
-pull request action (a review round, a fix, a reply) is a trace of its
-own, linked to the webhooks that queued it. It holds the workflow,
-activity and child workflow spans, and the Strands agent spans (agent,
-model and tool calls, without prompts or file contents). The traces
-appear in the CloudWatch console under Application Signals (Transaction
-Search) and under GenAI Observability. Turning tracing on needs CloudWatch
-Transaction Search enabled in the account and region; `make infra` then
-applies it to the deployed worker and router, and `make dev` to the local
-worker.
+With `TRACING=on` in `.env` (it needs CloudWatch Transaction Search
+enabled in the account and region), the worker and the router send
+OpenTelemetry traces to CloudWatch: one trace per pull request action (a
+round, a fix, a reply) with its workflow, activity and agent spans, without
+prompts or file contents. They appear under Application Signals
+(Transaction Search) and GenAI Observability. `make infra` applies the
+setting to the deployed worker and router, `make dev` to the local worker.
 
 ## Validation
 
-`make check` runs the unit tests (review logic, routing, contract) and the
-static checks. The end-to-end validation runs against the real
-infrastructure as a [Claude Code](https://claude.com/claude-code) project
-skill: `/e2e-validation` (smoke, 8 to 10 minutes) or `/e2e-validation full`
-(about 30 minutes, before a talk). It opens, fixes and merges pull requests
+`make check` runs the unit tests (review logic, routing, contract, GitHub
+error classification) and the static checks. The end-to-end validation
+runs against the real infrastructure as a
+[Claude Code](https://claude.com/claude-code) project skill:
+`/e2e-validation` (smoke, 8 to 10 minutes) or `/e2e-validation full` (about
+30 minutes, before a talk). It opens, fixes and merges pull requests
 in the demo repository and reports each step.
 
 ## Modules

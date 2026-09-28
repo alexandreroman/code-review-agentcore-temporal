@@ -5,12 +5,9 @@ empty accounts to a first reviewed pull request. Plan about an hour; most of
 it is the first image push and the waits for AWS.
 
 Commands run from the repository root unless stated otherwise. Values in
-angle brackets and `your-namespace.a1b2c` are placeholders for your own
-identifiers: `<this-repo-owner>` owns the copy of this repository you
-clone, `<owner>` owns your demo repository, `<your-org>` names your
-organization in the certificates, `<upstream-owner>` is the GitHub account
-that publishes this repository and its upstream demo repository, and
-`<profile>` is your AWS CLI profile.
+angle brackets and `your-namespace.a1b2c` (your Temporal Cloud namespace)
+are placeholders for your own identifiers. `<upstream-owner>` publishes
+the upstream demo repository; `<owner>` owns your copy of it.
 
 ## 1. Accounts and tools
 
@@ -154,7 +151,9 @@ Replace `ca-central-1` if you set another `AWS_REGION`.
 worker (`make dev`) uses your own credentials: an administrator identity
 has the permissions; otherwise grant yourself the three Bedrock statements
 of `infra/aws/worker.tf`, explained in
-[Global cross-Region inference](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html).
+[Global cross-Region inference][gcri].
+
+[gcri]: https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html
 
 ## 6. GitHub CLI
 
@@ -178,8 +177,9 @@ make up
 
 `make up` chains `bootstrap` (OpenTofu state bucket and KMS key), `infra`
 (Lambda router, ECR repository, IAM roles, including the worker's Bedrock
-access, secret containers, snapshots bucket and optional custom domain),
-`secrets` (mTLS certificates into Secrets Manager), `deploy` (image build
+access, an empty secret for the Temporal certificate, snapshots bucket and
+optional custom domain), `secrets` (the mTLS client certificate into that
+secret, read by the worker and the router), `deploy` (image build
 and push, AgentCore runtime and endpoint, Temporal Worker Deployment
 Version) and `github` (GitHub App webhook, demo repository). The first
 image push uploads about 100 MB: on a slow uplink it takes a long time;
@@ -209,6 +209,9 @@ and sends its webhooks to the router: its Lambda Function URL, or the
 [custom domain](#custom-domain-cloudflare-optional) when one is set. Its
 credentials go straight to Secrets Manager, in a secret that `make destroy`
 keeps.
+
+Optionally, upload `assets/github-app-logo.png` under the app's **Display
+information**.
 
 ## 9. Second deployment and app installation
 
@@ -328,8 +331,8 @@ stack:
 `make up` then points the app's webhook at the new URL by itself: an app
 registered earlier switches over without a visit to its settings, and
 emptying `DOMAIN_NAME` switches it back to the Function URL the same way.
-While `DOMAIN_NAME` is set, `make up`, `make infra` and `make destroy`
-stop at once if `CLOUDFLARE_ZONE_ID` or `CLOUDFLARE_API_TOKEN` is missing.
+While `DOMAIN_NAME` is set, every target that applies or destroys the aws
+stack stops if `CLOUDFLARE_ZONE_ID` or `CLOUDFLARE_API_TOKEN` is missing.
 
 ## Troubleshooting
 
@@ -372,6 +375,9 @@ stop at once if `CLOUDFLARE_ZONE_ID` or `CLOUDFLARE_API_TOKEN` is missing.
   the same hostname; without one, the recreated Function URL gets a new
   address. Either way, `make up` repoints the app's webhook if its URL
   differs.
+- The make targets initialize the OpenTofu backends themselves; after
+  pulling a change to the backend configuration, run `make infra-init`
+  once per worktree before any direct `tofu` command.
 - Renaming the GitHub App changes its slug: run `make up`, then
   `make kill-sessions`; the router picks up the new slug on its next cold
   start.

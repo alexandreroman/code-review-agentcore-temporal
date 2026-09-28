@@ -1,6 +1,5 @@
 variable "region" {
-  type    = string
-  default = "ca-central-1"
+  type = string
 }
 
 variable "temporal_address" {
@@ -77,7 +76,6 @@ variable "max_parallel_agents" {
 variable "tracing" {
   description = "on to trace the worker and the router into CloudWatch (needs Transaction Search), off otherwise"
   type        = string
-  default     = "off"
 
   validation {
     condition     = contains(["on", "off"], var.tracing)
@@ -109,17 +107,14 @@ variable "retained_endpoints" {
 variable "domain_name" {
   description = "Cloudflare zone of the webhook's custom domain (e.g. example.com); empty to use the Function URL"
   type        = string
-  default     = ""
 }
 
 variable "subdomain" {
   description = "Subdomain of the webhook's custom domain (codereview for codereview.example.com)"
   type        = string
-  default     = "codereview"
 }
 
 variable "cloudflare_zone_id" {
   description = "ID of the Cloudflare zone named by domain_name"
   type        = string
-  default     = ""
 }

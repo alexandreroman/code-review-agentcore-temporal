@@ -2,7 +2,7 @@
 
 A TemporalAgent runs the Strands loop inside the workflow: each model call is the plugin's activity,
 each tool call is an activity (Glob, Grep, Read), and hooks run deterministically in workflow code.
-Each tool activity's summary shows the call's arguments in Temporal UI (e.g. Read `app/main.py:1-400`).
+Each tool activity's summary shows the call's arguments in Temporal UI (e.g. Read `pom.xml:1-400`).
 """
 
 import copy

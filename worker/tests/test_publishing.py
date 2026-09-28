@@ -1,6 +1,13 @@
-from agentcore_review_shared.contract import Finding
+import pytest
 from agentcore_review_worker.markers import reply_marker
-from agentcore_review_worker.models import DiscussionReply, FileChange, ReviewContent, ThreadComment
+from agentcore_review_worker.models import (
+    CheckOutput,
+    DiscussionReply,
+    FileChange,
+    Finding,
+    ReviewContent,
+    ThreadComment,
+)
 from agentcore_review_worker.publishing import (
     MAX_BODY_CHARS,
     MAX_INLINE_COMMENTS,
@@ -10,6 +17,7 @@ from agentcore_review_worker.publishing import (
     check_output,
     closing_comment,
     comment_body,
+    failed_fix_comment,
     failed_reply,
     idle_close_comment,
     idle_warning_comment,
@@ -22,6 +30,7 @@ from agentcore_review_worker.publishing import (
 )
 
 MARKER = "<!-- round:pr-o-r-1:1 -->"
+PATH = "src/main/java/com/example/orders/OrderRepository.java"
 
 
 def finding(finding_id, line=11, end_line=None, severity="high", suggestion=None) -> Finding:
@@ -29,7 +38,7 @@ def finding(finding_id, line=11, end_line=None, severity="high", suggestion=None
         id=finding_id,
         category="security",
         severity=severity,
-        path="app/search.py",
+        path=PATH,
         line=line,
         end_line=end_line,
         title="SQL injection",
@@ -49,16 +58,16 @@ def test_comment_body_carries_the_marker_and_the_suggestion():
 
 
 def test_findings_on_diff_lines_go_inline_and_the_rest_into_the_body():
-    commentable = {"app/search.py": {10, 11, 12}}
+    commentable = {PATH: {10, 11, 12}}
     findings = [finding("S-01", line=11), finding("S-02", line=50), finding("S-03", line=11, end_line=13)]
     payload = build_review(content(findings), commentable, MARKER, inline=True)
-    assert [(c.path, c.line, c.side) for c in payload.comments] == [("app/search.py", 11, "RIGHT")]
+    assert [(c.path, c.line, c.side) for c in payload.comments] == [(PATH, 11, "RIGHT")]
     assert "<!-- finding:S-02 -->" in payload.body and "<!-- finding:S-03 -->" in payload.body
     assert payload.body.startswith(MARKER) and "Summary." in payload.body
 
 
 def test_multi_line_findings_use_start_line():
-    commentable = {"app/search.py": {10, 11, 12}}
+    commentable = {PATH: {10, 11, 12}}
     payload = build_review(content([finding("S-01", line=10, end_line=12)]), commentable, MARKER, inline=True)
     comment = payload.comments[0]
     assert (comment.start_line, comment.line, comment.start_side) == (10, 12, "RIGHT")
@@ -66,13 +75,13 @@ def test_multi_line_findings_use_start_line():
 
 def test_inline_comments_are_capped():
     findings = [finding(f"S-{i:02d}") for i in range(1, 26)]
-    payload = build_review(content(findings), {"app/search.py": {11}}, MARKER, inline=True)
+    payload = build_review(content(findings), {PATH: {11}}, MARKER, inline=True)
     assert len(payload.comments) == MAX_INLINE_COMMENTS
     assert payload.body.count("<!-- finding:") == 25 - MAX_INLINE_COMMENTS
 
 
 def test_without_inline_comments_every_finding_is_in_the_body():
-    payload = build_review(content([finding("S-01"), finding("S-02")]), {"app/search.py": {11}}, MARKER, inline=False)
+    payload = build_review(content([finding("S-01"), finding("S-02")]), {PATH: {11}}, MARKER, inline=False)
     assert payload.comments == []
     assert payload.body.count("<!-- finding:") == 2
     assert "### Findings" in payload.body and "### Other findings" not in payload.body
@@ -96,7 +105,7 @@ def test_body_reports_unlisted_files_without_excluded_ones():
     assert "### Not reviewed\n\n- 1 more file that GitHub does not list: too many changes" in body
 
 
-def test_body_says_the_merge_is_blocked_by_critical_or_high_findings():
+def test_the_merge_status_of_new_and_still_open_findings_follows_the_heading():
     extra = {"still_open": [finding("S-03", severity="critical"), finding("M-01", severity="low")]}
     findings = [finding("P-01", severity="high"), finding("S-02", severity="medium")]
     body = build_review(content(findings, **extra), {}, MARKER, inline=True).body
@@ -104,22 +113,6 @@ def test_body_says_the_merge_is_blocked_by_critical_or_high_findings():
         f"{MARKER}\n\n## AI Review — round 1\n\n**Merge blocked** by 2 critical or high findings: S-03, P-01.\n\n"
         "Summary."
     )
-
-
-def test_body_says_the_merge_is_blocked_by_a_single_critical_or_high_finding():
-    body = build_review(content([finding("S-03", severity="critical")]), {}, MARKER, inline=True).body
-    assert "## AI Review — round 1\n\n**Merge blocked** by 1 critical or high finding: S-03.\n\nSummary." in body
-
-
-def test_a_blocking_finding_still_open_from_an_earlier_round_blocks_the_merge():
-    body = build_review(content([], still_open=[finding("S-01", severity="high")]), {}, MARKER, inline=True).body
-    assert "**Merge blocked** by 1 critical or high finding: S-01." in body
-
-
-def test_body_says_the_pull_request_is_mergeable_without_critical_or_high_findings():
-    extra = {"still_open": [finding("S-02", severity="low")]}
-    body = build_review(content([finding("S-01", severity="medium")], **extra), {}, MARKER, inline=True).body
-    assert "## AI Review — round 1\n\n**Mergeable**: no critical or high finding is open.\n\nSummary." in body
 
 
 def test_body_is_truncated_below_the_github_limit():
@@ -130,25 +123,28 @@ def test_body_is_truncated_below_the_github_limit():
     assert body.endswith("(truncated)")
 
 
-def test_check_title_counts_the_blocking_findings_and_the_total():
-    _, title, summary = check_output([finding("S-02", severity="low"), finding("S-01", severity="critical")])
-    assert title == "Merge blocked: 1 critical or high finding open (2 in total)"
-    assert summary.index("S-01") < summary.index("S-02")
-    _, title, _ = check_output([finding("S-01", severity="critical"), finding("P-01", severity="high")])
-    assert title == "Merge blocked: 2 critical or high findings open"
+def test_a_blocking_finding_turns_the_check_red_and_counts_in_its_title():
+    output = check_output([finding("S-02", severity="low"), finding("S-01", severity="critical")])
+    assert output.conclusion == "failure"
+    assert output.title == "Merge blocked: 1 critical or high finding open (2 in total)"
+    assert output.summary.index("S-01") < output.summary.index("S-02")
+    assert "Fix it" in output.summary
+    output = check_output([finding("S-01", severity="critical"), finding("P-01", severity="high")])
+    assert output.conclusion == "failure" and output.title == "Merge blocked: 2 critical or high findings open"
 
 
-def test_check_title_without_blocking_findings():
-    assert check_output([finding("S-01", severity="medium")])[1] == "1 open finding, none critical or high"
-    _, title, summary = check_output([finding("S-01", severity="medium"), finding("S-02", severity="low")])
-    assert title == "2 open findings, none critical or high"
-    assert "Merge blocked" not in summary
-    assert check_output([]) == ("success", "No open finding", "No finding is open.")
+def test_without_blocking_findings_the_check_is_green():
+    output = check_output([finding("S-01", severity="medium")])
+    assert output.conclusion == "success" and output.title == "1 open finding, none critical or high"
+    output = check_output([finding("S-01", severity="medium"), finding("S-02", severity="low")])
+    assert output.conclusion == "success" and output.title == "2 open findings, none critical or high"
+    assert "Merge blocked" not in output.summary
+    assert check_output([]) == CheckOutput(conclusion="success", title="No open finding", summary="No finding is open.")
 
 
 def test_check_summary_starts_with_the_blocking_findings_and_the_way_out():
     findings = [finding("M-01", severity="low"), finding("P-01", severity="high"), finding("S-01", severity="critical")]
-    _, _, summary = check_output(findings)
+    summary = check_output(findings).summary
     assert summary.startswith(
         "**Merge blocked** by 2 critical or high findings: S-01 (critical), P-01 (high). "
         "Fix them (push a commit or comment `/fix`) or have them dismissed in their thread. "
@@ -157,44 +153,27 @@ def test_check_summary_starts_with_the_blocking_findings_and_the_way_out():
     assert summary.index("P-01 (high)") < summary.index("- **M-01**")
 
 
-def test_check_summary_for_a_single_blocking_finding():
-    _, _, summary = check_output([finding("S-01", severity="critical"), finding("M-01", severity="medium")])
-    assert summary.startswith(
-        "**Merge blocked** by 1 critical or high finding: S-01 (critical). "
-        "Fix it (push a commit or comment `/fix`) or have it dismissed in its thread. "
-        "The check turns green once none is left.\n\n"
-    )
-
-
-def test_check_is_red_only_for_blocking_findings():
-    assert check_output([finding("S-01", severity="medium"), finding("S-02", severity="low")])[0] == "success"
-    assert check_output([finding("S-01", severity="low"), finding("S-02", severity="high")])[0] == "failure"
-    assert check_output([finding("S-01", severity="critical")])[0] == "failure"
-
-
 def test_check_output_names_the_unavailable_reviewers():
-    _, title, summary = check_output(
-        [finding("S-01", severity="low")], unavailable=["security", "performance (batch 2)"]
-    )
-    assert title == "1 open finding, none critical or high, 2 reviewers unavailable"
-    assert "Not reviewed in this round (reviewer unavailable): security, performance (batch 2)." in summary
-    _, title, summary = check_output([], unavailable=["maintainability"])
-    assert title == "No open finding, 1 reviewer unavailable"
-    assert "maintainability" in summary
-    _, title, _ = check_output([finding("S-01", severity="high")], unavailable=["security"], unlisted=3)
-    assert title == "Merge blocked: 1 critical or high finding open, 1 reviewer unavailable, 3 files not listed"
+    output = check_output([finding("S-01", severity="low")], unavailable=["security", "performance (batch 2)"])
+    assert output.title == "1 open finding, none critical or high, 2 reviewers unavailable"
+    assert "Not reviewed in this round (reviewer unavailable): security, performance (batch 2)." in output.summary
+    output = check_output([], unavailable=["maintainability"])
+    assert output.title == "No open finding, 1 reviewer unavailable"
+    assert "maintainability" in output.summary
+    output = check_output([finding("S-01", severity="high")], unavailable=["security"], unlisted=3)
+    assert output.title == "Merge blocked: 1 critical or high finding open, 1 reviewer unavailable, 3 files not listed"
 
 
 def test_check_output_counts_the_unlisted_files():
-    conclusion, title, summary = check_output([], unlisted=42)
-    assert conclusion == "success" and title == "No open finding, 42 files not listed"
-    assert "Not reviewed in this round (not listed by GitHub, too many changes): 42 files." in summary
+    output = check_output([], unlisted=42)
+    assert output.conclusion == "success" and output.title == "No open finding, 42 files not listed"
+    assert "Not reviewed in this round (not listed by GitHub, too many changes): 42 files." in output.summary
 
 
 def test_unavailable_check_output_lists_every_reviewer():
-    conclusion, title, summary = unavailable_check_output(3, ["security", "performance", "maintainability"])
-    assert conclusion == "failure" and title == "Review unavailable"
-    assert summary == (
+    output = unavailable_check_output(3, ["security", "performance", "maintainability"])
+    assert output.conclusion == "failure" and output.title == "Review unavailable"
+    assert output.summary == (
         "No reviewer completed round 3 (unavailable: security, performance, maintainability), "
         "so this head was not reviewed. Push a commit to retry."
     )
@@ -249,6 +228,19 @@ def test_a_fix_refused_with_no_open_finding():
     assert text == "S-01, S-02 are not open findings: nothing was fixed. No finding is open.\n\n<!-- m -->"
 
 
+@pytest.mark.parametrize(
+    ("error_type", "text"),
+    [
+        ("BranchMoved", "Fix 2 abandoned: the branch changed while it was prepared. Comment `/fix` to try again."),
+        ("ForkNotSupported", "Fix 2 not pushed: this pull request comes from a fork, which the bot cannot push to."),
+        ("AgentUnavailable", "Fix 2 failed: nothing was pushed. Comment `/fix` to try again."),
+        (None, "Fix 2 failed: nothing was pushed. Comment `/fix` to try again."),
+    ],
+)
+def test_a_failed_fix_says_whether_a_new_fix_can_help(error_type, text):
+    assert failed_fix_comment(2, error_type, "<!-- m -->") == f"{text}\n\n<!-- m -->"
+
+
 def test_a_thread_reply_starts_with_the_verdict_and_ends_with_its_marker():
     keep = reply_body(
         "S-04", DiscussionReply(verdict="keep", answer=" The query is still built by hand. "), "<!-- m -->"
@@ -276,15 +268,15 @@ def test_only_the_agents_answers_count_toward_the_budget():
 
 def test_split_changes_rejects_protected_and_escaping_paths():
     paths = [
-        "app/a.py",
-        "./app/b.py",
+        "src/A.java",
+        "./src//B.java",
         ".github/workflows/ci.yml",
         ".GitHub/x",
         "../etc/passwd",
-        "/abs.py",
+        "/Abs.java",
         "",
-        "app/a.py",
+        "src/A.java",
     ]
     accepted, rejected = split_changes([FileChange(path=p, new_content=f"{i}") for i, p in enumerate(paths)])
-    assert [(c.path, c.new_content) for c in accepted] == [("app/a.py", "7"), ("app/b.py", "1")]
-    assert rejected == [".github/workflows/ci.yml", ".GitHub/x", "../etc/passwd", "/abs.py", ""]
+    assert [(c.path, c.new_content) for c in accepted] == [("src/A.java", "7"), ("src/B.java", "1")]
+    assert rejected == [".github/workflows/ci.yml", ".GitHub/x", "../etc/passwd", "/Abs.java", ""]

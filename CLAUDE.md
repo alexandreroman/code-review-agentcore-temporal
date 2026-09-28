@@ -33,13 +33,11 @@ make up        # deploy everything (AWS, worker, GitHub)
 
 ## E2E validation
 
-The `e2e-validation` project skill
-(`.claude/skills/e2e-validation/`) validates the deployed demo end to end:
-`/e2e-validation` (smoke, 8 to 10 minutes) after a change to the worker,
-the router or the infrastructure, `/e2e-validation full` (about 30
-minutes) before a conference. It uses real resources, opens pull requests
-in the demo repository and spends Bedrock tokens: run it only when asked.
-The planted defects it expects live in `expected-findings.yaml` next to it.
+`/e2e-validation` (smoke) or `/e2e-validation full` validates the deployed
+demo against real resources (`.claude/skills/e2e-validation/`): it opens
+pull requests in the demo repository and spends Bedrock tokens, so run it
+only when asked. The planted defects it expects live in
+`expected-findings.yaml` next to it.
 
 ## Agents
 

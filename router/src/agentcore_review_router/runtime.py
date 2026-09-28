@@ -86,23 +86,24 @@ def github_app_secret() -> GitHubAppSecret:
     return GitHubAppSecret.model_validate_json(_secret(settings().github_app_secret_id))
 
 
-def clear_github_app_secret() -> None:
-    """Drops the cached secret and everything derived from it, so a warm container picks up a re-registered app."""
-    # Any unsigned POST triggers this refresh: one Secrets Manager call, cheap enough for the demo.
+def refresh_github_app_secret() -> None:
+    """Reads the secret again; the GitHub client, with its token cache, is rebuilt only when the credentials changed."""
+    previous = github_app_secret()
     github_app_secret.cache_clear()
-    router_config.cache_clear()
-    github.cache_clear()
+    current = github_app_secret()
+    if current.client_id != previous.client_id or current.private_key != previous.private_key:
+        github.cache_clear()
 
 
-@cache
 def router_config() -> RouterConfig:
-    current, app = settings(), github_app_secret()
+    current = settings()
     return RouterConfig(
         prod_queue=current.task_queue,
         dev_queue=current.dev_task_queue,
         dev_branch_prefix=current.dev_branch_prefix,
-        app_slug=app.slug,
-        webhook_secret=app.webhook_secret,
+        app_slug=github_app_secret().slug,
+        idle_warning_seconds=current.pr_idle_warning_seconds,
+        idle_close_seconds=current.pr_idle_close_seconds,
     )
 
 

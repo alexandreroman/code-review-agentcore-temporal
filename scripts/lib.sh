@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # Shared helpers for the deployment scripts (sourced, not executed directly).
 
 die() {
@@ -27,17 +28,23 @@ tcli() {
 }
 
 # describe_version BUILD_ID: prints the version's JSON, or nothing if it does
-# not exist.
+# not exist. Any other error (TLS, timeout) fails, so that a caller assigning
+# the result (version=$(describe_version ...)) stops under set -e.
 describe_version() {
-  tcli worker deployment describe-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$1" -o json \
-    2>/dev/null || true
+  local output
+  if output=$(tcli worker deployment describe-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" \
+    --build-id "$1" -o json 2>&1); then
+    echo "$output"
+  elif [[ "$output" != *"Worker Deployment Version not found"* ]]; then
+    die "$output"
+  fi
 }
 
 # delete_version BUILD_ID: deletes the version without waiting for it to drain.
 delete_version() {
   if ! tcli worker deployment delete-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$1" \
     --skip-drainage; then
-    echo "pollers from the destroyed worker stay listed about 5 minutes; retry later" >&2
+    echo "a version with recent pollers cannot be deleted for about 5 minutes; retry later" >&2
     return 1
   fi
 }

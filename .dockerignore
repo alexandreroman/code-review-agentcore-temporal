@@ -1,10 +1,11 @@
-.env
-.env.*
-certs/
-.venv/
-.git/
-docs/
-build/
-infra/
-**/__pycache__/
-**/.pytest_cache/
+# Allowlist: exactly what worker/Dockerfile copies (IMAGE_INPUTS in scripts/deploy.sh).
+*
+!pyproject.toml
+!uv.lock
+!shared/pyproject.toml
+!router/pyproject.toml
+!worker/pyproject.toml
+!tools/pyproject.toml
+!shared/src
+!worker/src
+**/__pycache__

@@ -41,8 +41,6 @@ with workflow.unsafe.imports_passed_through():
         FixRequested,
         PrClosed,
         PrUpdated,
-        PullRequestInput,
-        format_finding_id,
     )
 
     # The process's own opentelemetry, shared with Strands and the plugin (a sandboxed copy has its own context and
@@ -56,6 +54,7 @@ with workflow.unsafe.imports_passed_through():
         BatchInput,
         ChangeSet,
         CheckInput,
+        CheckOutput,
         CommentInput,
         CommitResult,
         DiscussionInput,
@@ -64,6 +63,7 @@ with workflow.unsafe.imports_passed_through():
         ListFilesInput,
         PublishInput,
         PullRequestOutcome,
+        PullRequestRunInput,
         RecoveredCounters,
         RecoveryInput,
         ResolveInput,
@@ -86,7 +86,7 @@ tracer = trace.get_tracer(__name__)
 @workflow.defn(name=PULL_REQUEST_WORKFLOW)
 class PullRequestWorkflow:
     @workflow.init
-    def __init__(self, input: PullRequestInput) -> None:
+    def __init__(self, input: PullRequestRunInput) -> None:
         # Signal-with-start delivers pr_updated before run() starts: the state must exist already.
         self._input = input
         self._pr = input.pr
@@ -99,12 +99,12 @@ class PullRequestWorkflow:
         self._signal_links: defaultdict[str, list[trace.Link]] = defaultdict(list)
 
     @workflow.run
-    async def run(self, input: PullRequestInput) -> PullRequestOutcome:
+    async def run(self, input: PullRequestRunInput) -> PullRequestOutcome:
         # A started run has an empty state; a continued one carries its counters over, and must not recover them.
         if workflow.info().continued_run_id is None:
             await self._take_over_earlier_run()
         self._set_phase("waiting for changes")
-        if self._state.idle_since is None:  # a state carried over from a version without the idle timer
+        if self._state.idle_since is None:  # a start without the pr_updated signal (e.g. a manual start)
             lifecycle.start_idle(self._state, workflow.now())
         while True:
             # After an action or an idle timer: moves to a newly deployed version, freeing old endpoints for
@@ -196,8 +196,8 @@ class PullRequestWorkflow:
     def _show_details(self) -> None:
         """Show the open findings as they change within a phase (a published round, a dismissal).
 
-        Only the current details: they live in the worker's memory, whereas a memo upsert here would add a command
-        that the histories of running workflows lack, and break their replay.
+        Current details only: they add no command to the history, unlike a memo upsert, so they can change anywhere
+        within a phase.
         """
         workflow.set_current_details(lifecycle.current_details(self._phase, self._state))
 
@@ -208,9 +208,12 @@ class PullRequestWorkflow:
         info = workflow.info()
         if not (info.is_continue_as_new_suggested() or info.is_target_worker_deployment_version_changed()):
             return
+        # A signal handler still running would lose its work to the continue-as-new. The handlers here are
+        # synchronous, so this wait is a safeguard for an asynchronous one.
         await workflow.wait_condition(workflow.all_handlers_finished)
         workflow.continue_as_new(
             self._input.model_copy(update={"state": self._state}),
+            # The next run starts on the task queue's current deployment version, not on the one this run is pinned to.
             initial_versioning_behavior=workflow.ContinueAsNewVersioningBehavior.AUTO_UPGRADE,
         )
 
@@ -238,19 +241,10 @@ class PullRequestWorkflow:
             # review by its marker and publishes nothing, and its new findings are linked to the earlier threads.
             workflow.logger.warning("earlier numbering not recovered: %s", error.cause or error)
             return
-        state = self._state
-        state.round = recovered.last_round
-        state.last_finding_numbers = recovered.last_finding_numbers
-        state.fix_count = recovered.last_fix_number
-        last_findings = [
-            format_finding_id(category, number) for category, number in recovered.last_finding_numbers.items()
-        ]
-        workflow.logger.info(
-            "numbering continues after round %d, findings %s, fix %d",
-            recovered.last_round,
-            ", ".join(last_findings) or "none",
-            recovered.last_fix_number,
-        )
+        self._state.round = recovered.last_round
+        self._state.last_finding_numbers = recovered.last_finding_numbers
+        self._state.fix_count = recovered.last_fix_number
+        workflow.logger.info("numbering continues after %s", recovered)
 
     async def _close_earlier_threads(self) -> None:
         """Best effort: an earlier finding thread left open only misleads a reader, the new review goes on."""
@@ -332,7 +326,6 @@ class PullRequestWorkflow:
     async def _review(self) -> None:
         state = self._state
         state.pending_head_sha = None
-        check: CheckInput | None = None
         phase = "waiting for changes"
         try:
             change = await workflow.execute_activity(
@@ -348,23 +341,22 @@ class PullRequestWorkflow:
             trace.get_current_span().update_name(f"Review round {state.round}")
             self._reviewing_sha = change.head_sha
             self._set_phase(f"reviewing round {state.round}")
-            check = CheckInput(
-                pr=self._pr, head_sha=change.head_sha, external_id=f"{self._id}:{state.round}", status="in_progress"
-            )
-            reviewed = await self._run_round(change, check)
+            reviewed = await self._run_round(change)
             if not reviewed:
                 phase = f"round {state.round} unavailable, waiting for changes"
-        # Child failures never reach this point: reviewers and synthesis handle their own.
+        # Child failures never reach this point: reviewers and synthesis handle their own. Neither does a failure
+        # after the review is published: the round stands.
         except ActivityError as error:
-            if check is None:
+            if self._reviewing_sha is None:  # the round has not started
                 workflow.logger.error("changed files not listed: %s", error.cause or error)
                 phase = "listing the changed files failed, waiting for changes"
             else:
                 workflow.logger.error("round %d failed: %s", state.round, error.cause or error)
                 phase = f"round {state.round} failed, waiting for changes"
                 reason = f"Round {state.round} failed: {error.cause or error}. Push a commit to retry."
+                output = CheckOutput(conclusion="failure", title="AI Review failed", summary=reason)
                 try:
-                    await self._complete_check(check, state.round, "failure", "AI Review failed", reason)
+                    await self._complete_check(self._reviewing_sha, state.round, output)
                 except ActivityError as failure:
                     workflow.logger.warning(
                         "could not report the failed round on the check: %s", failure.cause or failure
@@ -373,7 +365,7 @@ class PullRequestWorkflow:
             self._reviewing_sha = None
             self._set_phase(phase)
 
-    async def _run_round(self, change: ChangeSet, check: CheckInput) -> bool:
+    async def _run_round(self, change: ChangeSet) -> bool:
         """Review the change; False when no reviewer completed, which leaves the head unreviewed."""
         state, number = self._state, self._state.round
         if not change.files:
@@ -381,16 +373,19 @@ class PullRequestWorkflow:
             state.last_reviewed_sha = change.head_sha
             state.last_reviewed_round = number
             output = publishing.check_output(state.open_findings, unlisted=change.unlisted)
-            await self._complete_check(check, number, *output)
+            await self._complete_check_best_effort(change.head_sha, number, output)
             return True
         snapshot = await self._snapshot(change.head_sha)
         title = f"Round {number}: reviewing {summaries.count(len(change.files), 'file')}"
-        await self._update_check(check.model_copy(update={"title": title}), number)
+        in_progress = CheckInput(
+            pr=self._pr, head_sha=change.head_sha, external_id=self._check_id(number), status="in_progress", title=title
+        )
+        await self._update_check(in_progress, number)
         reports, unavailable = await self._run_reviewers(change, snapshot)
         if not reports:
             # Publishing "no new finding" would pass a head nobody reviewed: the check fails instead.
             output = publishing.unavailable_check_output(number, unavailable)
-            await self._complete_check(check, number, *output)
+            await self._complete_check(change.head_sha, number, output)
             return False
         # IDs are committed to the state only once the review is published.
         new, last_finding_numbers = lifecycle.number_findings(reports, state.last_finding_numbers)
@@ -433,7 +428,7 @@ class PullRequestWorkflow:
         if resolved:
             await self._resolve(resolved)
         output = publishing.check_output(state.open_findings, unavailable=unavailable, unlisted=change.unlisted)
-        await self._complete_check(check, number, *output)
+        await self._complete_check_best_effort(change.head_sha, number, output)
         return True
 
     async def _run_reviewers(self, change: ChangeSet, snapshot: SnapshotRef) -> tuple[list[ReviewerReport], list[str]]:
@@ -519,7 +514,7 @@ class PullRequestWorkflow:
         try:
             return await publish(input)
         except ActivityError as error:
-            if not policies.failed_with(error, "GitHubUnprocessable"):
+            if policies.error_type(error) != "GitHubUnprocessable":
                 raise
             workflow.logger.warning("GitHub refused the inline comments: every finding goes into the review body")
             return await publish(input.model_copy(update={"inline": False}))
@@ -545,20 +540,37 @@ class PullRequestWorkflow:
                 **policies.SNAPSHOT,
             )
         except ActivityError as error:
-            if not policies.failed_with(error, "SnapshotTooLarge"):
+            if policies.error_type(error) != "SnapshotTooLarge":
                 raise
             # No snapshot: the tools read through the GitHub API instead.
             return SnapshotRef(pr=self._pr, sha=sha)
+
+    def _check_id(self, round_number: int) -> str:
+        """The external ID that finds the check run of a round again."""
+        return f"{self._id}:{round_number}"
 
     async def _update_check(self, check: CheckInput, round_number: int) -> None:
         summary = summaries.check(round_number, check.status, check.conclusion)
         await workflow.execute_activity("UpdateCheck", check, summary=summary, **policies.UPDATE_CHECK)
 
-    async def _complete_check(
-        self, check: CheckInput, round_number: int, conclusion: str, title: str, summary: str
-    ) -> None:
-        update = {"status": "completed", "conclusion": conclusion, "title": title, "summary": summary}
-        await self._update_check(check.model_copy(update=update), round_number)
+    async def _complete_check(self, head_sha: str, round_number: int, output: CheckOutput) -> None:
+        check = CheckInput(
+            pr=self._pr,
+            head_sha=head_sha,
+            external_id=self._check_id(round_number),
+            status="completed",
+            conclusion=output.conclusion,
+            title=output.title,
+            summary=output.summary,
+        )
+        await self._update_check(check, round_number)
+
+    async def _complete_check_best_effort(self, head_sha: str, round_number: int, output: CheckOutput) -> None:
+        """Once the round is recorded in the state: a check left in progress misleads, but the round stands."""
+        try:
+            await self._complete_check(head_sha, round_number, output)
+        except ActivityError as error:
+            workflow.logger.warning("check of round %d not completed: %s", round_number, error.cause or error)
 
     # --- fix ---
 
@@ -605,7 +617,17 @@ class PullRequestWorkflow:
             self._set_phase("fix pushed, waiting for its review")
         except (ActivityError, ChildWorkflowError) as error:
             workflow.logger.error("fix %d failed: %s", state.fix_count, error.cause or error)
+            await self._explain_failed_fix(state.fix_count, policies.error_type(error))
             self._set_phase("fix failed, waiting for changes")
+
+    async def _explain_failed_fix(self, fix_number: int, error_type: str | None) -> None:
+        """Tell in the Conversation that the fix pushed nothing, and how to retry when a retry can help."""
+        marker = markers.fix_failure_marker(self._id, fix_number)
+        body = publishing.failed_fix_comment(fix_number, error_type, marker)
+        try:
+            await self._post_comment(body, marker, f"fix {fix_number} failed")
+        except ActivityError as error:
+            workflow.logger.warning("fix failure not posted: %s", error.cause or error)
 
     async def _refuse_fix(self, refusal: lifecycle.FixRefusal) -> None:
         """Explain a refused /fix where it was posted: in its thread, or in the Conversation."""
@@ -712,20 +734,13 @@ class PullRequestWorkflow:
     async def _refresh_check(self) -> None:
         """Recompute the last round's check after a dismissal: it turns green once no blocking finding is left."""
         state = self._state
-        # A state carried over from a version without last_reviewed_round leaves the check as it is.
-        if state.last_reviewed_sha is None or state.last_reviewed_round is None:
-            return
-        check = CheckInput(
-            pr=self._pr,
-            head_sha=state.last_reviewed_sha,
-            external_id=f"{self._id}:{state.last_reviewed_round}",
-            status="in_progress",
-        )
+        # A finding is open only after a published round.
+        assert state.last_reviewed_sha is not None and state.last_reviewed_round is not None
         # The round's notes on unavailable reviewers and unlisted files drop out of the check here: accepted,
         # for simplicity, even in the rare round where every listed file was excluded and the check was the
         # only place reporting the unlisted files.
         output = publishing.check_output(state.open_findings)
-        await self._complete_check(check, state.last_reviewed_round, *output)
+        await self._complete_check(state.last_reviewed_sha, state.last_reviewed_round, output)
 
     # --- end ---
 

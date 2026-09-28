@@ -44,7 +44,6 @@ from .sessions import stop_sessions
 
 logger = logging.getLogger(__name__)
 
-FOLLOWUP_KEY = "router_task"
 # Seconds kept after the stops for the reaction, the comment and the HTTP response.
 REPLY_RESERVE = 2.5
 
@@ -52,7 +51,7 @@ REPLY_RESERVE = 2.5
 class KillFollowup(BaseModel):
     """Payload of the asynchronous self-invocation that finishes a /kill."""
 
-    router_task: Literal["kill"] = "kill"
+    router_task: Literal["kill"] = "kill"  # tells the handler this event is not a webhook
     pr: PrRef
     comment_id: int
     comment_kind: CommentKind
@@ -73,14 +72,15 @@ async def run_command(command: RunCommand, client: Client, deadline: float, fiel
 
 
 async def forward_reply(action: ForwardReply, client: Client, fields: dict[str, Any]) -> str:
-    """A plain reply in a finding's thread: checked like a command, then queued in the workflow, which answers."""
+    """A plain reply in a finding's thread: checked like a command, then queued in the workflow, which answers.
+
+    A plain reply is not addressed to the bot: when ignored, it gets neither a reaction nor a comment.
+    """
     app = runtime.github()
-    # Checked here rather than in the workflow: a human thread gets neither 👀 nor a signal.
     if await _comment_author(app, action.pr, action.thread_root_id) != action.bot_login:
         return "reply in a thread that is not a finding"
     permission = await _permission(app, action.pr, action.author)
     if not can_run_commands(permission):
-        # Unlike a command, a plain reply is not addressed to the bot: no 😕 reaction.
         return f"reply ignored: {action.author or 'unknown user'} has {permission or 'no'} access"
     posted = CommentPosted(
         comment_id=action.comment_id,
@@ -88,7 +88,6 @@ async def forward_reply(action: ForwardReply, client: Client, fields: dict[str, 
         author=action.author,
         delivery_id=action.delivery_id,
     )
-    # No "no review in progress" comment here: a plain reply is not addressed to the bot.
     if not await temporal_ops.signal(client, action.workflow_id, SIGNAL_COMMENT_POSTED, posted):
         return "reply ignored: no review in progress"
     await _best_effort(_react(app, action.pr, "review", action.comment_id, REACTION_ACK), fields)
@@ -97,12 +96,16 @@ async def forward_reply(action: ForwardReply, client: Client, fields: dict[str, 
 
 async def finish_kill(event: dict, deadline: float) -> None:
     """Asynchronous self-invocation: stops the sessions the webhook invocation could not confirm in time."""
-    followup = KillFollowup.model_validate(event)
-    fields = {"delivery": followup.delivery_id}
-    outcomes = await _stop(followup.sessions, deadline, fields)
-    tally = followup.tally.add(outcomes.values())
-    await _kill_feedback(runtime.github(), followup.pr, followup.comment_kind, followup.comment_id, tally, fields)
-    logger.info("kill follow-up", extra=fields | {"outcome": kill_comment(tally)})
+    fields = {"delivery": event.get("delivery_id", "")}
+    try:
+        followup = KillFollowup.model_validate(event)
+        outcomes = await _stop(followup.sessions, deadline, fields)
+        tally = followup.tally.add(outcomes.values())
+        await _kill_feedback(runtime.github(), followup.pr, followup.comment_kind, followup.comment_id, tally, fields)
+        logger.info("kill follow-up", extra=fields | {"outcome": kill_comment(tally)})
+    except Exception:
+        # Asynchronous invocations are never retried (event invoke config): a failure only logs.
+        logger.exception("kill follow-up failed", extra=fields)
 
 
 async def _fix(command: RunCommand, client: Client, app: GitHubApp, fields: dict[str, Any]) -> str:
@@ -139,15 +142,15 @@ async def _kill(command: RunCommand, client: Client, app: GitHubApp, deadline: f
         return "/kill: no active worker"
     outcomes = await _stop(targets, deadline, fields)
     leftover = [session for session, outcome in outcomes.items() if outcome == "retry"]
-    tally = KillTally().add(outcome for outcome in outcomes.values() if outcome != "retry")
     if leftover:
+        confirmed = KillTally().add(outcome for outcome in outcomes.values() if outcome != "retry")
         followup = KillFollowup(
             pr=command.pr,
             comment_id=command.comment_id,
             comment_kind=command.comment_kind,
             delivery_id=command.delivery_id,
             sessions=leftover,
-            tally=tally,
+            tally=confirmed,
         )
         try:
             runtime.lambda_client().invoke(
@@ -156,7 +159,8 @@ async def _kill(command: RunCommand, client: Client, app: GitHubApp, deadline: f
             return f"/kill: {len(leftover)} unconfirmed stop(s) handed to an asynchronous invocation"
         except Exception:
             logger.exception("asynchronous /kill follow-up not sent", extra=fields)
-            tally = tally.add(["failed"] * len(leftover))
+    # Unconfirmed stops count as failed.
+    tally = KillTally().add(outcomes.values())
     await _kill_feedback(app, command.pr, command.comment_kind, command.comment_id, tally, fields)
     return f"/kill: {kill_comment(tally)}"
 
@@ -201,10 +205,8 @@ async def _get_json_or_none(app: GitHubApp, pr: PrRef, path: str) -> dict | None
 
 
 async def _react(app: GitHubApp, pr: PrRef, comment_kind: CommentKind, comment_id: int, content: str) -> None:
-    if comment_kind == "review":
-        path = f"/repos/{pr.owner}/{pr.repo}/pulls/comments/{comment_id}/reactions"
-    else:
-        path = f"/repos/{pr.owner}/{pr.repo}/issues/comments/{comment_id}/reactions"
+    kind = "pulls" if comment_kind == "review" else "issues"
+    path = f"/repos/{pr.owner}/{pr.repo}/{kind}/comments/{comment_id}/reactions"
     await app.request(pr.installation_id, "POST", path, json={"content": content})
 
 

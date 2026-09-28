@@ -1,15 +1,13 @@
 #!/usr/bin/env bash
-# Pushes the Temporal mTLS certificates from .env to Secrets Manager
-# (make secrets).
+# Pushes the Temporal mTLS client certificate from .env to Secrets Manager,
+# where the worker and the router read it (make secrets).
 #
-# Every value is validated before anything is written. Each secret is
+# Every value is validated before anything is written. The secret is
 # compared against its current value first, so re-running this is a no-op
 # once Secrets Manager already holds the desired JSON.
 set -euo pipefail
 
 source scripts/lib.sh
-
-PREFIX="code-review-agentcore-temporal"
 
 require_pem() {
   local path="$1" var_name="$2"
@@ -53,10 +51,7 @@ sync_secret() {
 require_pem "${TEMPORAL_TLS_CERT_PATH:-}" TEMPORAL_TLS_CERT_PATH
 require_pem "${TEMPORAL_TLS_KEY_PATH:-}" TEMPORAL_TLS_KEY_PATH
 
-# The worker and the router each read their own secret; both get the same
-# client certificate.
 CERT_JSON=$(jq -n --rawfile cert "$TEMPORAL_TLS_CERT_PATH" --rawfile key "$TEMPORAL_TLS_KEY_PATH" \
   '{cert: $cert, key: $key}')
 
-sync_secret "$PREFIX/temporal-worker-cert" "$CERT_JSON"
-sync_secret "$PREFIX/temporal-router-cert" "$CERT_JSON"
+sync_secret code-review-agentcore-temporal/temporal-cert "$CERT_JSON"

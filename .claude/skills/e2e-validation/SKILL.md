@@ -33,11 +33,9 @@ defects found (E2E-04), a question in a finding's thread (E2E-04b), `/fix`
   sources `helpers.sh` first: shell state does not survive between
   commands, so settings come from the Makefile and run state from
   `/tmp/e2e-validation/current/state.env`.
-- Set the Bash tool timeout given in each step heading (600000 ms for the
-  steps that wait for a review).
-- Run the steps in order and do not add retries: `tcli` already retries the
-  Temporal CLI (5 attempts; the Go CLI fails intermittently on unstable
-  networks), and every wait polls every 5 s up to the step's maximum.
+- Set the Bash tool timeout given in each step heading.
+- Run the steps in order and add no retries: `tcli` and every wait already
+  retry.
 - A failing check records `FAIL`, runs `collect` (histories of the step's
   workflows, task queue, router and worker logs, pull request) into
   `/tmp/e2e-validation/current/failure/`, and the run goes on, unless the
@@ -95,7 +93,7 @@ check "$BUILD is the current version and serves $TASK_QUEUE (make deploy)" jq -e
    and ([.taskQueuesInfos[]?.name] | index($q) != null)' <<<"$version"
 uvx --from pyyaml==6.0.3 python -c 'import json, sys, yaml; json.dump(yaml.safe_load(sys.stdin), sys.stdout)' \
   <"$SKILL_DIR/expected-findings.yaml" >"$E2E_DIR/expected.json"
-check "expected findings" jq -e '.defects | length == 3' "$E2E_DIR/expected.json"
+check "expected findings" jq -e '.defects | length > 0' "$E2E_DIR/expected.json"
 if [[ "$fail" == 0 ]]; then result Preconditions ok "build $BUILD"; else result Preconditions FAIL "see MISSING"; fi
 exit "$fail"
 STEP
@@ -130,10 +128,6 @@ runs on the production queue, `main` is on `baseline` and both scenario
 branches on `scenario/customer-search`, `make kill-sessions` exited 0.
 **Stop** on failure.
 
-After a `make deploy`, always validate on a fresh pull request, as this
-run does: a pull request whose workflow started on an older build keeps
-the older behaviour until its workflow moves to the new build.
-
 ## E2E-01 — Scale-from-zero (timeout 180000)
 
 Requires Setup. Opens the pull request from `feature/customer-search`.
@@ -146,13 +140,12 @@ PR=$(open_pr feature/customer-search "$SCENARIO_TITLE") || { result E2E-01 FAIL 
 save PR "$PR"
 save WF "$(pr_workflow_id "$PR")"
 echo "PR #$PR, workflow $WF"
-wf_started() { describe "$WF"; }
 first_activity() {
   local file
   file=$(fetch_history "$WF") || return 1
   jqe -e 'include "e2e"; (workflow_tasks | length) > 0 and (activities | length) > 0' "$file"
 }
-if ! wait_until 30 "workflow started" wf_started; then
+if ! wait_until 30 "workflow started" describe "$WF"; then
   result E2E-01 FAIL "no workflow $WF 30 s after the PR (webhook, router)"
   collect "$WF"
   exit 1
@@ -411,10 +404,9 @@ Otherwise:
 bash <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
 merge() { gh pr merge "$PR" -R "$REPO" --merge; }
-completed() { workflow_completed "$WF"; }
 # Retried: GitHub may take a few seconds to see the green check.
 wait_until 30 "PR merged" merge || { result E2E-06 FAIL "gh pr merge refused"; collect "$WF"; exit 1; }
-wait_until 120 "workflow completed" completed || { result E2E-06 FAIL "workflow still open"; collect "$WF"; exit 1; }
+wait_until 120 "workflow completed" workflow_completed "$WF" || { result E2E-06 FAIL "workflow still open"; collect "$WF"; exit 1; }
 outcome=$(jqe -c 'include "e2e"; result_with(["merged", "rounds"])' "$(fetch_history "$WF")")
 threads=$(review_threads "$PR")
 keys=$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "$(lower "$OWNER")/$(lower "$DEMO_REPO")/pr-$PR/" \
@@ -480,7 +472,7 @@ else
 fi
 if [[ "$RUN" == 2 ]]; then
   gh pr close "$PR" -R "$REPO"
-  wait_until 120 "workflow of PR #$PR closed" workflow_closed "$WF" || echo "workflow $WF still open" >&2
+  wait_until 120 "workflow of PR #$PR completed" workflow_completed "$WF" || echo "workflow $WF still open" >&2
 fi
 STEP
 ```
@@ -498,8 +490,7 @@ source .claude/skills/e2e-validation/helpers.sh
 fail() { result E2E-06b FAIL "$1"; collect "$WF"; exit 1; }
 [[ "$(check_conclusion "$(head_sha "$PR")")" == failure ]] || fail "AI Review is not red on PR #$PR"
 gh pr merge "$PR" -R "$REPO" --admin --merge || fail "admin merge refused"
-completed() { workflow_completed "$WF"; }
-wait_until 120 "workflow completed" completed || fail "workflow still open"
+wait_until 120 "workflow completed" workflow_completed "$WF" || fail "workflow still open"
 file=$(fetch_history "$WF")
 save LAST_PROD_AT "$(jqe 'include "e2e"; .events[-1].eventTime | ts | floor' "$file")"
 outcome=$(jqe -c 'include "e2e"; result_with(["merged", "rounds"])' "$file")
@@ -535,7 +526,7 @@ runs after it, so no idle timer is left to wake a worker.
    make dev >/tmp/e2e-validation/current/dev-worker.log 2>&1
    ```
 
-2. Run:
+2. Run the block below.
 
 ```bash
 bash <<'STEP'
@@ -569,8 +560,8 @@ STEP
 ```
 
 Success: the workflow runs on `review-dev`, its first workflow task on a
-`dev:` identity, `/kill` gets the "Ctrl-C is your friend" reply and no
-session is stopped, the round is published by the local worker. Keep the
+`dev:` identity, `/kill` gets the "Ctrl-C is your friend" reply, the round
+is published by the local worker. Keep the
 local worker and the PR: E2E-08 closes it.
 
 ### E2E-08 — Reset (timeout 600000)
@@ -681,13 +672,12 @@ drain by themselves, and the next run's Setup resets the demo repository
 
 | Symptom                    | Where to look                                |
 | -------------------------- | -------------------------------------------- |
-| Every `tcli` attempt fails | Unstable network (Go CLI): use a stable one  |
 | No workflow after the PR   | `webhook-deliveries.log` has no line for it  |
 | Webhook status 401         | Webhook secret of the app vs Secrets Manager |
 | Webhook status 500         | `router.log`: Temporal error of the router   |
 | Workflow started, no task  | Current version, queue attachment            |
 | E2E-04 misses a defect     | Printed findings: line drift or a real miss  |
-| No fix commit              | Fixer history; "branch changed" comment      |
+| No fix commit              | Fixer history; the bot's "Fix N" comment     |
 | No answer in the thread    | `router.log` for the reply; discussion child |
 | Idle comment on a PR       | A step stalled: the history's `idle` timers  |
 

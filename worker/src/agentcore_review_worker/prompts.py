@@ -7,11 +7,18 @@ serves the diff to every reviewer that starts after the first one.
 
 import json
 
-from agentcore_review_shared.contract import Category, DismissedFinding, Finding
+from agentcore_review_shared.contract import Category
 
 from agentcore_review_worker.lifecycle import sort_key
 from agentcore_review_worker.limits import MAX_MODEL_CALLS
-from agentcore_review_worker.models import BatchPatches, FilePatch, SynthesisInput, ThreadComment
+from agentcore_review_worker.models import (
+    BatchPatches,
+    DismissedFinding,
+    FilePatch,
+    Finding,
+    SynthesisInput,
+    ThreadComment,
+)
 
 REVIEWER_SYSTEM = f"""You are one of three specialized code reviewers (security, performance, maintainability) \
 reviewing a GitHub pull request. The user message holds the diff of the files in your batch, the repository's \

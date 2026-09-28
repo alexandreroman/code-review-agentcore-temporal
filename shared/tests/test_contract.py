@@ -2,53 +2,12 @@ import pytest
 from agentcore_review_shared.contract import (
     AgentCoreSession,
     Category,
-    FindingDraft,
-    Severity,
     agentcore_identity,
     format_finding_id,
     parse_agentcore_identity,
     parse_finding_id,
     pr_workflow_id,
 )
-from pydantic import ValidationError
-
-
-def draft(**overrides) -> FindingDraft:
-    values = {
-        "category": "security",
-        "severity": "high",
-        "path": "app/search.py",
-        "line": 5,
-        "title": "SQL injection",
-        "explanation": "f-string in SQL",
-    }
-    values.update(overrides)
-    return FindingDraft(**values)
-
-
-def test_severity_rank_and_blocking():
-    assert [s.rank for s in Severity] == [0, 1, 2, 3]
-    assert Severity.CRITICAL.blocking and Severity.HIGH.blocking
-    assert not Severity.MEDIUM.blocking and not Severity.LOW.blocking
-
-
-@pytest.mark.parametrize(
-    ("field", "raw", "expected"),
-    [
-        ("category", "Security", Category.SECURITY),
-        ("category", " PERFORMANCE ", Category.PERFORMANCE),
-        ("severity", "Critical", Severity.CRITICAL),
-        ("severity", " low ", Severity.LOW),
-    ],
-)
-def test_enums_tolerate_case_and_spaces(field, raw, expected):
-    finding = draft(**{field: raw})
-    assert getattr(finding, field) is expected
-
-
-def test_unknown_enum_values_are_still_rejected():
-    with pytest.raises(ValidationError):
-        draft(category="style")
 
 
 def test_finding_id_round_trip():

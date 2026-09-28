@@ -1,4 +1,4 @@
-"""Where secrets live and what they hold, shared by the tools that write them and the code that reads them."""
+"""Secret shapes, written by `make github-app` / `make secrets` and read by the router and the worker."""
 
 from typing import Annotated
 

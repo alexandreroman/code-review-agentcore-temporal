@@ -1,4 +1,4 @@
-"""Ping: proves that a worker picks up the task queue (make ping, deploy checks)."""
+"""Ping: proves that a worker picks up the task queue (make ping)."""
 
 from temporalio import workflow
 

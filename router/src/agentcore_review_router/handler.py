@@ -6,12 +6,13 @@ not exist yet). The same function receives its own asynchronous invocations, whi
 fit in the webhook's 10 s. Logs are JSON (the function's log format); every line carries the delivery ID.
 """
 
+import json
 import logging
 import time
 from typing import Any
 
 from . import commands, runtime, temporal_ops
-from .routing import ForwardReply, Ignore, RouterConfig, RunCommand, SendSignal, StartOrSignal, load_payload, route
+from .routing import ForwardReply, Ignore, RunCommand, SendSignal, StartOrSignal, route
 from .signature import decode_body, verify_signature
 
 logger = logging.getLogger(__name__)
@@ -21,8 +22,8 @@ Reply = tuple[int, str]
 
 def handler(event: dict, context: Any) -> dict:
     deadline = time.monotonic() + context.get_remaining_time_in_millis() / 1000
-    if event.get(commands.FOLLOWUP_KEY) == "kill":
-        runtime.run(_finish_kill(event, deadline))
+    if event.get("router_task") == "kill":
+        runtime.run(commands.finish_kill(event, deadline))
         return {}
     return runtime.run(_handle_webhook(event, deadline))
 
@@ -44,16 +45,20 @@ async def _handle_webhook(event: dict, deadline: float) -> dict:
 async def _process(event: dict, headers: dict[str, str], fields: dict[str, Any], deadline: float) -> Reply:
     body = decode_body(event)
     try:
-        config = _signed_config(body, headers.get("x-hub-signature-256"))
+        signed = _is_signed(body, headers.get("x-hub-signature-256"))
     except Exception:
         logger.exception("router not configured (has make github-app run?)", extra=fields)
         return 503, "router not configured"
-    if config is None:
+    if not signed:
         return 401, "invalid signature"
-    payload = load_payload(body)
-    if payload is None:
+    try:
+        payload = json.loads(body)
+    except ValueError:  # JSONDecodeError and UnicodeDecodeError
+        payload = None
+    if not isinstance(payload, dict):
         return 400, "body is not a JSON object"
     fields["action"] = payload.get("action")
+    config = runtime.router_config()
     try:
         action = route(fields["event"], payload, fields["delivery"], config)
     except (KeyError, TypeError, AttributeError, ValueError) as error:
@@ -70,19 +75,14 @@ async def _process(event: dict, headers: dict[str, str], fields: dict[str, Any],
         return 500, "action failed (see the router logs)"
 
 
-def _signed_config(body: bytes, signature: str | None) -> RouterConfig | None:
-    """The router config whose webhook secret signed the body, or None when the signature is invalid.
-
-    Raises when the router is not configured (the GitHub App secret does not exist yet).
-    """
-    config = runtime.router_config()
-    if verify_signature(config.webhook_secret, body, signature):
-        return config
+def _is_signed(body: bytes, signature: str | None) -> bool:
+    """Raises when the router is not configured (the GitHub App secret does not exist yet)."""
+    if verify_signature(runtime.github_app_secret().webhook_secret, body, signature):
+        return True
     # A re-registered GitHub App rotates the webhook secret: a warm container's cache is stale exactly once, so
-    # check against a fresh secret before refusing the signature for good.
-    runtime.clear_github_app_secret()
-    config = runtime.router_config()
-    return config if verify_signature(config.webhook_secret, body, signature) else None
+    # check against a fresh secret (one Secrets Manager call per unsigned request) before refusing the signature.
+    runtime.refresh_github_app_secret()
+    return verify_signature(runtime.github_app_secret().webhook_secret, body, signature)
 
 
 async def _act(
@@ -91,10 +91,7 @@ async def _act(
     client = await runtime.temporal_client()
     if isinstance(action, StartOrSignal):
         fields["task_queue"] = action.task_queue
-        settings = runtime.settings()
-        if await temporal_ops.start_or_signal(
-            client, action, settings.pr_idle_warning_seconds, settings.pr_idle_close_seconds
-        ):
+        if await temporal_ops.start_or_signal(client, action):
             return 202, f"signal-with-start {action.workflow_id} on {action.task_queue}"
         return 204, "pull request workflow already finished"
     if isinstance(action, SendSignal):
@@ -104,11 +101,3 @@ async def _act(
     if isinstance(action, ForwardReply):
         return 202, await commands.forward_reply(action, client, fields)
     return 202, await commands.run_command(action, client, deadline, fields)
-
-
-async def _finish_kill(event: dict, deadline: float) -> None:
-    try:
-        await commands.finish_kill(event, deadline)
-    except Exception:
-        # Asynchronous invocations are never retried (event invoke config): a failure only logs.
-        logger.exception("kill follow-up failed", extra={"delivery": event.get("delivery_id", "")})

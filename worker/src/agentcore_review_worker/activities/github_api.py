@@ -20,7 +20,6 @@ from temporalio.exceptions import ApplicationError
 
 from ..aws import read_secret
 
-GITHUB_JSON = "application/vnd.github+json"
 GITHUB_RAW = "application/vnd.github.raw+json"
 PER_PAGE = 100
 MAX_ITEMS = 3000
@@ -67,7 +66,7 @@ def repo_path(pr: PrRef) -> str:
 
 async def get(pr: PrRef, path: str, params: dict | None = None) -> Any:
     """The decoded JSON body."""
-    response = await github().request(pr.installation_id, "GET", path, params=params, accept=GITHUB_JSON)
+    response = await github().request(pr.installation_id, "GET", path, params=params)
     return response.json()
 
 

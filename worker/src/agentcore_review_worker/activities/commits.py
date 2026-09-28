@@ -4,8 +4,6 @@ No author is set, so GitHub signs the commit as the app. The Review-Fix trailer 
 earlier attempt already pushed.
 """
 
-from typing import NoReturn
-
 from agentcore_review_shared.contract import PrRef
 from agentcore_review_shared.github import GitHubError
 from temporalio import activity
@@ -42,9 +40,8 @@ async def commit_fix(input: CommitInput) -> CommitResult:
         pushed = await _already_pushed(pr, branch, trailer)
         if pushed is not None:
             return CommitResult(sha=pushed, rejected=rejected)
-        ref = await get(pr, f"{repo_path(pr)}/git/ref/heads/{branch}")
-        if ref["object"]["sha"] != input.expected_head_sha:
-            await _abandon(pr, branch)
+        if await _branch_head(pr, branch) != input.expected_head_sha:
+            raise _branch_moved()
         parent = await get(pr, f"{repo_path(pr)}/git/commits/{input.expected_head_sha}")
         base_tree = parent["tree"]["sha"]
         executables = await _executable_paths(pr, base_tree)
@@ -71,8 +68,9 @@ async def commit_fix(input: CommitInput) -> CommitResult:
         try:
             await send(pr, "PATCH", f"{repo_path(pr)}/git/refs/heads/{branch}", {"sha": commit["sha"], "force": False})
         except GitHubError as error:
-            if error.status == 422:  # not a fast-forward: someone pushed in between
-                await _abandon(pr, branch)
+            # Someone pushed in between only if the branch moved: any other 422 is reported as it is.
+            if error.status == 422 and await _branch_head(pr, branch) != input.expected_head_sha:
+                raise _branch_moved() from None
             raise
     return CommitResult(sha=commit["sha"], rejected=rejected)
 
@@ -88,7 +86,11 @@ async def _already_pushed(pr: PrRef, branch: str, trailer: str) -> str | None:
     return next((c["sha"] for c in commits if trailer in c["commit"]["message"].splitlines()), None)
 
 
-async def _abandon(pr: PrRef, branch: str) -> NoReturn:
-    body = f"Branch `{branch}` changed while the fix was being prepared: fix abandoned. Comment `/fix` to try again."
-    await send(pr, "POST", f"{repo_path(pr)}/issues/{pr.number}/comments", {"body": body})
-    raise ApplicationError("branch changed, fix abandoned", type="BranchMoved", non_retryable=True)
+async def _branch_head(pr: PrRef, branch: str) -> str:
+    ref = await get(pr, f"{repo_path(pr)}/git/ref/heads/{branch}")
+    return ref["object"]["sha"]
+
+
+def _branch_moved() -> ApplicationError:
+    """The workflow explains it in the Conversation: the fix is abandoned, a new /fix starts from the new head."""
+    return ApplicationError("the branch changed while the fix was prepared", type="BranchMoved", non_retryable=True)

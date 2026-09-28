@@ -34,7 +34,8 @@ On a stable network, never on conference Wi-Fi:
 
 ## Pre-stage checklist (30 minutes before)
 
-1. **Network**: connect, and keep a tested phone hotspot at hand.
+1. **Network**: connect, and keep a phone hotspot at hand, tested with
+   `make ping`; disconnect VPNs if the network is unstable.
 2. **Credentials**: `aws sso login --profile <profile>` (the session must
    outlast the talk), `AWS_PROFILE` exported in the demo terminal,
    `gh auth status`.
@@ -151,17 +152,6 @@ workflow. Switch to the local worker, same Temporal Cloud namespace:
 4. Scale-from-zero and the session kill are lost; everything else is
    identical.
 
-## Network
-
-- **Slow uplinks.** Conference and hotel Wi-Fi can upload as slowly as
-  80 KB/s. Deploy the day before; on stage only webhooks and API calls
-  travel.
-- **Temporal CLI on unstable networks.** `make deploy` and
-  `make kill-sessions` can fail with "context deadline exceeded" or a TLS
-  EOF: retry, or switch to the hotspot.
-- **Hotspot.** Test it with `make ping` before the talk. VPNs can make
-  things worse: disconnect them if the network is unstable.
-
 ## Recovery
 
 | Symptom                        | Action                                     |
@@ -170,5 +160,6 @@ workflow. Switch to the local worker, same Temporal Cloud namespace:
 | No worker 30 s after the start | Plan B                                     |
 | `/kill` answers nothing        | Carry on: the review completes anyway      |
 | No answer to the reply in 90 s | Skip it: comment `/fix` on the PR          |
+| A "Fix N" comment after `/fix` | Comment `/fix` again, or admin merge       |
 | Check red after `/fix`         | Admin merge: the outcome records it        |
 | Review slower than 3 minutes   | Tour the history meanwhile                 |

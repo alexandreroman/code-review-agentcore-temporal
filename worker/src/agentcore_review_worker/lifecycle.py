@@ -7,18 +7,17 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Literal
 
-from agentcore_review_shared.contract import (
-    Category,
-    CommentPosted,
+from agentcore_review_shared.contract import Category, CommentPosted, FixRequested, format_finding_id, parse_finding_id
+
+from agentcore_review_worker.models import (
     DismissedFinding,
     Finding,
-    FixRequested,
     PullRequestState,
-    format_finding_id,
-    parse_finding_id,
+    ReviewerReport,
+    ReviewSummary,
+    SynthesisInput,
+    ThreadComment,
 )
-
-from agentcore_review_worker.models import ReviewerReport, ReviewSummary, SynthesisInput, ThreadComment
 from agentcore_review_worker.summaries import count
 
 Action = Literal["close", "review", "fix", "reply"]
@@ -42,8 +41,8 @@ MAX_BOT_REPLIES_PER_THREAD = 3
 def id_sort_key(finding_id: str) -> tuple[int, int, str]:
     """By category (security first), then by number: S-09, S-10, S-100, P-01.
 
-    Any other ID, such as a legacy F-003, comes last. The ID itself breaks ties, so the order never depends on the
-    input order, which a set leaves random.
+    An ID that does not parse sorts last. The ID itself breaks ties, so the order never depends on the input order,
+    which a set leaves random.
     """
     parsed = parse_finding_id(finding_id)
     if parsed is None:
@@ -306,8 +305,7 @@ def fallback_summary(input: SynthesisInput) -> ReviewSummary:
     merged = sorted(most_severe.values(), key=sort_key)
     kept = {f.id for f in merged}
     if merged:
-        listed = ", ".join(f"{f.id} ({f.severity})" for f in merged)
-        text = f"{count(len(merged), 'new finding')} in this round, most severe first: {listed}."
+        text = f"{count(len(merged), 'new finding')} in this round, most severe first: {with_severity(merged)}."
     else:
         text = "No new finding in this round."
     return ReviewSummary(
@@ -315,6 +313,11 @@ def fallback_summary(input: SynthesisInput) -> ReviewSummary:
         ordered_ids=[f.id for f in merged],
         duplicates=[f.id for f in input.new_findings if f.id not in kept],
     )
+
+
+def with_severity(findings: list[Finding]) -> str:
+    """`S-01 (critical), P-01 (high)`, in the given order."""
+    return ", ".join(f"{f.id} ({f.severity})" for f in findings)
 
 
 def merge_status(open_findings: list[Finding]) -> str:

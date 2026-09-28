@@ -1,15 +1,15 @@
 ---
 name: "Tests cover business logic only"
-description: "Unit tests target the pure review, routing and contract rules; workflows, infra, tooling and plumbing have none"
+description: "Unit tests target pure functions carrying rules (review, routing, contract, GitHub error classification)"
 type: feedback
 ---
 
 # Tests cover business logic only
 
-Unit tests cover the business logic: the pure modules carrying review,
-routing or contract rules. Workflows, agents, infrastructure (OpenTofu), the
-Makefile, the deployment tooling (`agentcore_review_tools`) and the runtime
-plumbing (entry points, settings, drain, HTTP clients) have no unit tests;
+Unit tests cover pure functions carrying rules: review, routing, contract
+and GitHub error classification. Workflows, agents, infrastructure
+(OpenTofu), the Makefile, the deployment tooling (`agentcore_review_tools`)
+and the runtime wiring (entry points, settings, drain, tracing) have none;
 the e2e-validation skill exercises them for real.
 
 **Why:** the project is a teaching-oriented conference demo; tests of

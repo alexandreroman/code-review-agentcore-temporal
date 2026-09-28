@@ -17,8 +17,13 @@ case "$action" in
   update)
     pr=$(gh pr view "$number" --repo "$owner/$repo" --json headRefOid,title)
     head=$(jq -r .headRefOid <<<"$pr")
-    # The router's summary: `#3 · Add customer search`, on a single line.
-    summary=$(jq -r --arg number "$number" '"#\($number) · \(.title | gsub("\\s+"; " "))"' <<<"$pr")
+    # The router's summary: `#3 · Add customer search`, whitespace collapsed,
+    # at most 200 bytes (Temporal's cap), cut with an ellipsis (3 bytes).
+    summary=$(jq -r --arg number "$number" '
+      def cut: if utf8bytelength <= 197 then . else .[:-1] | cut end;
+      "#\($number) · \(.title)" | [splits("\\s+")] | map(select(. != "")) | join(" ")
+      | if utf8bytelength <= 200 then . else cut + "…" end
+    ' <<<"$pr")
     installation=$(uv run --quiet python -m agentcore_review_tools.github_app installation-id \
       --owner "$owner" --repo "$repo")
     input=$(jq -nc --arg owner "$owner" --arg repo "$repo" --argjson number "$number" \
@@ -38,8 +43,7 @@ case "$action" in
     ;;
   close)
     signal=$(gh pr view "$number" --repo "$owner/$repo" --json state,mergedBy |
-      jq -c --arg delivery "$delivery" \
-        '{merged: (.state == "MERGED"), closed_by: .mergedBy.login, delivery_id: $delivery}')
+      jq -c '{merged: (.state == "MERGED"), closed_by: .mergedBy.login}')
     tcli workflow signal --workflow-id "$workflow_id" --name pr_closed --input "$signal"
     ;;
   *)

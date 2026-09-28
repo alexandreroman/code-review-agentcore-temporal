@@ -19,6 +19,7 @@ _locks: dict[str, asyncio.Lock] = {}
 
 
 async def local_root(snapshot: SnapshotRef) -> Path:
+    assert snapshot.bucket and snapshot.key  # without an archive, the tools read through the GitHub API
     target = CACHE_ROOT / snapshot.sha
     if target.is_dir():
         return target

@@ -4,7 +4,7 @@ from datetime import timedelta
 from typing import Any
 
 from temporalio.common import RetryPolicy
-from temporalio.exceptions import ActivityError, ApplicationError
+from temporalio.exceptions import ApplicationError
 
 FIVE_ATTEMPTS = RetryPolicy(maximum_attempts=5)
 THREE_ATTEMPTS = RetryPolicy(maximum_attempts=3)
@@ -60,6 +60,9 @@ PING = _options(30, THREE_ATTEMPTS)  # a broken worker must fail make ping, not 
 CHILD_RUN_TIMEOUT = timedelta(minutes=10)
 
 
-def failed_with(error: ActivityError, error_type: str) -> bool:
-    """Whether an activity failed with an ApplicationError of this type (e.g. GitHubUnprocessable)."""
-    return isinstance(error.cause, ApplicationError) and error.cause.type == error_type
+def error_type(error: BaseException) -> str | None:
+    """The type of the first ApplicationError behind a failure: GitHubUnprocessable, or BranchMoved behind a child's."""
+    cause = error.__cause__
+    while cause is not None and not isinstance(cause, ApplicationError):
+        cause = cause.__cause__
+    return cause.type if cause is not None else None

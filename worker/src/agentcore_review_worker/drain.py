@@ -7,6 +7,11 @@ from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, 
 
 
 class ActivityTracker(Interceptor):
+    """Counts the running activities: the worker drains once none has run for a while.
+
+    Only activities count: workflow tasks are short, and Temporal redelivers one that a stopped worker left unfinished.
+    """
+
     def __init__(self) -> None:
         self._inflight = 0
         self._changed = asyncio.Event()

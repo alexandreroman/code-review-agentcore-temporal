@@ -1,5 +1,5 @@
-"""What the bot writes on GitHub: review comments and body, check output, thread replies, /fix refusals, closing
-and inactivity comments, fixer changes.
+"""What the bot writes on GitHub: review comments and body, check output, thread replies, /fix refusals and
+failures, closing and inactivity comments, fixer changes.
 
 Pure functions: the activities call them with data they fetched, the workflow with its state.
 """
@@ -7,15 +7,21 @@ Pure functions: the activities call them with data they fetched, the workflow wi
 import re
 from collections.abc import Sequence
 from pathlib import PurePosixPath
-from typing import Literal
 
-from agentcore_review_shared.contract import FINDING_ID_PATTERN, Finding
+from agentcore_review_shared.contract import FINDING_ID_PATTERN
 from pydantic import BaseModel
 
 from agentcore_review_worker.hunks import is_commentable
-from agentcore_review_worker.lifecycle import MAX_BOT_REPLIES_PER_THREAD, merge_status, sort_key
+from agentcore_review_worker.lifecycle import MAX_BOT_REPLIES_PER_THREAD, merge_status, sort_key, with_severity
 from agentcore_review_worker.markers import finding_marker
-from agentcore_review_worker.models import DiscussionReply, FileChange, ReviewContent, ThreadComment
+from agentcore_review_worker.models import (
+    CheckOutput,
+    DiscussionReply,
+    FileChange,
+    Finding,
+    ReviewContent,
+    ThreadComment,
+)
 from agentcore_review_worker.navigation import is_outside_repository
 from agentcore_review_worker.summaries import count, file_list
 
@@ -66,11 +72,6 @@ def _inline(finding: Finding) -> InlineComment:
 
 def _line(finding: Finding) -> str:
     return f"- **{finding.id}** {finding.severity} · `{finding.path}:{finding.line}` · {finding.title}"
-
-
-def _with_severity(findings: list[Finding]) -> str:
-    """`S-01 (critical), P-01 (high)`."""
-    return ", ".join(f"{f.id} ({f.severity})" for f in findings)
 
 
 def _split_inline(
@@ -126,16 +127,13 @@ def build_review(content: ReviewContent, commentable: dict[str, set[int]], marke
     return ReviewPayload(body=body, comments=[_inline(f) for f in attached])
 
 
-def check_output(
-    open_findings: list[Finding], *, unavailable: Sequence[str] = (), unlisted: int = 0
-) -> tuple[Literal["success", "failure"], str, str]:
-    """Conclusion, title and summary of a completed round's check.
+def check_output(open_findings: list[Finding], *, unavailable: Sequence[str] = (), unlisted: int = 0) -> CheckOutput:
+    """The output of a completed round's check: red while a critical or high finding is open.
 
     `unavailable` names the reviewers that failed, `unlisted` counts the changed files GitHub did not list.
     """
     ordered = sorted(open_findings, key=sort_key)
     blocking = [f for f in ordered if f.severity.blocking]
-    conclusion: Literal["success", "failure"] = "failure" if blocking else "success"
     if blocking:
         title = f"Merge blocked: {count(len(blocking), 'critical or high finding')} open"
         if len(ordered) > len(blocking):
@@ -154,13 +152,13 @@ def check_output(
         files = count(unlisted, "file")
         title += f", {files} not listed"
         lines += ["", f"Not reviewed in this round (not listed by GitHub, too many changes): {files}."]
-    return conclusion, title, "\n".join(lines)
+    return CheckOutput(conclusion="failure" if blocking else "success", title=title, summary="\n".join(lines))
 
 
 def _merge_blocked(blocking: list[Finding]) -> str:
     """Why the check fails, and the ways to turn it green: a fix, or a dismissal in the finding's thread."""
     findings = count(len(blocking), "critical or high finding")
-    found = f"**Merge blocked** by {findings}: {_with_severity(blocking)}."
+    found = f"**Merge blocked** by {findings}: {with_severity(blocking)}."
     if len(blocking) == 1:
         way_out = "Fix it (push a commit or comment `/fix`) or have it dismissed in its thread."
     else:
@@ -168,13 +166,13 @@ def _merge_blocked(blocking: list[Finding]) -> str:
     return f"{found} {way_out} The check turns green once none is left."
 
 
-def unavailable_check_output(round_number: int, unavailable: list[str]) -> tuple[Literal["failure"], str, str]:
-    """Conclusion, title and summary of a round where no reviewer completed: the head stays unreviewed."""
+def unavailable_check_output(round_number: int, unavailable: list[str]) -> CheckOutput:
+    """The output of a round where no reviewer completed: the head stays unreviewed."""
     summary = (
         f"No reviewer completed round {round_number} (unavailable: {', '.join(unavailable)}), "
         "so this head was not reviewed. Push a commit to retry."
     )
-    return "failure", "Review unavailable", summary
+    return CheckOutput(conclusion="failure", title="Review unavailable", summary=summary)
 
 
 def reply_body(finding_id: str, reply: DiscussionReply, marker: str) -> str:
@@ -230,6 +228,17 @@ def not_open_fix_comment(not_open_ids: list[str], open_findings: list[Finding], 
     return f"{refused}: nothing was fixed. {still_open}\n\n{marker}"
 
 
+def failed_fix_comment(fix_number: int, error_type: str | None, marker: str) -> str:
+    """A /fix that pushed nothing; error_type is the failure's ApplicationError type, if any."""
+    if error_type == "BranchMoved":
+        text = f"Fix {fix_number} abandoned: the branch changed while it was prepared. Comment `/fix` to try again."
+    elif error_type == "ForkNotSupported":
+        text = f"Fix {fix_number} not pushed: this pull request comes from a fork, which the bot cannot push to."
+    else:
+        text = f"Fix {fix_number} failed: nothing was pushed. Comment `/fix` to try again."
+    return f"{text}\n\n{marker}"
+
+
 def bot_answers(thread: list[ThreadComment], bot_login: str) -> int:
     """The discussion agent's answers in a thread: the bot's replies that start with a verdict line.
 
@@ -240,7 +249,7 @@ def bot_answers(thread: list[ThreadComment], bot_login: str) -> int:
 
 def closing_comment(closed_by: str | None, open_findings: list[Finding], marker: str) -> str:
     ordered = sorted(open_findings, key=sort_key)
-    listed = _with_severity(ordered)
+    listed = with_severity(ordered)
     still_open = count(len(ordered), "open finding")
     who = f" by @{closed_by}" if closed_by else ""
     if any(f.severity.blocking for f in ordered):
@@ -266,7 +275,7 @@ def idle_close_comment(close_seconds: int, marker: str) -> str:
 
 
 def _repository_path(raw: str) -> str | None:
-    """The path in its plain form ("./app//a.py" gives "app/a.py"), or None when it is not a repository file."""
+    """The path in its plain form ("./src//A.java" gives "src/A.java"), or None when it is not a repository file."""
     text = raw.strip()
     if not text or is_outside_repository(text):
         return None

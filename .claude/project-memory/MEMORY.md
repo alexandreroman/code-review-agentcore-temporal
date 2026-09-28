@@ -21,8 +21,8 @@
 > only makes sense knowing the prior state,
 > rewrite it.
 
-- [Project objective](references/project_objective.md) — 15-min talk, two screens, four moments; stage reliability first
-- [Stack choices](references/project_stack.md) — mTLS, Claude on Bedrock (no Anthropic API key), Python, and why
+- [Project objective](references/project_objective.md) — 15-min talk, four moments; stage reliability and lean artifacts first
+- [Stack choices](references/project_stack.md) — mTLS for Temporal, Claude via Bedrock and IAM only, Python, and why
 - [Demo app is Java / Spring Boot](references/project_demo_app_java.md) — reviewed repo is Java for enterprise audiences
 - [Local dev uses Temporal Cloud](references/project_dev_on_temporal_cloud.md) — no local Temporal server; make dev targets Cloud
 - [Design docs location](references/reference_design_docs.md) — specs, plans, decisions, status and spike results in git-ignored docs/
@@ -33,7 +33,6 @@
 - [Amend unpushed commits instead of stacking fixes](references/feedback_amend_unpushed.md) — fold fixes into the unpushed commit they correct
 - [Placeholders for account identifiers](references/feedback_no_real_identifiers.md) — real namespace/account/app IDs only in .env, never tracked
 - [No maintainer specifics in public files](references/feedback_no_maintainer_specifics.md) — generic docker, no Casper in public files
-- [Tests cover business logic only](references/feedback_tests_business_only.md) — pure review, routing and contract rules; no plumbing tests
-- [Lean, optimized artifacts](references/feedback_lean_artifacts.md) — small images/zips from the start, few moving parts
+- [Tests cover business logic only](references/feedback_tests_business_only.md) — pure rule functions: review, routing, contract, GitHub errors
 - [Temporal UI labels and details](references/project_temporal_ui_labels.md) — short activity type names, summaries hold the detail only
-- [Observability choices](references/project_observability.md) — opt-in TRACING, OTel + SigV4 exporter, no Transaction Search in infra, heartbeats
+- [Observability choices](references/project_observability.md) — opt-in TRACING, OTel + SigV4 exporter, Transaction Search set by the owner

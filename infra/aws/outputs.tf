@@ -33,10 +33,10 @@ output "current_endpoint_arn" {
   ) : ""
 }
 
+# name => runtime version, passed back as retained_endpoints by scripts/infra.sh.
 output "endpoints" {
   value = {
-    for name, endpoint in aws_bedrockagentcore_agent_runtime_endpoint.build :
-    name => { arn = endpoint.agent_runtime_endpoint_arn, version = endpoint.agent_runtime_version }
+    for name, endpoint in aws_bedrockagentcore_agent_runtime_endpoint.build : name => endpoint.agent_runtime_version
   }
 }
 

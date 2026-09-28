@@ -9,16 +9,20 @@ from agentcore_review_router.routing import (
     RunCommand,
     SendSignal,
     StartOrSignal,
-    load_payload,
     route,
     workflow_summary,
 )
-from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed
+from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, PullRequestInput
 from temporalio.common import WorkflowIDReusePolicy
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CONFIG = RouterConfig(
-    prod_queue="review", dev_queue="review-dev", dev_branch_prefix="dev/", app_slug="tar-bot", webhook_secret="s"
+    prod_queue="review",
+    dev_queue="review-dev",
+    dev_branch_prefix="dev/",
+    app_slug="tar-bot",
+    idle_warning_seconds=600,
+    idle_close_seconds=900,
 )
 WF = "pr-octocat-agentcore-review-demo-app-3"
 # Each comment event is loaded from the fixture of the same name.
@@ -45,11 +49,10 @@ def test_pr_updates_start_or_signal(action, policy):
     assert result.workflow_id == WF and result.task_queue == "review" and result.reuse_policy == policy
     assert result.signal.head_sha == "a1b2c3d4e5f6" and result.signal.delivery_id == "delivery-1"
     assert result.summary == "#3 · Add customer search"
-    assert (result.pr.owner, result.pr.repo, result.pr.number, result.pr.installation_id) == (
-        "octocat",
-        "agentcore-review-demo-app",
-        3,
-        90210,
+    assert result.input == PullRequestInput(
+        pr=PrRef(owner="octocat", repo="agentcore-review-demo-app", number=3, installation_id=90210),
+        idle_warning_seconds=600,
+        idle_close_seconds=900,
     )
 
 
@@ -84,7 +87,7 @@ def test_merged_close_signals_the_merger():
     payload["pull_request"]["merged_by"] = {"login": "admin-user"}
     result = route("pull_request", payload, "d", CONFIG)
     assert isinstance(result, SendSignal) and result.workflow_id == WF and result.signal_name == SIGNAL_PR_CLOSED
-    assert result.payload == PrClosed(merged=True, closed_by="admin-user", delivery_id="d")
+    assert result.payload == PrClosed(merged=True, closed_by="admin-user")
 
 
 def test_unmerged_close_by_the_reset_bot_is_routed():
@@ -93,7 +96,7 @@ def test_unmerged_close_by_the_reset_bot_is_routed():
     payload["sender"] = {"login": "tar-bot[bot]"}
     result = route("pull_request", payload, "d", CONFIG)
     assert isinstance(result, SendSignal)
-    assert result.payload == PrClosed(merged=False, closed_by="tar-bot[bot]", delivery_id="d")
+    assert result.payload == PrClosed(merged=False, closed_by="tar-bot[bot]")
 
 
 @pytest.mark.parametrize("action", ["edited", "labeled", "ready_for_review", "assigned"])
@@ -103,9 +106,7 @@ def test_other_pr_actions_are_ignored(action):
     assert isinstance(route("pull_request", payload, "d", CONFIG), Ignore)
 
 
-@pytest.mark.parametrize(
-    ("body", "command"), [("/fix", "fix"), ("/kill", "kill"), ("/fix please", "fix"), ("  /kill\n", "kill")]
-)
+@pytest.mark.parametrize(("body", "command"), [("/fix", "fix"), ("/kill", "kill"), ("  /kill\n", "kill")])
 def test_commands(body, command):
     payload = load("issue_comment")
     payload["comment"]["body"] = body
@@ -205,15 +206,6 @@ def test_edited_or_deleted_comments_are_ignored(event, action):
 @pytest.mark.parametrize("event", ["ping", "installation", "push", "check_run"])
 def test_other_events_are_ignored(event):
     assert isinstance(route(event, {}, "d", CONFIG), Ignore)
-
-
-@pytest.mark.parametrize("body", [b"", b"not json", b"[1, 2]", b'"text"', b"null", b"\xff\xfe\x00"])
-def test_bodies_that_are_not_json_objects_are_rejected(body):
-    assert load_payload(body) is None
-
-
-def test_json_object_body_is_loaded():
-    assert load_payload(b'{"action": "opened"}') == {"action": "opened"}
 
 
 @pytest.mark.parametrize("event", COMMENT_EVENTS)

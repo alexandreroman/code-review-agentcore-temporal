@@ -105,16 +105,6 @@ def glob_files(root: Path, pattern: str, path: str | None = None) -> str:
     return _glob_output(sorted(str(p.relative_to(root)) for p in candidates if p.is_file() and _inside(root, p)))
 
 
-def _validate_glob_pattern(pattern: str) -> None:
-    """Raise the error Path.glob raises for a malformed pattern, without touching the filesystem.
-
-    Path.glob validates its pattern as soon as it is called, before any directory is read, so
-    calling it on a path that need not exist reproduces glob_files' errors (e.g. an empty or an
-    absolute pattern) for glob_paths, which has no directory to glob against.
-    """
-    Path(".").glob(pattern)
-
-
 def glob_paths(paths: list[str], pattern: str, path: str | None = None) -> str:
     """Glob over a list of repository paths (the GitHub tree fallback), answering like glob_files."""
     raw = path or ""
@@ -128,7 +118,7 @@ def glob_paths(paths: list[str], pattern: str, path: str | None = None) -> str:
     if not inside and not at_root:
         return f"Error: path {path!r} not found."
     try:
-        _validate_glob_pattern(pattern)
+        Path(".").glob(pattern)  # validates the pattern (e.g. empty or absolute) without reading a directory
     except (ValueError, NotImplementedError) as exc:
         return f"Error: invalid glob pattern {pattern!r}: {exc}"
     matches = sorted(str(p) for p in inside if (p if at_root else p.relative_to(base)).full_match(pattern))
@@ -150,7 +140,8 @@ def _grep_text(compiled: regex.Pattern, text: str, relative: str, deadline: floa
         if remaining <= 0:
             return hits, True
         try:
-            # concurrent=True releases the GIL, so the activity keeps heartbeating meanwhile.
+            # concurrent=True releases the GIL, so the event loop keeps running meanwhile: the model activities'
+            # heartbeats, and the workflow tasks.
             found = compiled.search(line, timeout=remaining, concurrent=True)
         except TimeoutError:
             return hits, True

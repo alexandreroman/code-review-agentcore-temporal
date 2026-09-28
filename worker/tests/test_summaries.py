@@ -1,5 +1,5 @@
 import pytest
-from agentcore_review_shared.contract import Finding
+from agentcore_review_worker.models import Finding
 from agentcore_review_worker.summaries import (
     MAX_SUMMARY_BYTES,
     MAX_SUMMARY_CHARS,
@@ -10,17 +10,19 @@ from agentcore_review_worker.summaries import (
     tool_call,
 )
 
+JAVA = "src/main/java/com/example/orders/OrderService.java"
+
 
 def test_a_short_text_is_kept():
-    assert fit("app/main.py") == "app/main.py"
+    assert fit(JAVA) == JAVA
 
 
 def test_a_long_path_keeps_its_start_and_its_file_name():
-    path = "app/" + "nested/" * 30 + "customers.py"
+    path = "src/" + "nested/" * 30 + "CustomerService.java"
     summary = fit(path)
     assert len(summary) == MAX_SUMMARY_CHARS
-    assert summary.startswith("app/nested/")
-    assert summary.endswith("/customers.py")
+    assert summary.startswith("src/nested/")
+    assert summary.endswith("/CustomerService.java")
     assert "…" in summary
 
 
@@ -38,7 +40,7 @@ def test_a_finding_title_stays_on_its_bullet_line():
         id="S-01",
         category="security",
         severity="critical",
-        path="app/search.py",
+        path=JAVA,
         line=12,
         title="SQL injection\nin the search query",
         explanation="The query concatenates user input.",
@@ -57,27 +59,27 @@ def test_finding_ids_are_listed_whole():
 
 
 def test_the_diff_lists_the_paths_that_fit():
-    assert diff_files(["app/main.py", "app/models.py"]) == "2 files: app/main.py, app/models.py"
-    many = diff_files([f"app/module_{number}.py" for number in range(30)])
-    assert many.startswith("30 files: app/module_0.py, app/module_1.py")
+    assert diff_files(["src/Order.java", "src/OrderService.java"]) == "2 files: src/Order.java, src/OrderService.java"
+    many = diff_files([f"src/Module{number}.java" for number in range(30)])
+    assert many.startswith("30 files: src/Module0.java, src/Module1.java")
     assert many.endswith(", …")
     assert len(many) <= MAX_SUMMARY_CHARS
 
 
 def test_a_single_long_path_is_cut_in_the_middle():
-    summary = diff_files(["app/" + "nested/" * 30 + "customers.py"])
-    assert summary.startswith("1 file: app/")
-    assert summary.endswith("customers.py")
+    summary = diff_files(["src/" + "nested/" * 30 + "CustomerService.java"])
+    assert summary.startswith("1 file: src/")
+    assert summary.endswith("CustomerService.java")
 
 
 @pytest.mark.parametrize(
     ("tool_input", "summary"),
     [
-        ({"file_path": "app/main.py"}, "app/main.py"),
-        ({"file_path": "app/main.py", "offset": 1, "limit": 400}, "app/main.py:1-400"),
-        ({"file_path": "app/main.py", "offset": "120"}, "app/main.py:120-"),
-        ({"file_path": "app/main.py", "limit": 50}, "app/main.py:1-50"),
-        ({"file_path": "app/main.py", "offset": "abc", "limit": -3}, "app/main.py"),
+        ({"file_path": "pom.xml"}, "pom.xml"),
+        ({"file_path": "pom.xml", "offset": 1, "limit": 400}, "pom.xml:1-400"),
+        ({"file_path": "pom.xml", "offset": "120"}, "pom.xml:120-"),
+        ({"file_path": "pom.xml", "limit": 50}, "pom.xml:1-50"),
+        ({"file_path": "pom.xml", "offset": "abc", "limit": -3}, "pom.xml"),
         ({"offset": 1}, None),
         ({"file_path": 42}, None),
     ],
@@ -89,9 +91,9 @@ def test_read_summary(tool_input, summary):
 @pytest.mark.parametrize(
     ("tool_input", "summary"),
     [
-        ({"pattern": r"select\(", "path": "app/", "glob": "*.py"}, r"/select\(/ in app/ (*.py)"),
+        ({"pattern": r"select\(", "path": "src/", "glob": "*.java"}, r"/select\(/ in src/ (*.java)"),
         ({"pattern": "TODO"}, "/TODO/"),
-        ({"path": "app/"}, "in app/"),
+        ({"path": "src/"}, "in src/"),
         ({"pattern": ["not", "a", "string"]}, None),
     ],
 )
@@ -102,8 +104,8 @@ def test_grep_summary(tool_input, summary):
 @pytest.mark.parametrize(
     ("tool_input", "summary"),
     [
-        ({"pattern": "app/**/*.py"}, "app/**/*.py"),
-        ({"pattern": "*.py", "path": "app"}, "*.py in app"),
+        ({"pattern": "src/**/*.java"}, "src/**/*.java"),
+        ({"pattern": "*.java", "path": "src"}, "*.java in src"),
         ({}, None),
     ],
 )
@@ -112,16 +114,16 @@ def test_glob_summary(tool_input, summary):
 
 
 def test_arguments_that_are_not_an_object_give_no_summary():
-    assert tool_call("Read", "app/main.py") is None
+    assert tool_call("Read", "pom.xml") is None
     assert tool_call("Grep", None) is None
 
 
 @pytest.mark.parametrize(
     ("tool_name", "tool_input"),
     [
-        ("Read", {"file_path": "app/main.py", "offset": 10**5000}),
-        ("Read", {"file_path": {"nested": ["app/main.py"]}, "offset": [1], "limit": {"n": 1}}),
-        ("Grep", {"pattern": {"regex": "x"}, "path": ["app"], "glob": None}),
+        ("Read", {"file_path": "pom.xml", "offset": 10**5000}),
+        ("Read", {"file_path": {"nested": ["pom.xml"]}, "offset": [1], "limit": {"n": 1}}),
+        ("Grep", {"pattern": {"regex": "x"}, "path": ["src"], "glob": None}),
     ],
 )
 def test_hostile_arguments_never_raise(tool_name, tool_input):

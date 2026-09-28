@@ -86,56 +86,46 @@ queue_attached() {
   jq -e --arg queue "$TASK_QUEUE" '[.taskQueuesInfos[]?.name] | index($queue) != null' <<<"$1" >/dev/null
 }
 
-# create_version BUILD_ID: creates the version with the current compute config.
-create_version() {
-  tcli worker deployment create-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$1" \
-    "${COMPUTE_FLAGS[@]}"
-}
-
-# reconcile_compute_config BUILD_ID: re-applies the current compute config to
-# an existing version, deleting and recreating it if Temporal refuses the update.
-reconcile_compute_config() {
-  local build_id="$1"
-  echo "Reconciling the compute config of existing version $build_id"
-  if tcli worker deployment update-version-compute-config --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" \
-    --build-id "$build_id" "${COMPUTE_FLAGS[@]}" >/dev/null 2>&1; then
-    return
-  fi
-  echo "Compute config update refused: deleting the stale version and recreating it"
-  delete_version "$build_id" || die "delete-version failed for $build_id: re-run make deploy in about 5 minutes"
-  create_version "$build_id"
+# stack_output NAME: that output of the aws stack, read from $OUTPUTS; stops
+# when it is missing or empty.
+stack_output() {
+  local value
+  value=$(jq -r --arg name "$1" '.[$name].value // empty' <<<"$OUTPUTS")
+  [[ -n "$value" ]] || die "make deploy: no $1 in the aws stack outputs (has make infra run?)"
+  echo "$value"
 }
 
 # register BUILD_ID: creates the Worker Deployment Version if it does not
 # exist, waits for its task queue to attach, then makes it current.
 register() {
-  local build_id="$1"
+  local build_id="$1" output
 
-  # A flaky connection can make `describe` fail even though the deployment
-  # already exists; treat that specific "create" error the same as success
-  # instead of aborting on a false negative.
-  if ! tcli worker deployment describe --name "$TEMPORAL_DEPLOYMENT_NAME" >/dev/null 2>&1; then
-    local create_output
-    if ! create_output=$(tcli worker deployment create --name "$TEMPORAL_DEPLOYMENT_NAME" 2>&1); then
-      [[ "$create_output" == *"already exists"* ]] || die "$create_output"
-    else
-      echo "$create_output"
+  if output=$(tcli worker deployment create --name "$TEMPORAL_DEPLOYMENT_NAME" 2>&1); then
+    echo "$output"
+  elif [[ "$output" != *"already exists"* ]]; then
+    die "$output"
+  fi
+
+  local version
+  version=$(describe_version "$build_id")
+  if [[ -z "$version" ]]; then
+    tcli worker deployment create-version --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$build_id" \
+      "${COMPUTE_FLAGS[@]}"
+  else
+    # The version may still point at a destroyed endpoint (destroy + up).
+    echo "Re-applying the compute config of existing version $build_id"
+    if ! output=$(tcli worker deployment update-version-compute-config \
+      --deployment-name "$TEMPORAL_DEPLOYMENT_NAME" --build-id "$build_id" "${COMPUTE_FLAGS[@]}" 2>&1); then
+      die "Temporal refused the compute config of $build_id: $output"
     fi
   fi
 
-  # An existing version may point at a destroyed endpoint (destroy + up): re-apply the compute config.
-  if [[ -z "$(describe_version "$build_id")" ]]; then
-    create_version "$build_id"
-  else
-    reconcile_compute_config "$build_id"
-  fi
-
-  local version elapsed=0 invoked=false
+  local elapsed=0 invoked=false
   version=$(describe_version "$build_id")
   while ! queue_attached "$version"; do
     if [[ "$elapsed" -ge "$ATTACH_TIMEOUT" ]]; then
       local runtime_id
-      runtime_id=$(jq -r '.runtime_id.value' <<<"$OUTPUTS")
+      runtime_id=$(stack_output runtime_id)
       die "task queue $TASK_QUEUE never attached to $build_id: check the CloudWatch log group" \
         "/aws/bedrock-agentcore/runtimes/${runtime_id}-${build_id}"
     fi
@@ -151,7 +141,7 @@ register() {
   echo "Task queue $TASK_QUEUE attached to $build_id"
 
   # An unset timestamp comes back as the Unix epoch.
-  if jq -e '(.currentSinceTime // "") as $t | ($t != "" and ($t | startswith("1970-01-01") | not))' <<<"$version" >/dev/null; then
+  if jq -e '.currentSinceTime // "" | . != "" and (startswith("1970") | not)' <<<"$version" >/dev/null; then
     echo "$build_id is already the current version"
     return
   fi
@@ -163,7 +153,7 @@ register() {
 # polls and attaches the task queue.
 invoke_endpoint() {
   local build_id="$1" runtime_arn
-  runtime_arn=$(jq -r '.runtime_arn.value' <<<"$OUTPUTS")
+  runtime_arn=$(stack_output runtime_arn)
   # AWS CLI v2 expects blob parameters base64-encoded.
   aws bedrock-agentcore invoke-agent-runtime \
     --agent-runtime-arn "$runtime_arn" \
@@ -175,14 +165,19 @@ invoke_endpoint() {
 
 BUILD_ID=$(build_id)
 echo "Deploying build $BUILD_ID"
-ECR_REPOSITORY_URL=$(jq -r '.ecr_repository_url.value' <<<"$(aws_outputs)")
+OUTPUTS=$(aws_outputs)
+ECR_REPOSITORY_URL=$(stack_output ecr_repository_url)
 ensure_image "$ECR_REPOSITORY_URL" "$BUILD_ID"
 scripts/infra.sh "$BUILD_ID"
 
+# Plain assignments, so that set -e stops here if an output is missing.
 OUTPUTS=$(aws_outputs)
+ENDPOINT_ARN=$(stack_output current_endpoint_arn)
+INVOKE_ROLE_ARN=$(stack_output temporal_invoke_role_arn)
+EXTERNAL_ID=$(stack_output temporal_external_id)
 COMPUTE_FLAGS=(
-  --aws-agentcore-endpoint-arn "$(jq -r '.current_endpoint_arn.value' <<<"$OUTPUTS")"
-  --aws-agentcore-assume-role-arn "$(jq -r '.temporal_invoke_role_arn.value' <<<"$OUTPUTS")"
-  --aws-agentcore-assume-role-external-id "$(jq -r '.temporal_external_id.value' <<<"$OUTPUTS")"
+  --aws-agentcore-endpoint-arn "$ENDPOINT_ARN"
+  --aws-agentcore-assume-role-arn "$INVOKE_ROLE_ARN"
+  --aws-agentcore-assume-role-external-id "$EXTERNAL_ID"
 )
 register "$BUILD_ID"

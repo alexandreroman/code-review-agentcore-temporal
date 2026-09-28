@@ -9,7 +9,6 @@ terraform {
   backend "s3" {
     key          = "github/terraform.tfstate"
     use_lockfile = true
-    encrypt      = true
   }
 
   encryption {
@@ -33,8 +32,7 @@ terraform {
 }
 
 variable "region" {
-  type    = string
-  default = "ca-central-1"
+  type = string
 }
 
 variable "github_owner" {
@@ -103,7 +101,6 @@ resource "github_repository_ruleset" "main" {
     deletion         = true
     non_fast_forward = true
     required_status_checks {
-      strict_required_status_checks_policy = false
       required_check {
         context        = "AI Review"
         integration_id = local.app.app_id
@@ -113,7 +110,7 @@ resource "github_repository_ruleset" "main" {
 
   # Admins may merge over a red check (traced by the workflow); the app force-pushes main during a reset.
   bypass_actors {
-    actor_id    = 5
+    actor_id    = 5 # the built-in repository Admin role
     actor_type  = "RepositoryRole"
     bypass_mode = "always"
   }
@@ -146,7 +143,7 @@ resource "github_repository_ruleset" "tags" {
   }
 
   bypass_actors {
-    actor_id    = 5
+    actor_id    = 5 # the built-in repository Admin role
     actor_type  = "RepositoryRole"
     bypass_mode = "always"
   }
@@ -170,8 +167,5 @@ resource "github_actions_secret" "app_private_key" {
 }
 
 output "app_slug" {
-  value = local.app.slug
-  # The whole github_app secret is sensitive, even though the slug is not:
-  # OpenTofu propagates sensitivity from local.app as a whole.
-  sensitive = true
+  value = nonsensitive(local.app.slug)
 }

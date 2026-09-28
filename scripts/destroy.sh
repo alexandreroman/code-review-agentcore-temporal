@@ -13,6 +13,7 @@ source scripts/lib.sh
 
 require_cloudflare
 
+# Read before tofu destroy empties the outputs.
 BUILDS=$(jq -r '.endpoints.value // {} | keys[]' <<<"$(aws_outputs)")
 
 scripts/kill-sessions.sh || true

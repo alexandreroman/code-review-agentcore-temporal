@@ -53,7 +53,7 @@ resource "aws_iam_role_policy" "agentcore" {
       {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
-        Resource = [local.github_app_secret_arn_pattern, aws_secretsmanager_secret.worker_cert.arn]
+        Resource = [local.github_app_secret_arn_pattern, aws_secretsmanager_secret.temporal_cert.arn]
       },
       {
         Effect    = "Allow"
@@ -120,7 +120,7 @@ resource "aws_bedrockagentcore_agent_runtime" "worker" {
     TASK_QUEUE               = var.task_queue
     TEMPORAL_DEPLOYMENT_NAME = var.deployment_name
     TEMPORAL_BUILD_ID        = var.build_id
-    TEMPORAL_CERT_SECRET_ARN = aws_secretsmanager_secret.worker_cert.arn
+    TEMPORAL_CERT_SECRET_ARN = aws_secretsmanager_secret.temporal_cert.arn
     GITHUB_APP_SECRET_ID     = local.github_app_secret_name
     SNAPSHOTS_BUCKET         = aws_s3_bucket.snapshots.bucket
     BEDROCK_MODEL_ID         = var.bedrock_model_id

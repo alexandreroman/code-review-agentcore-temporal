@@ -1,5 +1,12 @@
-from agentcore_review_shared.contract import Category, DismissedFinding, Finding
-from agentcore_review_worker.models import BatchPatches, FilePatch, SynthesisInput, ThreadComment
+from agentcore_review_shared.contract import Category
+from agentcore_review_worker.models import (
+    BatchPatches,
+    DismissedFinding,
+    FilePatch,
+    Finding,
+    SynthesisInput,
+    ThreadComment,
+)
 from agentcore_review_worker.prompts import (
     discussion_prompt,
     fixer_prompt,
@@ -7,9 +14,10 @@ from agentcore_review_worker.prompts import (
     synthesis_prompt,
 )
 
+PATH = "src/main/java/com/example/orders/OrderRepository.java"
 PATCHES = BatchPatches(
-    patches=[FilePatch(path="app/search.py", status="added", patch="@@ -0,0 +1 @@\n+run(f'{name}')")],
-    tree=["app/", "README.md"],
+    patches=[FilePatch(path=PATH, status="added", patch='@@ -0,0 +1 @@\n+query("name = \'" + name + "\'");')],
+    tree=["src/", "pom.xml"],
 )
 
 
@@ -18,7 +26,7 @@ def finding(finding_id: str, suggestion: str | None = None, category: str = "sec
         id=finding_id,
         category=category,
         severity="high",
-        path="app/search.py",
+        path=PATH,
         line=1,
         title="SQL injection",
         explanation="why",
@@ -35,7 +43,7 @@ def test_reviewers_share_everything_before_their_focus():
 
 def test_the_diff_comes_before_the_focus():
     shared, _, focus = reviewer_prompt(Category.PERFORMANCE, PATCHES, [], [])
-    assert "run(f'{name}')" in shared["text"] and "README.md" in shared["text"]
+    assert "+ name +" in shared["text"] and "pom.xml" in shared["text"]
     assert "performance" not in shared["text"].lower()
     assert "performance" in focus["text"]
 
@@ -59,7 +67,7 @@ def test_discussion_prompt_shows_the_finding_then_the_thread_in_order():
         ThreadComment(id=2, author="alice", body="Validated upstream."),
     ]
     text = discussion_prompt(finding("S-04", suggestion="Bind parameters."), thread, "alice")
-    assert "S-04" in text and "app/search.py:1" in text and "Bind parameters." in text
+    assert "S-04" in text and f"{PATH}:1" in text and "Bind parameters." in text
     assert text.index("S-04") < text.index("finding body") < text.index("Validated upstream.")
     assert "Answer @alice's last comment" in text
 

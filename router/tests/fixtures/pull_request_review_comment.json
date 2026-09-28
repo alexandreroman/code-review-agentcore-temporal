@@ -1,7 +1,7 @@
 {
   "action": "created",
-  "comment": {"id": 777, "body": "/fix", "in_reply_to_id": 666, "path": "src/customers.py"},
-  "pull_request": {"number": 3, "url": "https://api.github.com/repos/octocat/agentcore-review-demo-app/pulls/3"},
+  "comment": {"id": 777, "body": "/fix", "in_reply_to_id": 666},
+  "pull_request": {"number": 3},
   "repository": {"name": "agentcore-review-demo-app", "owner": {"login": "octocat"}},
   "sender": {"login": "octocat"},
   "installation": {"id": 90210}

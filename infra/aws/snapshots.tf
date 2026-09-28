@@ -11,15 +11,6 @@ resource "aws_s3_bucket_public_access_block" "snapshots" {
   restrict_public_buckets = true
 }
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "snapshots" {
-  bucket = aws_s3_bucket.snapshots.id
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
-
 # Safety net for workflows that never clean up their snapshots.
 resource "aws_s3_bucket_lifecycle_configuration" "snapshots" {
   bucket = aws_s3_bucket.snapshots.id

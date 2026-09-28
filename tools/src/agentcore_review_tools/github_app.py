@@ -3,8 +3,8 @@
 - register: creates the app through the manifest flow (make github-app)
 - sync: refreshes the stored slug after a rename in the app settings, and points the app's webhook at the
   router (make github, make up)
-- installation-id: prints the app's installation ID on a repository, or its install link
-  (make github, make up, make review-pr)
+- installation-id: prints the app's installation ID on a repository; when the app is not installed there, prints
+  its install link and exits with status 2 (make github, make up, make review-pr)
 """
 
 import argparse
@@ -14,12 +14,14 @@ import secrets
 import sys
 import webbrowser
 from collections.abc import Callable
+from functools import cache
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import boto3
 import httpx2 as httpx
-from agentcore_review_shared.github import API_URL, app_jwt
+from agentcore_review_shared.github import API_URL, GITHUB_JSON, app_jwt
 from agentcore_review_shared.secrets import GITHUB_APP_SECRET, GitHubAppSecret
 from botocore.exceptions import ClientError
 
@@ -31,7 +33,8 @@ PERMISSIONS = {
     "metadata": "read",
 }
 EVENTS = ["pull_request", "issue_comment", "pull_request_review_comment"]
-ACCEPT = {"Accept": "application/vnd.github+json"}
+# scripts/github.sh reads this exit status as "the app is not installed on the repository".
+NOT_INSTALLED_EXIT_STATUS = 2
 SECRET_TAGS = [{"Key": "Project", "Value": "code-review-agentcore-temporal"}]
 
 
@@ -82,7 +85,7 @@ def callback_code(path: str, expected_state: str) -> str | None:
 
 def convert(http: httpx.Client, code: str) -> GitHubAppSecret:
     """Exchange the manifest code (valid for one hour) for the app credentials."""
-    response = http.post(f"{API_URL}/app-manifests/{code}/conversions", headers=ACCEPT)
+    response = http.post(f"{API_URL}/app-manifests/{code}/conversions", headers={"Accept": GITHUB_JSON})
     response.raise_for_status()
     data = response.json()
     return GitHubAppSecret(
@@ -94,19 +97,15 @@ def convert(http: httpx.Client, code: str) -> GitHubAppSecret:
     )
 
 
-def install_url(app: GitHubAppSecret) -> str:
-    return f"https://github.com/apps/{app.slug}/installations/new"
-
-
 def is_organization(http: httpx.Client, owner: str) -> bool:
-    response = http.get(f"{API_URL}/users/{owner}", headers=ACCEPT)
+    response = http.get(f"{API_URL}/users/{owner}", headers={"Accept": GITHUB_JSON})
     response.raise_for_status()
     return response.json().get("type") == "Organization"
 
 
 def app_headers(app: GitHubAppSecret) -> dict[str, str]:
     """Headers that authenticate as the app itself (not as one of its installations)."""
-    return {**ACCEPT, "Authorization": f"Bearer {app_jwt(app.client_id, app.private_key)}"}
+    return {"Accept": GITHUB_JSON, "Authorization": f"Bearer {app_jwt(app.client_id, app.private_key)}"}
 
 
 def installation_id(http: httpx.Client, app: GitHubAppSecret, owner: str, repo: str) -> int | None:
@@ -126,23 +125,23 @@ def serve_once(
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             if urlparse(self.path).path == "/":
-                self._reply(200, page)
+                self.reply(200, page)
                 return
             code = callback_code(self.path, expected_state)
             if code is None:
-                self._reply(400, "<p>Invalid callback: unknown state or missing code.</p>")
+                self.reply(400, "<p>Invalid callback: unknown state or missing code.</p>")
                 return
             try:
-                self._reply(200, on_code(code))
+                self.reply(200, on_code(code))
                 done.append(None)
             except Exception as error:
-                self._reply(500, f"<p>App creation failed: {html.escape(str(error))}</p>")
+                self.reply(500, f"<p>App creation failed: {html.escape(str(error))}</p>")
                 done.append(error)
 
         def log_message(self, format: str, *args: object) -> None:
             pass
 
-        def _reply(self, status: int, body: str) -> None:
+        def reply(self, status: int, body: str) -> None:
             self.send_response(status)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
@@ -156,9 +155,14 @@ def serve_once(
         raise done[0]
 
 
-def _registered_app(client) -> GitHubAppSecret | None:
+@cache
+def secretsmanager() -> Any:
+    return boto3.client("secretsmanager")
+
+
+def registered_app() -> GitHubAppSecret | None:
     try:
-        value = client.get_secret_value(SecretId=GITHUB_APP_SECRET)["SecretString"]
+        value = secretsmanager().get_secret_value(SecretId=GITHUB_APP_SECRET)["SecretString"]
     except ClientError as error:
         if error.response["Error"]["Code"] == "ResourceNotFoundException":
             return None
@@ -166,27 +170,26 @@ def _registered_app(client) -> GitHubAppSecret | None:
     return GitHubAppSecret.model_validate_json(value)
 
 
-def _store_app(client, app: GitHubAppSecret) -> None:
+def store_app(app: GitHubAppSecret) -> None:
     """Create the secret on the first registration, else store a new version of it."""
     # The secret lives outside the aws stack, so make destroy keeps it and the next make up reuses the app.
     try:
-        client.create_secret(Name=GITHUB_APP_SECRET, SecretString=app.model_dump_json(), Tags=SECRET_TAGS)
+        secretsmanager().create_secret(Name=GITHUB_APP_SECRET, SecretString=app.model_dump_json(), Tags=SECRET_TAGS)
     except ClientError as error:
         if error.response["Error"]["Code"] != "ResourceExistsException":
             raise
-        client.put_secret_value(SecretId=GITHUB_APP_SECRET, SecretString=app.model_dump_json())
+        secretsmanager().put_secret_value(SecretId=GITHUB_APP_SECRET, SecretString=app.model_dump_json())
 
 
-def _require_registered_app() -> GitHubAppSecret:
-    app = _registered_app(boto3.client("secretsmanager"))
+def require_registered_app() -> GitHubAppSecret:
+    app = registered_app()
     if app is None:
-        sys.exit("The GitHub App is not registered yet: run make github-app")
+        sys.exit("The GitHub App is not registered yet: run make github-app, then make up again.")
     return app
 
 
 def register(args: argparse.Namespace) -> None:
-    client = boto3.client("secretsmanager")
-    existing = _registered_app(client)
+    existing = registered_app()
     if existing and not args.force:
         sys.exit(
             f"GitHub App {existing.slug} is already registered. To register a new one, delete it in the GitHub "
@@ -200,7 +203,7 @@ def register(args: argparse.Namespace) -> None:
 
         def on_code(code: str) -> str:
             app = convert(http, code)
-            _store_app(client, app)
+            store_app(app)
             print(f"Registered GitHub App {app.slug} (stored in {GITHUB_APP_SECRET}).")
             print("Next: make up creates the demo repository and prints the link to install the app on it.")
             slug = html.escape(app.slug)
@@ -229,7 +232,7 @@ def sync_slug(http: httpx.Client, app: GitHubAppSecret) -> GitHubAppSecret:
     if slug == app.slug:
         return app
     renamed = app.model_copy(update={"slug": slug})
-    _store_app(boto3.client("secretsmanager"), renamed)
+    store_app(renamed)
     print(f"GitHub App slug: {app.slug} -> {slug}")
     return renamed
 
@@ -249,18 +252,22 @@ def sync_webhook(http: httpx.Client, app: GitHubAppSecret, url: str) -> None:
 
 
 def sync(args: argparse.Namespace) -> None:
-    app = _require_registered_app()
+    app = require_registered_app()
     with httpx.Client(timeout=20) as http:
         app = sync_slug(http, app)
         sync_webhook(http, app, args.url)
 
 
 def print_installation_id(args: argparse.Namespace) -> None:
-    app = _require_registered_app()
+    app = require_registered_app()
     with httpx.Client(timeout=20) as http:
         found = installation_id(http, app, args.owner, args.repo)
     if found is None:
-        sys.exit(f"Action needed: install GitHub App {app.slug} on {args.owner}/{args.repo}: {install_url(app)}")
+        install_url = f"https://github.com/apps/{app.slug}/installations/new"
+        print(
+            f"Action needed: install GitHub App {app.slug} on {args.owner}/{args.repo}: {install_url}", file=sys.stderr
+        )
+        sys.exit(NOT_INSTALLED_EXIT_STATUS)
     print(found)
 
 

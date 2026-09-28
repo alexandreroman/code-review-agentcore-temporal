@@ -31,6 +31,11 @@ def fix_refusal_marker(workflow_id: str, delivery_id: str) -> str:
     return f"<!-- fix-refused:{workflow_id}:{delivery_id} -->"
 
 
+def fix_failure_marker(workflow_id: str, fix_number: int) -> str:
+    """Marks the bot's note on a failed fix, keyed on its number: posted once, whatever the retries."""
+    return f"<!-- fix-failed:{workflow_id}:{fix_number} -->"
+
+
 def idle_warning_marker(workflow_id: str, idle_since: datetime) -> str:
     """Marks the warning of one idle period, keyed on its start: posted once, whatever the retries or replays."""
     return f"<!-- idle-warning:{workflow_id}:{int(idle_since.timestamp())} -->"

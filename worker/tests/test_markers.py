@@ -33,7 +33,7 @@ def test_the_last_finding_numbers_read_every_marker_per_category():
     texts = [
         f"{finding_marker('S-09')} a\n\n{finding_marker('S-10')} b",
         finding_marker("P-07"),
-        finding_marker("F-040"),  # an earlier numbering scheme: ignored
+        finding_marker("F-040"),
         None,
     ]
     assert last_finding_numbers(texts) == {Category.SECURITY: 10, Category.PERFORMANCE: 7}

@@ -9,6 +9,7 @@ import httpx2 as httpx
 import jwt
 
 API_URL = "https://api.github.com"
+GITHUB_JSON = "application/vnd.github+json"
 TOKEN_REFRESH_MARGIN = 300.0
 DEFAULT_RATE_LIMIT_WAIT = 60.0
 
@@ -94,12 +95,12 @@ class GitHubApp:
             f"/app/installations/{installation_id}/access_tokens",
             headers={
                 "Authorization": f"Bearer {app_jwt(self._client_id, self._private_key)}",
-                "Accept": "application/vnd.github+json",
+                "Accept": GITHUB_JSON,
             },
         )
         raise_for_status(resp)
         data = resp.json()
-        expires_at = datetime.fromisoformat(data["expires_at"].replace("Z", "+00:00")).timestamp()
+        expires_at = datetime.fromisoformat(data["expires_at"]).timestamp()
         self._tokens[installation_id] = _CachedToken(data["token"], expires_at)
         return data["token"]
 
@@ -111,7 +112,7 @@ class GitHubApp:
         *,
         json: object | None = None,
         params: dict | None = None,
-        accept: str = "application/vnd.github+json",
+        accept: str = GITHUB_JSON,
     ) -> httpx.Response:
         token = await self.installation_token(installation_id)
         resp = await self._http.request(

@@ -3,7 +3,7 @@
 import asyncio
 from datetime import timedelta
 
-from agentcore_review_shared.contract import PULL_REQUEST_WORKFLOW, SIGNAL_PR_UPDATED, PullRequestInput
+from agentcore_review_shared.contract import PULL_REQUEST_WORKFLOW, SIGNAL_PR_UPDATED
 from pydantic import BaseModel
 from temporalio.api.enums.v1 import TaskQueueKind, TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
@@ -18,20 +18,12 @@ from .routing import StartOrSignal
 RPC_TIMEOUT = timedelta(seconds=5)
 
 
-async def start_or_signal(
-    client: Client, action: StartOrSignal, idle_warning_seconds: int, idle_close_seconds: int
-) -> bool:
-    """SignalWithStart(pr_updated). False when the reuse policy refuses a new run (a late event on a finished PR).
-
-    The idle durations only reach a new run: a running workflow keeps those it started with.
-    """
-    workflow_input = PullRequestInput(
-        pr=action.pr, idle_warning_seconds=idle_warning_seconds, idle_close_seconds=idle_close_seconds
-    )
+async def start_or_signal(client: Client, action: StartOrSignal) -> bool:
+    """SignalWithStart(pr_updated). False when the reuse policy refuses a new run (a late event on a finished PR)."""
     try:
         await client.start_workflow(
             PULL_REQUEST_WORKFLOW,
-            workflow_input,
+            action.input,
             id=action.workflow_id,
             task_queue=action.task_queue,
             id_reuse_policy=action.reuse_policy,

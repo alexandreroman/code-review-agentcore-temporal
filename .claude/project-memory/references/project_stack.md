@@ -6,19 +6,18 @@ type: project
 
 # Stack choices
 
-- Temporal Cloud is authenticated with mTLS client certificates, not API
-  keys. Serverless Workers on AgentCore is a prerelease feature enabled on
-  the namespace.
-- Claude is called through Amazon Bedrock with the Strands `BedrockModel`
-  (Converse API), signed with the caller's AWS credentials: the runtime
-  role on AgentCore, the developer's credentials in the dev worker. The
-  project has no Anthropic API key and no direct Anthropic API client.
-- Python, because the Temporal Python SDK is the only one with an official
+- Temporal Cloud authenticates every client with mTLS certificates.
+  Serverless Workers on AgentCore is a prerelease feature enabled on the
+  namespace.
+- Claude is reached only through Amazon Bedrock, authorized by the
+  caller's IAM identity (the runtime role on AgentCore, the developer's
+  credentials in the dev worker).
+- Python: the Temporal Python SDK is the only one with an official
   AgentCore sample and the Strands Agents plugin.
 
-**Why:** these follow from the demo goal (Temporal + AgentCore) and from
-the accounts and access actually available; Bedrock keeps every
-credential inside AWS IAM.
+**Why:** Bedrock and mTLS keep every credential inside AWS IAM and the
+certificate pair, and Python gives the demo its AgentCore sample and agent
+plugin.
 
-**How to apply:** model access goes through Bedrock and IAM only; do not
-introduce Temporal API keys or another language.
+**How to apply:** model access through Bedrock and IAM only, Temporal
+access through mTLS only, orchestrator in Python.
