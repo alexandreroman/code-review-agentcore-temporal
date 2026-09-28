@@ -24,6 +24,7 @@ from agentcore_review_worker.publishing import (
     no_longer_open_reply,
     not_open_fix_comment,
     off_thread_fix_reply,
+    reopen_comment,
     reply_body,
     split_changes,
     unavailable_check_output,
@@ -207,6 +208,17 @@ def test_the_idle_close_comment_gives_the_idle_duration():
     assert idle_close_comment(900, "<!-- m -->") == (
         "Closed after 15 minutes without activity. Reopen it for a new review.\n\n<!-- m -->"
     )
+
+
+def test_the_reopen_comment_announces_the_next_round_after_the_earlier_threads():
+    assert reopen_comment(2, "<!-- m -->") == (
+        "Reopened: a new review starts. The earlier finding threads still open are resolved first, then round 3 "
+        "reviews the whole pull request; this takes a few minutes.\n\n<!-- m -->"
+    )
+
+
+def test_the_reopen_comment_without_an_earlier_round_only_announces_the_review():
+    assert reopen_comment(0, "<!-- m -->") == "Reopened: a new review starts; it takes a few minutes.\n\n<!-- m -->"
 
 
 def test_a_fix_refused_in_a_thread_points_to_both_ways_of_fixing():

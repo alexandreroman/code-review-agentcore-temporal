@@ -46,6 +46,11 @@ def idle_close_marker(workflow_id: str, idle_since: datetime) -> str:
     return f"<!-- idle-close:{workflow_id}:{int(idle_since.timestamp())} -->"
 
 
+def reopen_marker(workflow_id: str, run_id: str) -> str:
+    """Marks the comment announcing the new review of a reopened pull request: once per run, whatever the retries."""
+    return f"<!-- reopen:{workflow_id}:{run_id} -->"
+
+
 def superseded_marker(workflow_id: str, thread_root_id: int) -> str:
     """Marks the note that closes an earlier run's finding thread once a new run takes over: posted once."""
     return f"<!-- superseded:{workflow_id}:{thread_root_id} -->"

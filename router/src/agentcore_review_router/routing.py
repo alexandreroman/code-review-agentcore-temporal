@@ -140,6 +140,7 @@ def _route_pull_request(payload: dict, delivery_id: str, config: RouterConfig) -
                 pr=ref,
                 idle_warning_seconds=config.idle_warning_seconds,
                 idle_close_seconds=config.idle_close_seconds,
+                reopened=(action == "reopened"),
             ),
             signal=PrUpdated(head_sha=pull_request["head"]["sha"], delivery_id=delivery_id),
             reuse_policy=policy,

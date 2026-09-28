@@ -34,14 +34,14 @@ def load(name: str) -> dict:
 
 
 @pytest.mark.parametrize(
-    ("action", "policy"),
+    ("action", "policy", "reopened"),
     [
-        ("opened", WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY),
-        ("synchronize", WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY),
-        ("reopened", WorkflowIDReusePolicy.ALLOW_DUPLICATE),
+        ("opened", WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY, False),
+        ("synchronize", WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY, False),
+        ("reopened", WorkflowIDReusePolicy.ALLOW_DUPLICATE, True),
     ],
 )
-def test_pr_updates_start_or_signal(action, policy):
+def test_pr_updates_start_or_signal(action, policy, reopened):
     payload = load("pull_request")
     payload["action"] = action
     result = route("pull_request", payload, "delivery-1", CONFIG)
@@ -53,6 +53,7 @@ def test_pr_updates_start_or_signal(action, policy):
         pr=PrRef(owner="octocat", repo="agentcore-review-demo-app", number=3, installation_id=90210),
         idle_warning_seconds=600,
         idle_close_seconds=900,
+        reopened=reopened,
     )
 
 

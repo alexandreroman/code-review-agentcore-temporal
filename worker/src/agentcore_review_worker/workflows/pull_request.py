@@ -220,9 +220,14 @@ class PullRequestWorkflow:
     async def _take_over_earlier_run(self) -> None:
         """Continue the numbering an earlier run of this workflow ID left on GitHub, then close its open threads.
 
+        A reopen is announced in between, before the slow part: closing the threads and the new round.
+
         Numbering from 1 again would collide with that run's round markers, finding IDs and Review-Fix trailers.
         """
         await self._recover_counters()
+        # Only a reopen is announced: a run that replaces a failed one takes over silently.
+        if self._input.reopened:
+            await self._announce_reopen()
         # Without an earlier round there is no earlier finding thread: a new pull request skips the closing.
         if self._state.round > 0:
             await self._close_earlier_threads()
@@ -245,6 +250,16 @@ class PullRequestWorkflow:
         self._state.last_finding_numbers = recovered.last_finding_numbers
         self._state.fix_count = recovered.last_fix_number
         workflow.logger.info("numbering continues after %s", recovered)
+
+    async def _announce_reopen(self) -> None:
+        """Best effort: closing the earlier threads and the new round take minutes, the author learns why at once."""
+        # Keyed on the run: a retry posts nothing more, and each reopen gets its own comment.
+        marker = markers.reopen_marker(self._id, workflow.info().run_id)
+        body = publishing.reopen_comment(self._state.round, marker)
+        try:
+            await self._post_comment(body, marker, "reopen")
+        except ActivityError as error:
+            workflow.logger.warning("reopen comment not posted: %s", error.cause or error)
 
     async def _close_earlier_threads(self) -> None:
         """Best effort: an earlier finding thread left open only misleads a reader, the new review goes on."""

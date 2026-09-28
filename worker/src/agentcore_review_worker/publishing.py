@@ -274,6 +274,17 @@ def idle_close_comment(close_seconds: int, marker: str) -> str:
     return f"Closed after {_duration(close_seconds)} without activity. Reopen it for a new review.\n\n{marker}"
 
 
+def reopen_comment(earlier_round: int, marker: str) -> str:
+    """Announces the new review of a reopened pull request; earlier_round is 0 when no earlier round is known."""
+    if earlier_round == 0:
+        return f"Reopened: a new review starts; it takes a few minutes.\n\n{marker}"
+    # The new run starts with no reviewed SHA: its first round reviews every changed file, not a delta.
+    return (
+        f"Reopened: a new review starts. The earlier finding threads still open are resolved first, then round "
+        f"{earlier_round + 1} reviews the whole pull request; this takes a few minutes.\n\n{marker}"
+    )
+
+
 def _repository_path(raw: str) -> str | None:
     """The path in its plain form ("./src//A.java" gives "src/A.java"), or None when it is not a repository file."""
     text = raw.strip()

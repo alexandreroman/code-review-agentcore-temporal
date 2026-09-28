@@ -123,3 +123,5 @@ class PullRequestInput(BaseModel):
     # Seconds without activity before the warning comment, then before the pull request is closed.
     idle_warning_seconds: int
     idle_close_seconds: int
+    # The run was started by a reopen: the bot announces the new review.
+    reopened: bool = False
