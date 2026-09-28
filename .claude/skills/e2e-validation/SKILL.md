@@ -279,7 +279,7 @@ completed before the kill needed one attempt; at least one activity
 scheduled before the kill was retried (attempt 2 or more), on a session
 that was not killed.
 
-Success for E2E-03: from the execution start to the second `set_check`
+Success for E2E-03: from the execution start to the second `UpdateCheck`
 completion (the round's conclusion) takes at most 180 s, the bot published
 exactly one `COMMENTED` review, and `AI Review` is `failure` (the SQL
 injection is at least `high`).

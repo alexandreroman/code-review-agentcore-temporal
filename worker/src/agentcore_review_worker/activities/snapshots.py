@@ -38,7 +38,7 @@ class SnapshotActivities:
     def __init__(self, settings: AppSettings) -> None:
         self._bucket = settings.snapshots_bucket
 
-    @activity.defn(name="snapshot_repo")
+    @activity.defn(name="Snapshot")
     async def snapshot_repo(self, input: SnapshotInput) -> SnapshotRef:
         """Archive the repository at `sha` into S3; a no-op when the key already exists."""
         pr = input.pr
@@ -60,7 +60,7 @@ class SnapshotActivities:
             await _heartbeating(asyncio.to_thread(s3().upload_file, str(archive), self._bucket, key))
         return ref
 
-    @activity.defn(name="delete_snapshots")
+    @activity.defn(name="DeleteSnapshots")
     async def delete_snapshots(self, pr: PrRef) -> int:
         """Delete every snapshot of the pull request; deleting nothing is not an error."""
         return await asyncio.to_thread(_delete_prefix, self._bucket, snapshot_prefix(pr.owner, pr.repo, pr.number))

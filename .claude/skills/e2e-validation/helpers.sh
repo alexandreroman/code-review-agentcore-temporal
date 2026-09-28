@@ -152,7 +152,7 @@ agentcore_pollers() {
     jqe 'include "e2e"; agentcore_identities' >"$1"
 }
 
-# round_published WORKFLOW_ID ROUND: the parent completed 2 x ROUND set_check activities.
+# round_published WORKFLOW_ID ROUND: the parent completed 2 x ROUND UpdateCheck activities.
 round_published() {
   local file
   file=$(fetch_history "$1") || return 1

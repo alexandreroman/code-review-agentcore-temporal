@@ -1,4 +1,4 @@
-"""FixerWorkflow: an agent writes the fix, then commit_changes pushes it as one commit.
+"""FixerWorkflow: an agent writes the fix, then CommitFix pushes it as one commit.
 
 The commit runs here rather than in the parent: a FixPlan holds whole files, and the parent's history
 only carries metadata. The parent gets the commit SHA back.
@@ -10,7 +10,7 @@ from agentcore_review_worker.workflows import policies
 from agentcore_review_worker.workflows.agents import AGENT_FAILURES, navigation_tools, run_agent
 
 with workflow.unsafe.imports_passed_through():
-    from agentcore_review_worker import prompts
+    from agentcore_review_worker import prompts, summaries
     from agentcore_review_worker.models import CommitInput, CommitResult, FixerInput, FixPlan
 
 
@@ -33,5 +33,9 @@ class FixerWorkflow:
             plan=plan,
         )
         return await workflow.execute_activity(
-            "commit_changes", commit, result_type=CommitResult, **policies.COMMIT_CHANGES
+            "CommitFix",
+            commit,
+            result_type=CommitResult,
+            summary=summaries.commit(input.fix_number, len(plan.changes)),
+            **policies.COMMIT_FIX,
         )

@@ -34,3 +34,4 @@
 - [No maintainer specifics in public files](references/feedback_no_maintainer_specifics.md) — generic docker, no Casper in public files
 - [Tests cover business logic only](references/feedback_tests_business_only.md) — pure review/routing logic only; no plumbing or constant tests
 - [Lean, optimized artifacts](references/feedback_lean_artifacts.md) — small images/zips from the start, few moving parts
+- [Temporal UI labels and details](references/project_temporal_ui_labels.md) — short activity type names, summaries hold the detail only

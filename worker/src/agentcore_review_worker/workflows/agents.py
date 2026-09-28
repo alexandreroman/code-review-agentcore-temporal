@@ -2,9 +2,11 @@
 
 A TemporalAgent runs the Strands loop inside the workflow: each model call is the plugin's activity,
 each tool call is an activity (Glob, Grep, Read), and hooks run deterministically in workflow code.
+Each tool activity's summary shows the call's arguments in Temporal UI (e.g. Read `app/main.py:1-400`).
 """
 
 import copy
+from collections.abc import Callable
 from typing import Any, cast
 
 from strands.hooks import BeforeModelCallEvent, BeforeToolCallEvent, HookProvider, HookRegistry
@@ -25,6 +27,7 @@ from agentcore_review_worker.workflows.policies import MODEL_ACTIVITY, TOOL_ACTI
 with workflow.unsafe.imports_passed_through():
     from pydantic import BaseModel
 
+    from agentcore_review_worker import summaries
     from agentcore_review_worker.activities import tools as navigation_activities
     from agentcore_review_worker.limits import HARD_TURN_LIMIT, budget_message, tool_call_allowed
     from agentcore_review_worker.models import MODEL_NAME, SnapshotRef
@@ -60,13 +63,18 @@ class RoundLimit(HookProvider):
 
 
 class _SnapshotBound(AgentTool):
-    """A navigation activity shown to the model without its `snapshot` parameter, which the workflow fills in."""
+    """A navigation activity shown to the model without its `snapshot` parameter, which the workflow fills in.
 
-    def __init__(self, tool: AgentTool, snapshot: SnapshotRef) -> None:
+    activity_as_tool only takes a static summary: each call wraps the activity again, with a summary built
+    from the model's arguments.
+    """
+
+    def __init__(self, activity_fn: Callable, snapshot: SnapshotRef) -> None:
         super().__init__()
-        self._tool = tool
+        self._activity_fn = activity_fn
+        self._tool = activity_as_tool(activity_fn, **TOOL_ACTIVITY)
         self._snapshot = snapshot.model_dump(mode="json")
-        spec = copy.deepcopy(tool.tool_spec)
+        spec = copy.deepcopy(self._tool.tool_spec)
         schema = spec["inputSchema"]["json"]
         schema.pop("$defs", None)
         schema["properties"].pop("snapshot")
@@ -86,14 +94,16 @@ class _SnapshotBound(AgentTool):
         return self._tool.tool_type
 
     async def stream(self, tool_use: ToolUse, invocation_state: dict[str, Any], **kwargs: Any) -> ToolGenerator:
+        summary = summaries.tool_call(self.tool_name, tool_use["input"])
+        tool = activity_as_tool(self._activity_fn, **TOOL_ACTIVITY, summary=summary)
         bound = cast(ToolUse, {**tool_use, "input": {**tool_use["input"], "snapshot": self._snapshot}})
-        async for event in self._tool.stream(bound, invocation_state, **kwargs):
+        async for event in tool.stream(bound, invocation_state, **kwargs):
             yield event
 
 
 def navigation_tools(snapshot: SnapshotRef) -> list[AgentTool]:
     activities = (navigation_activities.glob_tool, navigation_activities.grep_tool, navigation_activities.read_tool)
-    return [_SnapshotBound(activity_as_tool(fn, **TOOL_ACTIVITY), snapshot) for fn in activities]
+    return [_SnapshotBound(fn, snapshot) for fn in activities]
 
 
 async def run_agent[T: BaseModel](

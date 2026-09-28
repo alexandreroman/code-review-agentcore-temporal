@@ -4,6 +4,9 @@ from datetime import timedelta
 
 from temporalio import workflow
 
+with workflow.unsafe.imports_passed_through():
+    from agentcore_review_worker import summaries
+
 
 @workflow.defn(name="Ping")
 class PingWorkflow:
@@ -11,5 +14,9 @@ class PingWorkflow:
     async def run(self, message: str) -> str:
         # Called by name so this module never imports the activity module.
         return await workflow.execute_activity(
-            "ping", message, start_to_close_timeout=timedelta(seconds=30), result_type=str
+            "Ping",
+            message,
+            start_to_close_timeout=timedelta(seconds=30),
+            result_type=str,
+            summary=summaries.fit(message),
         )

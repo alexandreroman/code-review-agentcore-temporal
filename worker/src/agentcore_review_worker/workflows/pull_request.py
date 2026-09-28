@@ -36,7 +36,7 @@ with workflow.unsafe.imports_passed_through():
         PullRequestInput,
     )
 
-    from agentcore_review_worker import lifecycle, markers, publishing
+    from agentcore_review_worker import lifecycle, markers, publishing, summaries
     from agentcore_review_worker.batching import make_batches
     from agentcore_review_worker.models import (
         BatchInput,
@@ -204,7 +204,7 @@ class PullRequestWorkflow:
         marker = markers.idle_warning_marker(self._id, state.idle_since)
         body = publishing.idle_warning_comment(self._idle_warning_seconds, self._idle_close_seconds, marker)
         try:
-            await self._post_comment(body, marker)
+            await self._post_comment(body, marker, "idle warning")
         except ActivityError as error:
             workflow.logger.warning("idle warning not posted: %s", error.cause or error)
 
@@ -214,7 +214,7 @@ class PullRequestWorkflow:
         assert state.idle_since is not None  # set by run() before the first wait
         marker = markers.idle_close_marker(self._id, state.idle_since)
         try:
-            await workflow.execute_activity("close_pull_request", self._pr, **policies.CLOSE_PULL_REQUEST)
+            await workflow.execute_activity("ClosePR", self._pr, summary="inactivity", **policies.CLOSE_PR)
         except ActivityError as error:
             workflow.logger.error("pull request not closed for inactivity: %s", error.cause or error)
             lifecycle.start_idle(state, workflow.now())
@@ -222,7 +222,8 @@ class PullRequestWorkflow:
         # GitHub's closed webhook signals this run while it ends, or finds none: harmless either way.
         self._memo("closed for inactivity")
         try:
-            await self._post_comment(publishing.idle_close_comment(self._idle_close_seconds, marker), marker)
+            body = publishing.idle_close_comment(self._idle_close_seconds, marker)
+            await self._post_comment(body, marker, "idle close")
         except ActivityError as error:
             workflow.logger.warning("inactivity comment not posted: %s", error.cause or error)
         await self._delete_snapshots()
@@ -243,10 +244,11 @@ class PullRequestWorkflow:
         phase = "waiting for changes"
         try:
             change = await workflow.execute_activity(
-                "list_changed_files",
+                "ListFiles",
                 ListFilesInput(pr=self._pr, since_sha=state.last_reviewed_sha),
                 result_type=ChangeSet,
-                **policies.LIST_CHANGED_FILES,
+                summary=summaries.list_files(state.last_reviewed_sha),
+                **policies.LIST_FILES,
             )
             if change.head_sha == state.last_reviewed_sha:
                 return  # a late signal for a head already reviewed
@@ -269,7 +271,7 @@ class PullRequestWorkflow:
                 phase = f"round {state.round} failed, waiting for changes"
                 reason = f"Round {state.round} failed: {error.cause or error}. Push a commit to retry."
                 try:
-                    await self._complete_check(check, "failure", "AI Review failed", reason)
+                    await self._complete_check(check, state.round, "failure", "AI Review failed", reason)
                 except ActivityError as failure:
                     workflow.logger.warning(
                         "could not report the failed round on the check: %s", failure.cause or failure
@@ -285,15 +287,17 @@ class PullRequestWorkflow:
             # No review is published for this round: only the check can report the files GitHub did not list.
             state.last_reviewed_sha = change.head_sha
             state.last_reviewed_round = number
-            await self._complete_check(check, *publishing.check_output(state.open_findings, [], change.unlisted))
+            output = publishing.check_output(state.open_findings, [], change.unlisted)
+            await self._complete_check(check, number, *output)
             return True
         snapshot = await self._snapshot(change.head_sha)
         title = f"Round {number}: reviewing {len(change.files)} files"
-        await self._set_check(check.model_copy(update={"title": title}))
+        await self._set_check(check.model_copy(update={"title": title}), number)
         reports, unavailable = await self._run_reviewers(change, snapshot)
         if not reports:
             # Publishing "no new finding" would pass a head nobody reviewed: the check fails instead.
-            await self._complete_check(check, "failure", *publishing.unavailable_check_output(number, unavailable))
+            output = publishing.unavailable_check_output(number, unavailable)
+            await self._complete_check(check, number, "failure", *output)
             return False
         # IDs are committed to the state only once the review is published.
         new, next_finding_number = lifecycle.number_findings(reports, state.next_finding_number)
@@ -334,7 +338,8 @@ class PullRequestWorkflow:
         state.last_reviewed_round = number
         if resolved:
             await self._resolve(resolved)
-        await self._complete_check(check, *publishing.check_output(state.open_findings, unavailable, change.unlisted))
+        output = publishing.check_output(state.open_findings, unavailable, change.unlisted)
+        await self._complete_check(check, number, *output)
         return True
 
     async def _run_reviewers(self, change: ChangeSet, snapshot: SnapshotRef) -> tuple[list[ReviewerReport], list[str]]:
@@ -367,7 +372,8 @@ class PullRequestWorkflow:
                     reviewer,
                     id=child_id,
                     run_timeout=policies.CHILD_RUN_TIMEOUT,
-                    static_summary=f"{label} reviewer",
+                    static_summary=label,
+                    static_details=summaries.file_list(reviewer.batch.paths),
                 )
 
         results = await asyncio.gather(*(review(*job) for job in jobs), return_exceptions=True)
@@ -392,7 +398,10 @@ class PullRequestWorkflow:
                 input,
                 id=_synthesis_workflow_id(self._id, self._state.round),
                 run_timeout=policies.CHILD_RUN_TIMEOUT,
-                static_summary="synthesis",
+                static_summary=f"round {self._state.round}",
+                static_details=summaries.synthesis_details(
+                    len(input.new_findings), len(input.still_open), len(input.resolved_ids), len(input.unavailable)
+                ),
             )
         except ChildWorkflowError as error:
             workflow.logger.warning("synthesis failed, deterministic merge instead: %s", error.cause or error)
@@ -402,25 +411,31 @@ class PullRequestWorkflow:
         """The IDs of the inline comments, by finding ID."""
         try:
             return await workflow.execute_activity(
-                "publish_review", input, result_type=dict[str, int], **policies.PUBLISH_REVIEW
+                "PublishReview",
+                input,
+                result_type=dict[str, int],
+                summary=summaries.publish(input.content.round, len(input.content.findings), inline=True),
+                **policies.PUBLISH_REVIEW,
             )
         except ActivityError as error:
             if not policies.failed_with(error, "GitHubUnprocessable"):
                 raise
             workflow.logger.warning("GitHub refused the inline comments: every finding goes into the review body")
             return await workflow.execute_activity(
-                "publish_review",
+                "PublishReview",
                 input.model_copy(update={"inline": False}),
                 result_type=dict[str, int],
+                summary=summaries.publish(input.content.round, len(input.content.findings), inline=False),
                 **policies.PUBLISH_REVIEW,
             )
 
     async def _resolve(self, finding_ids: list[str]) -> None:
         try:
             await workflow.execute_activity(
-                "resolve_threads",
+                "ResolveThreads",
                 ResolveInput(pr=self._pr, finding_ids=finding_ids),
                 result_type=int,
+                summary=summaries.finding_ids(finding_ids),
                 **policies.RESOLVE_THREADS,
             )
         except ActivityError as error:
@@ -429,7 +444,11 @@ class PullRequestWorkflow:
     async def _snapshot(self, sha: str) -> SnapshotRef:
         try:
             return await workflow.execute_activity(
-                "snapshot_repo", SnapshotInput(pr=self._pr, sha=sha), result_type=SnapshotRef, **policies.SNAPSHOT_REPO
+                "Snapshot",
+                SnapshotInput(pr=self._pr, sha=sha),
+                result_type=SnapshotRef,
+                summary=summaries.short_sha(sha),
+                **policies.SNAPSHOT,
             )
         except ActivityError as error:
             if not policies.failed_with(error, "SnapshotTooLarge"):
@@ -438,12 +457,15 @@ class PullRequestWorkflow:
             pr = self._pr
             return SnapshotRef(owner=pr.owner, repo=pr.repo, installation_id=pr.installation_id, sha=sha)
 
-    async def _set_check(self, check: CheckInput) -> None:
-        await workflow.execute_activity("set_check", check, **policies.SET_CHECK)
+    async def _set_check(self, check: CheckInput, round_number: int) -> None:
+        summary = summaries.check(round_number, check.status, check.conclusion)
+        await workflow.execute_activity("UpdateCheck", check, summary=summary, **policies.UPDATE_CHECK)
 
-    async def _complete_check(self, check: CheckInput, conclusion: str, title: str, summary: str) -> None:
+    async def _complete_check(
+        self, check: CheckInput, round_number: int, conclusion: str, title: str, summary: str
+    ) -> None:
         update = {"status": "completed", "conclusion": conclusion, "title": title, "summary": summary}
-        await self._set_check(check.model_copy(update=update))
+        await self._set_check(check.model_copy(update=update), round_number)
 
     # --- fix ---
 
@@ -478,7 +500,8 @@ class PullRequestWorkflow:
                 fixer,
                 id=_fixer_workflow_id(self._id, state.fix_count),
                 run_timeout=policies.CHILD_RUN_TIMEOUT,
-                static_summary="fixer",
+                static_summary=summaries.finding_ids([f.id for f in plan.findings]),
+                static_details=summaries.finding_list(plan.findings),
             )
             # The commit's synchronize webhook brings the incremental round; the bot's commit never asks for a fix.
             workflow.logger.info("fix %d pushed as %s (rejected: %s)", state.fix_count, result.sha, result.rejected)
@@ -495,10 +518,10 @@ class PullRequestWorkflow:
         try:
             if refusal.thread_finding_id is not None and request.thread_root_id is not None:
                 body = publishing.off_thread_fix_reply(refusal.thread_finding_id, request.finding_ids, marker)
-                await self._post_reply(request.thread_root_id, body, marker)
+                await self._post_reply(request.thread_root_id, body, marker, refusal.thread_finding_id)
             else:
                 body = publishing.not_open_fix_comment(refusal.not_open_ids, self._state.open_findings, marker)
-                await self._post_comment(body, marker)
+                await self._post_comment(body, marker, "fix refused")
         except ActivityError as error:
             workflow.logger.warning("fix refusal not posted: %s", error.cause or error)
 
@@ -517,13 +540,14 @@ class PullRequestWorkflow:
         self._memo(f"answering @{reply.author} on {finding.id}")
         try:
             thread: ThreadRead = await workflow.execute_activity(
-                "read_thread",
+                "ReadThread",
                 ThreadInput(pr=self._pr, thread_root_id=reply.thread_root_id),
                 result_type=ThreadRead,
+                summary=finding.id,
                 **policies.READ_THREAD,
             )
             if not lifecycle.reply_budget_left(publishing.bot_answers(thread.comments, thread.bot_login)):
-                await self._post_reply(reply.thread_root_id, publishing.budget_reply(marker), marker)
+                await self._post_reply(reply.thread_root_id, publishing.budget_reply(marker), marker, finding.id)
                 return
             assert state.last_reviewed_sha is not None  # a finding exists only after a published round
             snapshot = await self._snapshot(state.last_reviewed_sha)
@@ -536,13 +560,15 @@ class PullRequestWorkflow:
                     DiscussionInput(finding=finding, thread=comments, author=reply.author, snapshot=snapshot),
                     id=_discussion_workflow_id(self._id, number),
                     run_timeout=policies.CHILD_RUN_TIMEOUT,
-                    static_summary="discussion",
+                    static_summary=finding.id,
+                    static_details=f"{summaries.finding_line(finding)}\n\nReply by @{reply.author}",
                 )
             except ChildWorkflowError as error:
                 workflow.logger.error("discussion %d failed: %s", number, error.cause or error)
-                await self._post_reply(reply.thread_root_id, publishing.failed_reply(marker), marker)
+                await self._post_reply(reply.thread_root_id, publishing.failed_reply(marker), marker, finding.id)
                 return
-            await self._post_reply(reply.thread_root_id, publishing.reply_body(finding.id, answer, marker), marker)
+            body = publishing.reply_body(finding.id, answer, marker)
+            await self._post_reply(reply.thread_root_id, body, marker, finding.id)
             if answer.verdict == "dismiss":
                 lifecycle.dismiss(state, finding.id, answer.answer, reply.author)
                 await self._resolve([finding.id])
@@ -561,20 +587,27 @@ class PullRequestWorkflow:
         if finding_id is None:
             return
         try:
-            await self._post_reply(thread_root_id, publishing.no_longer_open_reply(finding_id, marker), marker)
+            body = publishing.no_longer_open_reply(finding_id, marker)
+            await self._post_reply(thread_root_id, body, marker, finding_id)
         except ActivityError as error:
             workflow.logger.warning("no-longer-open answer not posted: %s", error.cause or error)
 
-    async def _post_reply(self, thread_root_id: int, body: str, marker: str) -> None:
+    async def _post_reply(self, thread_root_id: int, body: str, marker: str, finding_id: str) -> None:
+        """Reply in the thread of finding_id, which labels the activity in Temporal UI."""
         await workflow.execute_activity(
-            "post_thread_reply",
+            "ReplyInThread",
             ThreadReplyInput(pr=self._pr, thread_root_id=thread_root_id, body=body, marker=marker),
-            **policies.POST_THREAD_REPLY,
+            summary=finding_id,
+            **policies.REPLY_IN_THREAD,
         )
 
-    async def _post_comment(self, body: str, marker: str) -> None:
+    async def _post_comment(self, body: str, marker: str, label: str) -> None:
+        """Comment in the Conversation; label names the comment in Temporal UI (e.g. "idle warning")."""
         await workflow.execute_activity(
-            "post_pr_comment", CommentInput(pr=self._pr, body=body, marker=marker), **policies.POST_PR_COMMENT
+            "PostComment",
+            CommentInput(pr=self._pr, body=body, marker=marker),
+            summary=label,
+            **policies.POST_COMMENT,
         )
 
     async def _refresh_check(self) -> None:
@@ -592,7 +625,8 @@ class PullRequestWorkflow:
         # The round's notes on unavailable reviewers and unlisted files drop out of the check here: accepted,
         # for simplicity, even in the rare round where every listed file was excluded and the check was the
         # only place reporting the unlisted files.
-        await self._complete_check(check, *publishing.check_output(state.open_findings, [], 0))
+        output = publishing.check_output(state.open_findings, [], 0)
+        await self._complete_check(check, state.last_reviewed_round, *output)
 
     # --- end ---
 
@@ -604,7 +638,7 @@ class PullRequestWorkflow:
             marker = markers.closing_marker(self._id)
             body = publishing.closing_comment(closed.closed_by, self._state.open_findings, marker)
             try:
-                await self._post_comment(body, marker)
+                await self._post_comment(body, marker, "closing")
             except ActivityError as error:
                 workflow.logger.warning("closing comment not posted: %s", error.cause or error)
         await self._delete_snapshots()
@@ -617,6 +651,12 @@ class PullRequestWorkflow:
 
     async def _delete_snapshots(self) -> None:
         try:
-            await workflow.execute_activity("delete_snapshots", self._pr, result_type=int, **policies.DELETE_SNAPSHOTS)
+            await workflow.execute_activity(
+                "DeleteSnapshots",
+                self._pr,
+                result_type=int,
+                summary=f"pr-{self._pr.number}",
+                **policies.DELETE_SNAPSHOTS,
+            )
         except ActivityError as error:
             workflow.logger.warning("snapshots not deleted (the S3 lifecycle rule will): %s", error.cause or error)

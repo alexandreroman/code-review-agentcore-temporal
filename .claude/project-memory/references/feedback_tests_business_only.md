@@ -8,7 +8,8 @@ type: feedback
 
 Unit tests cover the business logic: the shared contract, the webhook
 routing and command rules, and the pure review modules the workflows call
-(hunks, batching, navigation, lifecycle, publishing, prompts, limits).
+(hunks, batching, navigation, lifecycle, publishing, prompts, limits,
+summaries).
 Workflows, agents, infrastructure (OpenTofu), the Makefile, the deployment
 tooling (`agentcore_review_tools`) and the runtime plumbing (entry points,
 settings, drain, HTTP clients) have no unit tests; the e2e-validation skill

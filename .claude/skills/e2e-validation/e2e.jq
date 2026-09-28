@@ -39,9 +39,9 @@ def activities:
     else . end)
   | [.[]];
 
-# Completion times of the set_check activities, oldest first. A review round
+# Completion times of the UpdateCheck activities, oldest first. A review round
 # completes two of them: in_progress, then the conclusion.
-def check_updates: [activities[] | select(.name == "set_check" and .completed) | .completed] | sort;
+def check_updates: [activities[] | select(.name == "UpdateCheck" and .completed) | .completed] | sort;
 
 # E2E-02 bookkeeping for one history, around the /kill time $kill.
 def kill_report($kill):

@@ -32,17 +32,17 @@ MODEL_ACTIVITY = {**_options(180, MODEL_RETRY, heartbeat=15), "schedule_to_close
 # A session's first tool call downloads and extracts the snapshot.
 TOOL_ACTIVITY = _options(60, FIVE_ATTEMPTS)
 
-LIST_CHANGED_FILES = _options(30, FIVE_ATTEMPTS)
-SNAPSHOT_REPO = _options(120, FIVE_ATTEMPTS, heartbeat=15)
-FETCH_BATCH_PATCHES = _options(30, FIVE_ATTEMPTS)
-SET_CHECK = _options(15, FIVE_ATTEMPTS)
+LIST_FILES = _options(30, FIVE_ATTEMPTS)
+SNAPSHOT = _options(120, FIVE_ATTEMPTS, heartbeat=15)
+FETCH_DIFF = _options(30, FIVE_ATTEMPTS)
+UPDATE_CHECK = _options(15, FIVE_ATTEMPTS)
 PUBLISH_REVIEW = _options(30, FIVE_ATTEMPTS)
 RESOLVE_THREADS = _options(30, THREE_ATTEMPTS)
 READ_THREAD = _options(15, FIVE_ATTEMPTS)
-POST_THREAD_REPLY = _options(15, FIVE_ATTEMPTS)
-POST_PR_COMMENT = _options(15, FIVE_ATTEMPTS)
-CLOSE_PULL_REQUEST = _options(15, FIVE_ATTEMPTS)
-COMMIT_CHANGES = _options(60, THREE_ATTEMPTS)
+REPLY_IN_THREAD = _options(15, FIVE_ATTEMPTS)
+POST_COMMENT = _options(15, FIVE_ATTEMPTS)
+CLOSE_PR = _options(15, FIVE_ATTEMPTS)
+COMMIT_FIX = _options(60, THREE_ATTEMPTS)
 DELETE_SNAPSHOTS = _options(30, SINGLE_ATTEMPT)  # never fatal: the S3 lifecycle rule is the safety net
 
 # Children never retry: their activities do.

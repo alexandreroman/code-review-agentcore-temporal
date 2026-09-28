@@ -92,7 +92,8 @@ Talking points:
 - **3:00, parallel agents.** The parent starts `…-r1-security`,
   `…-r1-performance` and `…-r1-maintainability`. Open one: each model
   call is an activity; `Grep`, `Glob` and `Read` tool calls explore the
-  whole repository snapshot, not only the diff.
+  whole repository snapshot, not only the diff. The Timeline shows the file
+  or pattern of every `Read`, `Grep` and `Glob` next to its name.
 - **4:00, durability.** The bot replies "N AgentCore sessions stopped".
   The running activity times out on its heartbeat and resumes on a new
   session (attempt 2) about 10 to 25 seconds later; finished model calls

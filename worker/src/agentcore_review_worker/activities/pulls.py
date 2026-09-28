@@ -1,7 +1,7 @@
 """Pull request reads: the files a round reviews, and the patches of one reviewer's batch.
 
 Both read the same comparison, pinned to two SHAs: whatever is pushed during a round, every reviewer gets
-the patches of the head the round snapshotted and publishes on. publish_review reads the pull request's
+the patches of the head the round snapshotted and publishes on. PublishReview reads the pull request's
 comparison at that head too.
 """
 
@@ -21,7 +21,7 @@ class PullActivities:
     def __init__(self, settings: AppSettings) -> None:
         self._max_parallel_agents = settings.max_parallel_agents
 
-    @activity.defn(name="list_changed_files")
+    @activity.defn(name="ListFiles")
     async def list_changed_files(self, input: ListFilesInput) -> ChangeSet:
         """The real head, and the files changed since the last reviewed SHA (the whole pull request at first).
 
@@ -43,9 +43,9 @@ class PullActivities:
             max_parallel_agents=self._max_parallel_agents,
         )
 
-    @activity.defn(name="fetch_batch_patches")
+    @activity.defn(name="FetchDiff")
     async def fetch_batch_patches(self, input: BatchInput) -> BatchPatches:
-        """The patches of a reviewer's files (the comparison list_changed_files read) and the top-level tree."""
+        """The patches of a reviewer's files (the comparison ListFiles read) and the top-level tree."""
         pr = input.pr
         with github_errors():
             raw = await compared_files(pr, input.diff_base, input.head_sha)

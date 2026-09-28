@@ -19,7 +19,7 @@ from .github_api import get, github_errors, repo_path, send
 FILE_MODE = "100644"  # the fixer edits regular source files
 
 
-@activity.defn(name="commit_changes")
+@activity.defn(name="CommitFix")
 async def commit_changes(input: CommitInput) -> CommitResult:
     pr = input.pr
     trailer = fix_trailer(input.workflow_id, input.fix_number)

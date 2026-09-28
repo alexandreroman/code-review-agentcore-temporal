@@ -6,7 +6,7 @@ from agentcore_review_worker.workflows import policies
 from agentcore_review_worker.workflows.agents import AGENT_FAILURES, navigation_tools, run_agent
 
 with workflow.unsafe.imports_passed_through():
-    from agentcore_review_worker import prompts
+    from agentcore_review_worker import prompts, summaries
     from agentcore_review_worker.lifecycle import clean_report
     from agentcore_review_worker.models import BatchPatches, ReviewerInput, ReviewerReport
 
@@ -17,7 +17,11 @@ class ReviewerWorkflow:
     async def run(self, input: ReviewerInput) -> ReviewerReport:
         # The batch's patches go into the first prompt; the tools only add context from the snapshot.
         patches = await workflow.execute_activity(
-            "fetch_batch_patches", input.batch, result_type=BatchPatches, **policies.FETCH_BATCH_PATCHES
+            "FetchDiff",
+            input.batch,
+            result_type=BatchPatches,
+            summary=summaries.diff_files(input.batch.paths),
+            **policies.FETCH_DIFF,
         )
         report = await run_agent(
             name=f"{input.category} reviewer",

@@ -52,7 +52,7 @@ query($owner: String!, $repo: String!, $number: Int!, $after: String) {
 RESOLVE_THREAD = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id}) { thread { isResolved } } }"
 
 
-@activity.defn(name="set_check")
+@activity.defn(name="UpdateCheck")
 async def set_check(input: CheckInput) -> None:
     """Create or update the AI Review check run of a round, found again by its external ID."""
     pr = input.pr
@@ -74,7 +74,7 @@ async def set_check(input: CheckInput) -> None:
             await send(pr, "PATCH", f"{repo_path(pr)}/check-runs/{existing['id']}", body)
 
 
-@activity.defn(name="publish_review")
+@activity.defn(name="PublishReview")
 async def publish_review(input: PublishInput) -> dict[str, int]:
     """Publish the round's single COMMENT review, unless its round marker shows it already exists.
 
@@ -108,7 +108,7 @@ async def publish_review(input: PublishInput) -> dict[str, int]:
     return {fid: c["id"] for c in comments for fid in extract_finding_ids(c.get("body"))}
 
 
-@activity.defn(name="resolve_threads")
+@activity.defn(name="ResolveThreads")
 async def resolve_threads(input: ResolveInput) -> int:
     """Resolve the unresolved threads whose first comment carries a resolved finding's marker.
 
@@ -146,7 +146,7 @@ async def _review_threads(pr: PrRef) -> list[dict]:
         after = page["pageInfo"]["endCursor"]
 
 
-@activity.defn(name="read_thread")
+@activity.defn(name="ReadThread")
 async def read_thread(input: ThreadInput) -> ThreadRead:
     """A finding's review thread, oldest first: GitHub points every reply's in_reply_to_id at the thread's root."""
     pr = input.pr
@@ -164,7 +164,7 @@ async def read_thread(input: ThreadInput) -> ThreadRead:
     )
 
 
-@activity.defn(name="post_thread_reply")
+@activity.defn(name="ReplyInThread")
 async def post_thread_reply(input: ThreadReplyInput) -> None:
     """Reply in a finding's thread once: a retry finds the marker of the earlier attempt among the PR's comments."""
     pr = input.pr
@@ -180,7 +180,7 @@ async def post_thread_reply(input: ThreadReplyInput) -> None:
         )
 
 
-@activity.defn(name="post_pr_comment")
+@activity.defn(name="PostComment")
 async def post_pr_comment(input: CommentInput) -> None:
     """Comment in the Conversation once: a retry finds the marker of the earlier attempt among its comments."""
     pr = input.pr
@@ -191,7 +191,7 @@ async def post_pr_comment(input: CommentInput) -> None:
         await send(pr, "POST", f"{repo_path(pr)}/issues/{pr.number}/comments", {"body": input.body})
 
 
-@activity.defn(name="close_pull_request")
+@activity.defn(name="ClosePR")
 async def close_pull_request(pr: PrRef) -> None:
     """Close the pull request; closing a closed one changes nothing, so a retry is harmless."""
     with github_errors():
