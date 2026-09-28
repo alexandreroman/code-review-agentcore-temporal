@@ -33,6 +33,7 @@ from .github_api import (
     send,
     spaced_write,
 )
+from .pulls import compared_files
 
 CHECK_NAME = "AI Review"
 
@@ -77,8 +78,11 @@ async def set_check(input: CheckInput) -> None:
 async def publish_review(input: PublishInput) -> dict[str, int]:
     """Publish the round's single COMMENT review, unless its round marker shows it already exists.
 
-    Inline comments are validated against the pull request's hunks at the head; GitHub still answers
-    422 for the whole review if one is refused, and the workflow then republishes with inline=False.
+    Inline comments are validated against the pull request's hunks at the round's head, read from the
+    comparison pinned to its SHAs so that a push during the round cannot shift them. A finding on a file
+    the comparison does not list (beyond its 300 files) has no known hunk and goes into the body. GitHub
+    still answers 422 for the whole review if one is refused, and the workflow then republishes with
+    inline=False.
     """
     pr = input.pr
     marker = round_marker(input.workflow_id, input.content.round)
@@ -86,7 +90,7 @@ async def publish_review(input: PublishInput) -> dict[str, int]:
         reviews = await get_pages(pr, f"{repo_path(pr)}/pulls/{pr.number}/reviews")
         review = next((r for r in reviews if marker in (r.get("body") or "")), None)
         if review is None:
-            files = await get_pages(pr, f"{repo_path(pr)}/pulls/{pr.number}/files")
+            files = await compared_files(pr, input.pr_base_sha, input.head_sha)
             commentable = {f["filename"]: commentable_lines(f.get("patch")) for f in files}
             payload = build_review(input.content, commentable, marker, inline=input.inline)
             review = await send(

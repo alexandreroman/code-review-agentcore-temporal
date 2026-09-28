@@ -70,11 +70,11 @@ def _line(finding: Finding) -> str:
     return f"- **{finding.id}** {finding.severity} · `{finding.path}:{finding.line}` · {finding.title}"
 
 
-def _file_list(paths: list[str]) -> str:
+def _file_lines(paths: list[str]) -> list[str]:
     lines = [f"- `{p}`" for p in paths[:MAX_LISTED_FILES]]
     if len(paths) > MAX_LISTED_FILES:
         lines.append(f"- … and {len(paths) - MAX_LISTED_FILES} more")
-    return "\n".join(lines)
+    return lines
 
 
 def split_inline(
@@ -108,12 +108,10 @@ def build_review(content: ReviewContent, commentable: dict[str, set[int]], marke
     if content.still_open:
         still_open = "\n".join(_line(f) for f in sorted(content.still_open, key=sort_key))
         sections.append("### Still open from earlier rounds\n\n" + still_open)
-    if content.excluded or content.unlisted:
-        not_reviewed = [_file_list(content.excluded)] if content.excluded else []
-        if content.unlisted:
-            not_reviewed.append(
-                f"- {_count(content.unlisted, 'more file')} that GitHub does not list: too many changes"
-            )
+    not_reviewed = _file_lines(content.excluded)
+    if content.unlisted:
+        not_reviewed.append(f"- {_count(content.unlisted, 'more file')} that GitHub does not list: too many changes")
+    if not_reviewed:
         sections.append("### Not reviewed\n\n" + "\n".join(not_reviewed))
     if content.unavailable:
         sections.append(
@@ -126,9 +124,12 @@ def build_review(content: ReviewContent, commentable: dict[str, set[int]], marke
 
 
 def check_output(
-    open_findings: list[Finding], unavailable: list[str]
+    open_findings: list[Finding], unavailable: list[str], unlisted: int
 ) -> tuple[Literal["success", "failure"], str, str]:
-    """Conclusion, title and summary of a completed round's check; `unavailable` names the reviewers that failed."""
+    """Conclusion, title and summary of a completed round's check.
+
+    `unavailable` names the reviewers that failed, `unlisted` counts the changed files GitHub did not list.
+    """
     blocking = sum(f.severity.blocking for f in open_findings)
     conclusion: Literal["success", "failure"] = "failure" if blocking else "success"
     if open_findings:
@@ -142,6 +143,10 @@ def check_output(
     if unavailable:
         title += f", {_count(len(unavailable), 'reviewer')} unavailable"
         lines += ["", f"Not reviewed in this round (reviewer unavailable): {', '.join(unavailable)}."]
+    if unlisted:
+        files = _count(unlisted, "file")
+        title += f", {files} not listed"
+        lines += ["", f"Not reviewed in this round (not listed by GitHub, too many changes): {files}."]
     return conclusion, title, "\n".join(lines)
 
 

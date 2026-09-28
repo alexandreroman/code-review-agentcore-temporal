@@ -1,7 +1,8 @@
 """Pull request reads: the files a round reviews, and the patches of one reviewer's batch.
 
 Both read the same comparison, pinned to two SHAs: whatever is pushed during a round, every reviewer gets
-the patches of the head the round snapshotted and publishes on.
+the patches of the head the round snapshotted and publishes on. publish_review reads the pull request's
+comparison at that head too.
 """
 
 from agentcore_review_shared.contract import PrRef
@@ -34,6 +35,7 @@ class PullActivities:
         reviewed, excluded = partition([_changed_file(f) for f in raw])
         return ChangeSet(
             head_sha=pull["head"]["sha"],
+            pr_base_sha=pull["base"]["sha"],
             diff_base=diff_base,
             files=reviewed,
             excluded=[f.path for f in excluded],
@@ -46,7 +48,7 @@ class PullActivities:
         """The patches of a reviewer's files (the comparison list_changed_files read) and the top-level tree."""
         pr = input.pr
         with github_errors():
-            raw = await _compared_files(pr, input.diff_base, input.head_sha)
+            raw = await compared_files(pr, input.diff_base, input.head_sha)
             tree = await get(pr, f"{repo_path(pr)}/git/trees/{input.head_sha}")
         wanted = set(input.paths)
         patches = [
@@ -69,7 +71,7 @@ async def _changed_files(pr: PrRef, pull: dict, since: str | None) -> tuple[str,
         if delta is not None:
             return since, delta, 0
     base = pull["base"]["sha"]
-    files = await _compared_files(pr, base, head)
+    files = await compared_files(pr, base, head)
     unlisted = 0
     if len(files) >= COMPARE_MAX_FILES:
         # changed_files counts every file of the pull request, beyond the ones the comparison lists.
@@ -101,7 +103,8 @@ async def _delta_files(pr: PrRef, since: str, head: str) -> list[dict] | None:
     return None
 
 
-async def _compared_files(pr: PrRef, base: str, head: str) -> list[dict]:
+async def compared_files(pr: PrRef, base: str, head: str) -> list[dict]:
+    """The files of the three-dot comparison, at most COMPARE_MAX_FILES of them."""
     return (await _comparison(pr, base, head)).get("files", [])
 
 

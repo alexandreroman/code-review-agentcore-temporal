@@ -282,9 +282,10 @@ class PullRequestWorkflow:
         """Review the change; False when no reviewer completed, which leaves the head unreviewed."""
         state, number = self._state, self._state.round
         if not change.files:
+            # No review is published for this round: only the check can report the files GitHub did not list.
             state.last_reviewed_sha = change.head_sha
             state.last_reviewed_round = number
-            await self._complete_check(check, *publishing.check_output(state.open_findings, []))
+            await self._complete_check(check, *publishing.check_output(state.open_findings, [], change.unlisted))
             return True
         snapshot = await self._snapshot(change.head_sha)
         title = f"Round {number}: reviewing {len(change.files)} files"
@@ -318,7 +319,13 @@ class PullRequestWorkflow:
             unavailable=unavailable,
         )
         comment_ids = await self._publish(
-            PublishInput(pr=self._pr, head_sha=change.head_sha, workflow_id=self._id, content=content)
+            PublishInput(
+                pr=self._pr,
+                pr_base_sha=change.pr_base_sha,
+                head_sha=change.head_sha,
+                workflow_id=self._id,
+                content=content,
+            )
         )
         state.next_finding_number = next_finding_number
         lifecycle.record_resolved(state, resolved)
@@ -327,7 +334,7 @@ class PullRequestWorkflow:
         state.last_reviewed_round = number
         if resolved:
             await self._resolve(resolved)
-        await self._complete_check(check, *publishing.check_output(state.open_findings, unavailable))
+        await self._complete_check(check, *publishing.check_output(state.open_findings, unavailable, change.unlisted))
         return True
 
     async def _run_reviewers(self, change: ChangeSet, snapshot: SnapshotRef) -> tuple[list[ReviewerReport], list[str]]:
@@ -582,8 +589,10 @@ class PullRequestWorkflow:
             external_id=f"{self._id}:{state.last_reviewed_round}",
             status="in_progress",
         )
-        # The round's "reviewers unavailable" note drops out of the check here: accepted, for simplicity.
-        await self._complete_check(check, *publishing.check_output(state.open_findings, []))
+        # The round's notes on unavailable reviewers and unlisted files drop out of the check here: accepted,
+        # for simplicity, even in the rare round where every listed file was excluded and the check was the
+        # only place reporting the unlisted files.
+        await self._complete_check(check, *publishing.check_output(state.open_findings, [], 0))
 
     # --- end ---
 

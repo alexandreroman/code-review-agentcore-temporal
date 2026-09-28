@@ -92,6 +92,11 @@ def test_body_reports_resolved_open_excluded_unlisted_and_unavailable():
         assert expected in body
 
 
+def test_body_reports_unlisted_files_without_excluded_ones():
+    body = build_review(content([], unlisted=1), {}, MARKER, inline=True).body
+    assert "### Not reviewed\n\n- 1 more file that GitHub does not list: too many changes" in body
+
+
 def test_body_is_truncated_below_the_github_limit():
     body = build_review(
         ReviewContent(round=1, summary_markdown="x" * 70_000, findings=[]), {}, MARKER, inline=True
@@ -101,33 +106,39 @@ def test_body_is_truncated_below_the_github_limit():
 
 
 def test_check_output_counts_blocking_findings():
-    _, title, summary = check_output([finding("F-002", severity="low"), finding("F-001", severity="critical")], [])
+    _, title, summary = check_output([finding("F-002", severity="low"), finding("F-001", severity="critical")], [], 0)
     assert title == "2 open findings, 1 blocking"
     assert summary.index("F-001") < summary.index("F-002")
-    assert check_output([], [])[1] == "No open finding"
+    assert check_output([], [], 0)[1] == "No open finding"
 
 
 def test_check_is_red_only_for_blocking_findings():
-    assert check_output([], [])[0] == "success"
-    assert check_output([finding("F-1", severity="medium"), finding("F-2", severity="low")], [])[0] == "success"
-    assert check_output([finding("F-1", severity="low"), finding("F-2", severity="high")], [])[0] == "failure"
-    assert check_output([finding("F-1", severity="critical")], [])[0] == "failure"
+    assert check_output([], [], 0)[0] == "success"
+    assert check_output([finding("F-1", severity="medium"), finding("F-2", severity="low")], [], 0)[0] == "success"
+    assert check_output([finding("F-1", severity="low"), finding("F-2", severity="high")], [], 0)[0] == "failure"
+    assert check_output([finding("F-1", severity="critical")], [], 0)[0] == "failure"
 
 
 def test_check_output_names_the_unavailable_reviewers():
-    _, title, summary = check_output([finding("F-001", severity="low")], ["security", "performance (batch 2)"])
+    _, title, summary = check_output([finding("F-001", severity="low")], ["security", "performance (batch 2)"], 0)
     assert title == "1 open finding, 0 blocking, 2 reviewers unavailable"
     assert "Not reviewed in this round (reviewer unavailable): security, performance (batch 2)." in summary
-    _, title, summary = check_output([], ["maintainability"])
+    _, title, summary = check_output([], ["maintainability"], 0)
     assert title == "No open finding, 1 reviewer unavailable"
     assert "maintainability" in summary
 
 
+def test_check_output_counts_the_unlisted_files():
+    conclusion, title, summary = check_output([], [], 42)
+    assert conclusion == "success" and title == "No open finding, 42 files not listed"
+    assert "Not reviewed in this round (not listed by GitHub, too many changes): 42 files." in summary
+
+
 def test_dismissing_the_last_blocking_finding_turns_the_check_green():
     state = PullRequestState(open_findings=[finding("F-001"), finding("F-002", severity="low")])
-    assert check_output(state.open_findings, [])[0] == "failure"
+    assert check_output(state.open_findings, [], 0)[0] == "failure"
     dismiss(state, "F-001", "not reachable", "alice")
-    conclusion, title, _ = check_output(state.open_findings, [])
+    conclusion, title, _ = check_output(state.open_findings, [], 0)
     assert conclusion == "success" and title == "1 open finding, 0 blocking"
 
 

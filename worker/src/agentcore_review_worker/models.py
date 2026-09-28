@@ -21,7 +21,8 @@ class ChangedFile(BaseModel):
 
 class ChangeSet(BaseModel):
     head_sha: str
-    diff_base: str  # the last reviewed SHA for a delta, the base branch's SHA for the whole pull request
+    pr_base_sha: str  # the base branch's SHA: inline comments must fit the whole pull request's diff
+    diff_base: str  # the last reviewed SHA for a delta, pr_base_sha for the whole pull request
     files: list[ChangedFile] = Field(default_factory=list)  # reviewable files only
     excluded: list[str] = Field(default_factory=list)
     unlisted: int = 0  # changed files beyond the ones a GitHub comparison lists
@@ -161,6 +162,7 @@ class ReviewContent(BaseModel):
 
 class PublishInput(BaseModel):
     pr: PrRef
+    pr_base_sha: str
     head_sha: str
     workflow_id: str
     content: ReviewContent
