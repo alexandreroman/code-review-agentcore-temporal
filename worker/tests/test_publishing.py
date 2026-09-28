@@ -96,6 +96,32 @@ def test_body_reports_unlisted_files_without_excluded_ones():
     assert "### Not reviewed\n\n- 1 more file that GitHub does not list: too many changes" in body
 
 
+def test_body_says_the_merge_is_blocked_by_critical_or_high_findings():
+    extra = {"still_open": [finding("S-03", severity="critical"), finding("M-01", severity="low")]}
+    findings = [finding("P-01", severity="high"), finding("S-02", severity="medium")]
+    body = build_review(content(findings, **extra), {}, MARKER, inline=True).body
+    assert body.startswith(
+        f"{MARKER}\n\n## AI Review — round 1\n\n**Merge blocked** by 2 critical or high findings: S-03, P-01.\n\n"
+        "Summary."
+    )
+
+
+def test_body_says_the_merge_is_blocked_by_a_single_critical_or_high_finding():
+    body = build_review(content([finding("S-03", severity="critical")]), {}, MARKER, inline=True).body
+    assert "## AI Review — round 1\n\n**Merge blocked** by 1 critical or high finding: S-03.\n\nSummary." in body
+
+
+def test_a_blocking_finding_still_open_from_an_earlier_round_blocks_the_merge():
+    body = build_review(content([], still_open=[finding("S-01", severity="high")]), {}, MARKER, inline=True).body
+    assert "**Merge blocked** by 1 critical or high finding: S-01." in body
+
+
+def test_body_says_the_pull_request_is_mergeable_without_critical_or_high_findings():
+    extra = {"still_open": [finding("S-02", severity="low")]}
+    body = build_review(content([finding("S-01", severity="medium")], **extra), {}, MARKER, inline=True).body
+    assert "## AI Review — round 1\n\n**Mergeable**: no critical or high finding is open.\n\nSummary." in body
+
+
 def test_body_is_truncated_below_the_github_limit():
     body = build_review(
         ReviewContent(round=1, summary_markdown="x" * 70_000, findings=[]), {}, MARKER, inline=True
@@ -104,11 +130,40 @@ def test_body_is_truncated_below_the_github_limit():
     assert body.endswith("(truncated)")
 
 
-def test_check_output_counts_blocking_findings():
+def test_check_title_counts_the_blocking_findings_and_the_total():
     _, title, summary = check_output([finding("S-02", severity="low"), finding("S-01", severity="critical")])
-    assert title == "2 open findings, 1 blocking"
+    assert title == "Merge blocked: 1 critical or high finding open (2 in total)"
     assert summary.index("S-01") < summary.index("S-02")
-    assert check_output([])[1] == "No open finding"
+    _, title, _ = check_output([finding("S-01", severity="critical"), finding("P-01", severity="high")])
+    assert title == "Merge blocked: 2 critical or high findings open"
+
+
+def test_check_title_without_blocking_findings():
+    assert check_output([finding("S-01", severity="medium")])[1] == "1 open finding, none critical or high"
+    _, title, summary = check_output([finding("S-01", severity="medium"), finding("S-02", severity="low")])
+    assert title == "2 open findings, none critical or high"
+    assert "Merge blocked" not in summary
+    assert check_output([]) == ("success", "No open finding", "No finding is open.")
+
+
+def test_check_summary_starts_with_the_blocking_findings_and_the_way_out():
+    findings = [finding("M-01", severity="low"), finding("P-01", severity="high"), finding("S-01", severity="critical")]
+    _, _, summary = check_output(findings)
+    assert summary.startswith(
+        "**Merge blocked** by 2 critical or high findings: S-01 (critical), P-01 (high). "
+        "Fix them (push a commit or comment `/fix`) or have them dismissed in their thread. "
+        "The check turns green once none is left.\n\n- **S-01** critical"
+    )
+    assert summary.index("P-01 (high)") < summary.index("- **M-01**")
+
+
+def test_check_summary_for_a_single_blocking_finding():
+    _, _, summary = check_output([finding("S-01", severity="critical"), finding("M-01", severity="medium")])
+    assert summary.startswith(
+        "**Merge blocked** by 1 critical or high finding: S-01 (critical). "
+        "Fix it (push a commit or comment `/fix`) or have it dismissed in its thread. "
+        "The check turns green once none is left.\n\n"
+    )
 
 
 def test_check_is_red_only_for_blocking_findings():
@@ -121,11 +176,13 @@ def test_check_output_names_the_unavailable_reviewers():
     _, title, summary = check_output(
         [finding("S-01", severity="low")], unavailable=["security", "performance (batch 2)"]
     )
-    assert title == "1 open finding, 0 blocking, 2 reviewers unavailable"
+    assert title == "1 open finding, none critical or high, 2 reviewers unavailable"
     assert "Not reviewed in this round (reviewer unavailable): security, performance (batch 2)." in summary
     _, title, summary = check_output([], unavailable=["maintainability"])
     assert title == "No open finding, 1 reviewer unavailable"
     assert "maintainability" in summary
+    _, title, _ = check_output([finding("S-01", severity="high")], unavailable=["security"], unlisted=3)
+    assert title == "Merge blocked: 1 critical or high finding open, 1 reviewer unavailable, 3 files not listed"
 
 
 def test_check_output_counts_the_unlisted_files():

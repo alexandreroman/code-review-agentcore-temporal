@@ -68,6 +68,20 @@ def _line(finding: Finding) -> str:
     return f"- **{finding.id}** {finding.severity} · `{finding.path}:{finding.line}` · {finding.title}"
 
 
+def _with_severity(findings: list[Finding]) -> str:
+    """`S-01 (critical), P-01 (high)`."""
+    return ", ".join(f"{f.id} ({f.severity})" for f in findings)
+
+
+def _merge_status(open_findings: list[Finding]) -> str:
+    """Whether the open findings let the pull request merge: none of critical or high severity may be open."""
+    blocking = [f.id for f in sorted(open_findings, key=sort_key) if f.severity.blocking]
+    if blocking:
+        findings = count(len(blocking), "critical or high finding")
+        return f"**Merge blocked** by {findings}: {', '.join(blocking)}."
+    return "**Mergeable**: no critical or high finding is open."
+
+
 def _split_inline(
     findings: list[Finding], commentable: dict[str, set[int]], cap: int
 ) -> tuple[list[Finding], list[Finding]]:
@@ -90,7 +104,12 @@ def build_review(content: ReviewContent, commentable: dict[str, set[int]], marke
     """
     cap = MAX_INLINE_COMMENTS if inline else 0
     attached, in_body = _split_inline(content.findings, commentable, cap)
-    sections = [marker, f"## AI Review — round {content.round}", content.summary_markdown.strip() or "No summary."]
+    sections = [
+        marker,
+        f"## AI Review — round {content.round}",
+        _merge_status(content.findings + content.still_open),
+        content.summary_markdown.strip() or "No summary.",
+    ]
     if in_body:
         sections.append("### Other findings" if attached else "### Findings")
         sections += [comment_body(f) for f in in_body]
@@ -123,13 +142,17 @@ def check_output(
 
     `unavailable` names the reviewers that failed, `unlisted` counts the changed files GitHub did not list.
     """
-    blocking = sum(f.severity.blocking for f in open_findings)
+    ordered = sorted(open_findings, key=sort_key)
+    blocking = [f for f in ordered if f.severity.blocking]
     conclusion: Literal["success", "failure"] = "failure" if blocking else "success"
-    if open_findings:
-        ordered = sorted(open_findings, key=sort_key)
-        title = f"{count(len(ordered), 'open finding')}, {blocking} blocking"
+    if blocking:
+        title = f"Merge blocked: {count(len(blocking), 'critical or high finding')} open"
+        if len(ordered) > len(blocking):
+            title += f" ({len(ordered)} in total)"
+        lines = [_merge_blocked(blocking), ""] + [_line(f) for f in ordered]
+    elif ordered:
+        title = f"{count(len(ordered), 'open finding')}, none critical or high"
         lines = [_line(f) for f in ordered]
-        lines += ["", "The check fails while a finding of high severity or above is open."]
     else:
         title = "No open finding"
         lines = ["No finding is open."]
@@ -141,6 +164,17 @@ def check_output(
         title += f", {files} not listed"
         lines += ["", f"Not reviewed in this round (not listed by GitHub, too many changes): {files}."]
     return conclusion, title, "\n".join(lines)
+
+
+def _merge_blocked(blocking: list[Finding]) -> str:
+    """Why the check fails, and the ways to turn it green: a fix, or a dismissal in the finding's thread."""
+    findings = count(len(blocking), "critical or high finding")
+    found = f"**Merge blocked** by {findings}: {_with_severity(blocking)}."
+    if len(blocking) == 1:
+        way_out = "Fix it (push a commit or comment `/fix`) or have it dismissed in its thread."
+    else:
+        way_out = "Fix them (push a commit or comment `/fix`) or have them dismissed in their thread."
+    return f"{found} {way_out} The check turns green once none is left."
 
 
 def unavailable_check_output(round_number: int, unavailable: list[str]) -> tuple[Literal["failure"], str, str]:
@@ -215,7 +249,7 @@ def bot_answers(thread: list[ThreadComment], bot_login: str) -> int:
 
 def closing_comment(closed_by: str | None, open_findings: list[Finding], marker: str) -> str:
     ordered = sorted(open_findings, key=sort_key)
-    listed = ", ".join(f"{f.id} ({f.severity})" for f in ordered)
+    listed = _with_severity(ordered)
     still_open = count(len(ordered), "open finding")
     who = f" by @{closed_by}" if closed_by else ""
     if any(f.severity.blocking for f in ordered):
