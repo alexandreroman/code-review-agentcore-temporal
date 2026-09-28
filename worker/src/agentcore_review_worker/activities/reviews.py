@@ -1,5 +1,5 @@
-"""Review side effects on GitHub: the AI Review check, the round's review, thread resolution and replies, the
-closing comment.
+"""Review side effects on GitHub: the AI Review check, the round's review, thread resolution and replies, comments
+in the Conversation.
 
 Each one is idempotent: a hidden marker or the check run's external ID identifies what an earlier
 attempt already wrote.
@@ -10,10 +10,10 @@ from agentcore_review_shared.github import GitHubError
 from temporalio import activity
 
 from ..hunks import commentable_lines
-from ..markers import closing_marker, extract_finding_ids, round_marker
+from ..markers import extract_finding_ids, round_marker
 from ..models import (
     CheckInput,
-    ClosingInput,
+    CommentInput,
     PublishInput,
     ResolveInput,
     ThreadComment,
@@ -176,13 +176,12 @@ async def post_thread_reply(input: ThreadReplyInput) -> None:
         )
 
 
-@activity.defn(name="post_closing_comment")
-async def post_closing_comment(input: ClosingInput) -> None:
-    """Post the merge-with-open-findings comment once, found again by its closing marker."""
+@activity.defn(name="post_pr_comment")
+async def post_pr_comment(input: CommentInput) -> None:
+    """Comment in the Conversation once: a retry finds the marker of the earlier attempt among its comments."""
     pr = input.pr
-    marker = closing_marker(input.workflow_id)
     with github_errors():
         comments = await get_pages(pr, f"{repo_path(pr)}/issues/{pr.number}/comments")
-        if any(marker in (c.get("body") or "") for c in comments):
+        if any(input.marker in (c.get("body") or "") for c in comments):
             return
-        await send(pr, "POST", f"{repo_path(pr)}/issues/{pr.number}/comments", {"body": f"{marker}\n{input.body}"})
+        await send(pr, "POST", f"{repo_path(pr)}/issues/{pr.number}/comments", {"body": input.body})

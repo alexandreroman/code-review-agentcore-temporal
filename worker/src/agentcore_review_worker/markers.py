@@ -23,6 +23,11 @@ def reply_marker(workflow_id: str, comment_id: int) -> str:
     return f"<!-- reply:{workflow_id}:{comment_id} -->"
 
 
+def fix_refusal_marker(workflow_id: str, delivery_id: str) -> str:
+    """Marks the bot's refusal of one /fix request, keyed on its webhook delivery: posted once, whatever the retries."""
+    return f"<!-- fix-refused:{workflow_id}:{delivery_id} -->"
+
+
 def has_reply_marker(text: str) -> bool:
     return _REPLY.search(text) is not None
 

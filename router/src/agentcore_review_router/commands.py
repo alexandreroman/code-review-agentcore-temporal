@@ -27,6 +27,7 @@ from . import runtime, temporal_ops
 from .routing import CommentKind, ForwardReply, RunCommand
 from .rules import (
     DEV_KILL_REPLY,
+    FIX_USAGE_REPLY,
     NO_REVIEW_REPLY,
     NO_WORKER_REPLY,
     REACTION_DENIED,
@@ -35,6 +36,7 @@ from .rules import (
     KillTally,
     StopOutcome,
     can_run_commands,
+    fix_finding_ids,
     is_bot_login,
     kill_comment,
     kill_targets,
@@ -108,8 +110,16 @@ async def finish_kill(event: dict, deadline: float) -> None:
 
 
 async def _fix(command: RunCommand, client: Client, app: GitHubApp, fields: dict[str, Any]) -> str:
+    finding_ids = fix_finding_ids(command.arguments)
+    if finding_ids is None:
+        await _best_effort(_react(app, command.pr, command.comment_kind, command.comment_id, REACTION_DENIED), fields)
+        await _best_effort(_reply(app, command.pr, FIX_USAGE_REPLY, command.thread_root_id), fields)
+        return "/fix refused: arguments are not finding IDs"
     requested = FixRequested(
-        requested_by=command.author, delivery_id=command.delivery_id, thread_root_id=command.thread_root_id
+        requested_by=command.author,
+        delivery_id=command.delivery_id,
+        thread_root_id=command.thread_root_id,
+        finding_ids=finding_ids,
     )
     if await temporal_ops.signal(client, command.workflow_id, SIGNAL_FIX_REQUESTED, requested):
         await _best_effort(_react(app, command.pr, command.comment_kind, command.comment_id, REACTION_FIX), fields)
@@ -202,8 +212,13 @@ async def _react(app: GitHubApp, pr: PrRef, comment_kind: CommentKind, comment_i
     await app.request(pr.installation_id, "POST", path, json={"content": content})
 
 
-async def _reply(app: GitHubApp, pr: PrRef, body: str) -> None:
-    path = f"/repos/{pr.owner}/{pr.repo}/issues/{pr.number}/comments"
+async def _reply(app: GitHubApp, pr: PrRef, body: str, thread_root_id: int | None = None) -> None:
+    """A comment in the Conversation, or a reply in the review thread that starts with thread_root_id."""
+    if thread_root_id is None:
+        path = f"/repos/{pr.owner}/{pr.repo}/issues/{pr.number}/comments"
+    else:
+        # GitHub answers a thread through its first comment: replies to a reply are not supported.
+        path = f"/repos/{pr.owner}/{pr.repo}/pulls/{pr.number}/comments/{thread_root_id}/replies"
     await app.request(pr.installation_id, "POST", path, json={"body": body})
 
 

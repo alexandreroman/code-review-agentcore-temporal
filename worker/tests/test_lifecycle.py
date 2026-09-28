@@ -12,15 +12,16 @@ from agentcore_review_worker.lifecycle import (
     MAX_FIX_DELIVERIES,
     MAX_PENDING_REPLIES,
     MAX_RESOLVED_THREADS,
+    FixRefusal,
     apply_summary,
     clean_report,
     discussion_thread,
     dismiss,
     fallback_summary,
-    fix_targets,
     memo,
     next_action,
     number_findings,
+    plan_fix,
     record_fix_request,
     record_head,
     record_reply,
@@ -46,19 +47,19 @@ def reply(delivery_id="d1", thread_root_id=100) -> CommentPosted:
 
 
 def test_close_wins_then_review_then_fix():
-    state = PullRequestState(pending_head_sha="b", pending_fix=FixRequested(requested_by="dev", delivery_id="d"))
+    state = PullRequestState(pending_head_sha="b", pending_fixes=[FixRequested(requested_by="dev", delivery_id="d")])
     assert next_action(state, closed=True) == "close"
     assert next_action(state, closed=False) == "review"
     state.pending_head_sha = None
     assert next_action(state, closed=False) == "fix"
-    state.pending_fix = None
+    state.pending_fixes = []
     assert next_action(state, closed=False) is None
 
 
 def test_a_reply_comes_after_a_review_and_a_fix():
     state = PullRequestState(pending_replies=[reply()])
     assert next_action(state, closed=False) == "reply"
-    state.pending_fix = FixRequested(requested_by="alice", delivery_id="f")
+    state.pending_fixes = [FixRequested(requested_by="alice", delivery_id="f")]
     assert next_action(state, closed=False) == "fix"
     state.pending_head_sha = "abc"
     assert next_action(state, closed=False) == "review"
@@ -82,55 +83,21 @@ def test_a_new_head_becomes_the_pending_review():
     assert state.pending_head_sha == "d"
 
 
-def test_a_fix_request_becomes_pending_once_per_delivery():
+def fix_request(delivery_id: str, thread_root_id: int | None = None, finding_ids=()) -> FixRequested:
+    return FixRequested(
+        requested_by="alice", delivery_id=delivery_id, thread_root_id=thread_root_id, finding_ids=list(finding_ids)
+    )
+
+
+def test_fix_requests_queue_apart_once_per_delivery():
     state = PullRequestState()
-    first = FixRequested(requested_by="alice", delivery_id="d1")
-    assert record_fix_request(state, first) is True
-    state.pending_fix = None  # the fix ran
-    assert record_fix_request(state, FixRequested(requested_by="alice", delivery_id="d1")) is False
-    assert state.pending_fix is None
-    assert record_fix_request(state, FixRequested(requested_by="bob", delivery_id="d2")) is True
-    assert state.pending_fix.requested_by == "bob"
-
-
-def fix_request(delivery_id: str, thread_root_id: int | None = None) -> FixRequested:
-    return FixRequested(requested_by="alice", delivery_id=delivery_id, thread_root_id=thread_root_id)
-
-
-def test_two_thread_fixes_merge_into_both_findings():
-    first, second = finding("F-001", comment_id=100), finding("F-002", comment_id=200)
-    state = PullRequestState(open_findings=[first, second, finding("F-003", comment_id=300)])
-    record_fix_request(state, fix_request("d1", thread_root_id=100))
-    record_fix_request(state, fix_request("d2", thread_root_id=200))
-    record_fix_request(state, fix_request("d3", thread_root_id=200))
-    assert state.pending_fix_roots == [100, 200]
-    assert fix_targets(state, state.pending_fix_roots) == [first, second]
-
-
-def test_a_fix_of_everything_and_a_thread_fix_merge_into_everything_in_any_order():
-    state = PullRequestState()
-    record_fix_request(state, fix_request("d1"))
-    record_fix_request(state, fix_request("d2", thread_root_id=100))
-    assert state.pending_fix_roots is None
-    state = PullRequestState()
-    record_fix_request(state, fix_request("d1", thread_root_id=100))
-    record_fix_request(state, fix_request("d2"))
-    assert state.pending_fix_roots is None
-
-
-def test_a_redelivered_fix_request_leaves_the_pending_targets_alone():
-    state = PullRequestState()
-    record_fix_request(state, fix_request("d1", thread_root_id=100))
+    assert record_fix_request(state, fix_request("d1", thread_root_id=100)) is True
     assert record_fix_request(state, fix_request("d1")) is False
-    assert state.pending_fix_roots == [100]
-
-
-def test_a_fix_after_the_pending_one_ran_starts_from_its_own_targets():
-    state = PullRequestState()
-    record_fix_request(state, fix_request("d1"))
-    state.pending_fix, state.pending_fix_roots = None, None  # the fix ran
-    record_fix_request(state, fix_request("d2", thread_root_id=200))
-    assert state.pending_fix_roots == [200]
+    assert record_fix_request(state, fix_request("d2", finding_ids=["F-003"])) is True
+    assert [r.delivery_id for r in state.pending_fixes] == ["d1", "d2"]
+    state.pending_fixes = []  # the fix ran
+    assert record_fix_request(state, fix_request("d2")) is False
+    assert state.pending_fixes == []
 
 
 def test_seen_fix_deliveries_keep_only_the_most_recent():
@@ -152,12 +119,70 @@ def test_a_reply_is_queued_once_per_delivery_and_the_oldest_are_dropped():
     assert state.pending_replies[-1].delivery_id == f"x{MAX_PENDING_REPLIES + 4}"
 
 
-def test_fix_targets_every_open_finding_or_those_of_the_threads():
-    first, second = finding("F-001", comment_id=100), finding("F-002", comment_id=200)
-    state = PullRequestState(open_findings=[first, second])
-    assert fix_targets(state, None) == [first, second]
-    assert fix_targets(state, [200]) == [second]
-    assert fix_targets(state, [999]) == []
+def three_open_findings() -> PullRequestState:
+    return PullRequestState(
+        open_findings=[
+            finding("F-001", comment_id=100),
+            finding("F-002", comment_id=200),
+            finding("F-003", comment_id=300),
+        ]
+    )
+
+
+def planned_ids(plan) -> list[str]:
+    return [f.id for f in plan.findings]
+
+
+def test_a_bare_fix_in_the_conversation_fixes_every_open_finding():
+    plan = plan_fix(three_open_findings(), [fix_request("d1")])
+    assert planned_ids(plan) == ["F-001", "F-002", "F-003"]
+    assert plan.refusals == [] and plan.closed_threads == []
+
+
+def test_a_fix_naming_open_findings_fixes_only_those():
+    plan = plan_fix(three_open_findings(), [fix_request("d1", finding_ids=["F-003", "F-001"])])
+    assert planned_ids(plan) == ["F-001", "F-003"]
+
+
+def test_a_fix_naming_a_finding_that_is_not_open_fixes_nothing():
+    request = fix_request("d1", finding_ids=["F-001", "F-099"])
+    plan = plan_fix(three_open_findings(), [request])
+    assert plan.findings == [] and plan.accepted == []
+    assert plan.refusals == [FixRefusal(request, not_open_ids=["F-099"])]
+
+
+def test_a_bare_fix_in_a_thread_fixes_its_finding():
+    plan = plan_fix(three_open_findings(), [fix_request("d1", thread_root_id=200)])
+    assert planned_ids(plan) == ["F-002"]
+
+
+def test_a_fix_in_a_thread_may_name_its_own_finding():
+    plan = plan_fix(three_open_findings(), [fix_request("d1", thread_root_id=200, finding_ids=["F-002"])])
+    assert planned_ids(plan) == ["F-002"]
+
+
+@pytest.mark.parametrize("finding_ids", [["F-003"], ["F-002", "F-003"], ["F-099"]])
+def test_a_fix_in_a_thread_naming_another_finding_fixes_nothing(finding_ids):
+    request = fix_request("d1", thread_root_id=200, finding_ids=finding_ids)
+    plan = plan_fix(three_open_findings(), [request])
+    assert plan.findings == []
+    assert plan.refusals == [FixRefusal(request, thread_finding_id="F-002")]
+
+
+def test_a_refused_request_does_not_widen_the_accepted_ones():
+    refused = fix_request("d2", finding_ids=["F-003", "F-099"])
+    requests = [fix_request("d1", thread_root_id=100), refused, fix_request("d3", finding_ids=["F-002"])]
+    plan = plan_fix(three_open_findings(), requests)
+    assert planned_ids(plan) == ["F-001", "F-002"]
+    assert [r.delivery_id for r in plan.accepted] == ["d1", "d3"]
+    assert [refusal.request for refusal in plan.refusals] == [refused]
+
+
+def test_threads_without_an_open_finding_are_listed_once():
+    requests = [fix_request("d1", thread_root_id=900), fix_request("d2", thread_root_id=900, finding_ids=["F-001"])]
+    plan = plan_fix(three_open_findings(), requests)
+    assert plan.findings == [] and plan.refusals == []
+    assert plan.closed_threads == [900]
 
 
 def test_a_reply_targets_only_an_open_finding():

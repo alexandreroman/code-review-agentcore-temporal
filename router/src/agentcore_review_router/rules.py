@@ -1,6 +1,7 @@
-"""Pure command rules: who may run /fix and /kill, which threads are findings, which sessions /kill targets, and
-what the bot answers."""
+"""Pure command rules: who may run /fix and /kill, which findings /fix names, which threads are findings, which
+sessions /kill targets, and what the bot answers."""
 
+import re
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -18,6 +19,13 @@ REACTION_KILL = "rocket"  # GitHub has no 💥 reaction: the /kill comment carri
 NO_REVIEW_REPLY = "No review in progress."
 DEV_KILL_REPLY = "Dev worker: Ctrl-C is your friend."
 NO_WORKER_REPLY = "No active worker, nothing to kill."
+FIX_USAGE_REPLY = (
+    "Nothing was fixed: `/fix` accepts finding IDs only, such as `/fix F-001 F-003`. "
+    "A bare `/fix` fixes every open finding, or the thread's finding in a review thread."
+)
+
+# ASCII digits only: \d would also accept other scripts' digits, which no finding ID contains.
+_FINDING_ID = re.compile(r"F-[0-9]+")
 
 StopOutcome = Literal["stopped", "gone", "retry", "failed"]
 # 409 while a session changes state, throttling, and connect or read timeouts ("timeout") are worth another try.
@@ -32,6 +40,18 @@ def can_run_commands(permission: str | None) -> bool:
 def is_bot_login(login: str | None, bot_login: str) -> bool:
     """The GitHub App comments as "<app slug>[bot]"; a human may pick the bare slug as a user name."""
     return login == bot_login
+
+
+def fix_finding_ids(arguments: Iterable[str]) -> list[str] | None:
+    """The finding IDs named after /fix, uppercased and once each; None when an argument is not a finding ID.
+
+    Only the syntax is checked here: the worker alone knows which findings are open.
+    """
+    finding_ids = [argument.upper() for argument in arguments]
+    for finding_id in finding_ids:
+        if not _FINDING_ID.fullmatch(finding_id):
+            return None
+    return list(dict.fromkeys(finding_ids))
 
 
 def kill_targets(identities: Iterable[str]) -> list[AgentCoreSession]:

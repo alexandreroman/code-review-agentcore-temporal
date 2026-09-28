@@ -104,9 +104,10 @@ Talking points:
   code proves the human right; on stage, a question on a real defect keeps
   the answer predictable.
 - **7:30, `/fix`.** Post it as a PR comment: the fixer handles every open
-  finding (in a finding's thread, `/fix` fixes that finding only). 👀 on
-  the comment. The fixer child workflow plans the change and the bot
-  pushes one commit.
+  finding (in a finding's thread, `/fix` fixes that finding only;
+  `/fix F-001 F-003` fixes the findings it names, and nothing at all if
+  one of them is not open). 👀 on the comment. The fixer child workflow
+  plans the change and the bot pushes one commit.
 - **8:30, long-lived workflow.** The commit triggers round 2 on the delta
   only: fixed threads are resolved, the check turns green.
 - **10:00, lifecycle.** Merge: the workflow ends with its

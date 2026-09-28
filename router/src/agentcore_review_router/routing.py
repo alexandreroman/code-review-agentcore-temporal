@@ -52,6 +52,8 @@ class RunCommand:
     delivery_id: str
     # The first comment of the review thread the command was posted in; None outside a thread.
     thread_root_id: int | None = None
+    # The words after the command, checked by the command itself (/kill ignores them).
+    arguments: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -169,6 +171,7 @@ def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: s
             author=sender.get("login", ""),
             delivery_id=delivery_id,
             thread_root_id=thread_root_id,
+            arguments=tuple(words[1:]),
         )
     if thread_root_id is None:
         return Ignore("not a command")

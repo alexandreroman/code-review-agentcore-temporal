@@ -86,8 +86,11 @@ class PrUpdated(BaseModel):
 class FixRequested(BaseModel):
     requested_by: str
     delivery_id: str
-    # The finding's comment when /fix is posted in its review thread; None fixes every open finding.
+    # The first comment of the review thread /fix was posted in; None in the Conversation.
     thread_root_id: int | None = None
+    # The finding IDs after /fix, empty for a bare /fix: the thread's finding, or every open finding in the
+    # Conversation.
+    finding_ids: list[str] = Field(default_factory=list)
 
 
 class CommentPosted(BaseModel):
@@ -133,9 +136,8 @@ class DismissedFinding(BaseModel):
 class PullRequestState(BaseModel):
     last_reviewed_sha: str | None = None
     pending_head_sha: str | None = None
-    pending_fix: FixRequested | None = None
-    # The findings' comments the pending fix targets, merged across requests; None: every open finding.
-    pending_fix_roots: list[int] | None = None
+    # Fix requests waiting for the next fix, in arrival order: each one is checked on its own when the fix starts.
+    pending_fixes: list[FixRequested] = Field(default_factory=list)
     # Delivery IDs of the latest fix requests: GitHub redelivers webhooks, and a repeat must not fix twice.
     fix_deliveries: list[str] = Field(default_factory=list)
     pending_replies: list[CommentPosted] = Field(default_factory=list)

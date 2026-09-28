@@ -170,10 +170,12 @@ class ResolveInput(BaseModel):
     finding_ids: list[str]
 
 
-class ClosingInput(BaseModel):
+class CommentInput(BaseModel):
+    """A comment in the pull request's Conversation."""
+
     pr: PrRef
-    workflow_id: str
     body: str
+    marker: str  # idempotence: nothing is posted when a comment of the Conversation already carries it
 
 
 class ThreadInput(BaseModel):

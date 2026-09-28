@@ -1,5 +1,5 @@
-"""What the bot writes on GitHub: review comments and body, check output, thread replies, closing comment, fixer
-changes.
+"""What the bot writes on GitHub: review comments and body, check output, thread replies, /fix refusals, closing
+comment, fixer changes.
 
 Pure functions: the activities call them with data they fetched, the workflow with its state.
 """
@@ -170,6 +170,33 @@ def failed_reply(marker: str) -> str:
     return f"I could not answer this time. Reply again to retry.\n\n{marker}"
 
 
+def _fix_command(finding_ids: list[str]) -> str:
+    return " ".join(["/fix", *finding_ids])
+
+
+def off_thread_fix_reply(thread_finding_id: str, requested_ids: list[str], marker: str) -> str:
+    """A /fix in a finding's thread that named other findings."""
+    command = _fix_command(requested_ids)
+    return (
+        f"This thread is about {thread_finding_id}: `{command}` was not applied. Comment `/fix` here to fix "
+        f"{thread_finding_id}, or `{command}` in the conversation.\n\n{marker}"
+    )
+
+
+def not_open_fix_comment(not_open_ids: list[str], open_findings: list[Finding], marker: str) -> str:
+    """A /fix in the Conversation that named findings that are not open."""
+    if len(not_open_ids) == 1:
+        refused = f"{not_open_ids[0]} is not an open finding"
+    else:
+        refused = f"{', '.join(not_open_ids)} are not open findings"
+    if open_findings:
+        listed = ", ".join(f.id for f in sorted(open_findings, key=sort_key))
+        still_open = f"Open findings: {listed}."
+    else:
+        still_open = "No finding is open."
+    return f"{refused}: nothing was fixed. {still_open}\n\n{marker}"
+
+
 def bot_answers(thread: list[ThreadComment], bot_login: str) -> int:
     """The discussion agent's answers in a thread: the bot's replies that start with a verdict line.
 
@@ -182,14 +209,14 @@ def bot_answers(thread: list[ThreadComment], bot_login: str) -> int:
     )
 
 
-def closing_comment(closed_by: str | None, open_findings: list[Finding]) -> str:
+def closing_comment(closed_by: str | None, open_findings: list[Finding], marker: str) -> str:
     ordered = sorted(open_findings, key=sort_key)
     listed = ", ".join(f"{f.id} ({f.severity})" for f in ordered)
     count = _count(len(ordered), "open finding")
     who = f" by @{closed_by}" if closed_by else ""
     if any(f.severity.blocking for f in ordered):
-        return f"⚠️ Merged{who} bypassing AI Review, {count}: {listed}."
-    return f"Merged{who} with {count}: {listed}."
+        return f"⚠️ Merged{who} bypassing AI Review, {count}: {listed}.\n\n{marker}"
+    return f"Merged{who} with {count}: {listed}.\n\n{marker}"
 
 
 def _repository_path(raw: str) -> str | None:

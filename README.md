@@ -18,7 +18,10 @@ conference demo that makes durable execution visible on stage.
   agent, which may dismiss the finding when the human is right. A `/fix`
   comment lets an agent push a fix, for every open finding on the PR or
   for that finding only in its thread; an incremental review then turns
-  the `AI Review` check green.
+  the `AI Review` check green. `/fix F-001 F-003` fixes only the findings
+  it names. The bot fixes nothing and explains why when an argument is
+  not a finding ID, a named finding is not open, or a thread's `/fix`
+  names another finding.
 
 [DEMO.md](DEMO.md) is the timed run-through of the talk, with its
 checklist and plan B.

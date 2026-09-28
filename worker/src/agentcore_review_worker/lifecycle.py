@@ -3,6 +3,7 @@
 PullRequestWorkflow calls these from workflow code, so they stay deterministic and free of I/O.
 """
 
+from dataclasses import dataclass, field
 from typing import Literal
 
 from agentcore_review_shared.contract import (
@@ -48,7 +49,7 @@ def next_action(state: PullRequestState, closed: bool) -> Action | None:
         return "close"
     if review_pending(state):
         return "review"
-    if state.pending_fix is not None:
+    if state.pending_fixes:
         return "fix"
     if state.pending_replies:
         return "reply"
@@ -68,22 +69,16 @@ def record_head(state: PullRequestState, head_sha: str, reviewing_sha: str | Non
 
 
 def record_fix_request(state: PullRequestState, request: FixRequested) -> bool:
-    """Record a fix request as the pending fix, unless its webhook delivery was already seen.
+    """Queue a fix request, unless its webhook delivery was already seen.
 
-    A request made while a fix is pending merges into it: the pending fix targets every open finding
-    as soon as one of the requests does, otherwise the findings of all the requests' threads.
+    Requests stay apart until the fix starts: plan_fix checks each one on its own, so a refused request
+    never widens the others.
     """
     if request.delivery_id in state.fix_deliveries:
         return False
     recent = state.fix_deliveries + [request.delivery_id]
     state.fix_deliveries = recent[-MAX_FIX_DELIVERIES:]
-    if state.pending_fix is None:
-        state.pending_fix_roots = None if request.thread_root_id is None else [request.thread_root_id]
-    elif state.pending_fix_roots is None or request.thread_root_id is None:
-        state.pending_fix_roots = None
-    elif request.thread_root_id not in state.pending_fix_roots:
-        state.pending_fix_roots = state.pending_fix_roots + [request.thread_root_id]
-    state.pending_fix = request
+    state.pending_fixes = state.pending_fixes + [request]
     return True
 
 
@@ -98,11 +93,64 @@ def record_reply(state: PullRequestState, reply: CommentPosted) -> bool:
     return True
 
 
-def fix_targets(state: PullRequestState, thread_root_ids: list[int] | None) -> list[Finding]:
-    """Every open finding (None), or only those whose review threads the /fix requests were posted in."""
-    if thread_root_ids is None:
-        return list(state.open_findings)
-    return [f for f in state.open_findings if f.comment_id in thread_root_ids]
+@dataclass(frozen=True)
+class FixRefusal:
+    """A /fix request that fixes nothing, with what its explanation needs."""
+
+    request: FixRequested
+    # In a finding's thread: the thread's finding, the only one the request may name. None in the Conversation.
+    thread_finding_id: str | None = None
+    # In the Conversation: the requested IDs that are not open findings.
+    not_open_ids: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class FixPlan:
+    """What the pending /fix requests amount to: one fixer run over the accepted requests' findings."""
+
+    accepted: list[FixRequested]
+    findings: list[Finding]  # in the order of the open findings
+    refusals: list[FixRefusal]
+    # Threads of requests whose thread has no open finding: those of dismissed or resolved findings get an answer.
+    closed_threads: list[int]
+
+
+def plan_fix(state: PullRequestState, requests: list[FixRequested]) -> FixPlan:
+    """Check each request against the open findings, then gather the accepted ones into one fix.
+
+    In the Conversation, a bare /fix asks for every open finding, and named findings must all be open.
+    In a finding's thread, a bare /fix asks for that finding, and the only finding it may name is that one.
+    A request refused on any finding fixes none of them.
+    """
+    open_ids = [f.id for f in state.open_findings]
+    wanted: set[str] = set()
+    accepted: list[FixRequested] = []
+    refusals: list[FixRefusal] = []
+    closed_threads: list[int] = []
+    for request in requests:
+        if request.thread_root_id is None:
+            not_open = [finding_id for finding_id in request.finding_ids if finding_id not in open_ids]
+            if not_open:
+                refusals.append(FixRefusal(request, not_open_ids=not_open))
+                continue
+            if request.finding_ids:
+                wanted.update(request.finding_ids)
+            else:
+                wanted.update(open_ids)
+            accepted.append(request)
+            continue
+        thread_finding = reply_target(state, request.thread_root_id)
+        if thread_finding is None:
+            if request.thread_root_id not in closed_threads:
+                closed_threads.append(request.thread_root_id)
+            continue
+        if any(finding_id != thread_finding.id for finding_id in request.finding_ids):
+            refusals.append(FixRefusal(request, thread_finding_id=thread_finding.id))
+            continue
+        wanted.add(thread_finding.id)
+        accepted.append(request)
+    findings = [f for f in state.open_findings if f.id in wanted]
+    return FixPlan(accepted=accepted, findings=findings, refusals=refusals, closed_threads=closed_threads)
 
 
 def reply_target(state: PullRequestState, thread_root_id: int) -> Finding | None:

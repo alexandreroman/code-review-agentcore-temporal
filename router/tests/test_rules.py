@@ -2,6 +2,7 @@ import pytest
 from agentcore_review_router.rules import (
     KillTally,
     can_run_commands,
+    fix_finding_ids,
     is_bot_login,
     kill_comment,
     kill_targets,
@@ -32,6 +33,27 @@ def test_only_write_access_runs_commands(permission, allowed):
 )
 def test_only_the_bot_login_starts_a_finding_thread(login, expected):
     assert is_bot_login(login, "tar-bot[bot]") is expected
+
+
+@pytest.mark.parametrize(
+    ("arguments", "finding_ids"),
+    [
+        ((), []),
+        (("F-001", "F-003"), ["F-001", "F-003"]),
+        (("f-001", "F-001"), ["F-001"]),
+        (("F-1000",), ["F-1000"]),
+    ],
+)
+def test_fix_arguments_name_findings_uppercased_once_each(arguments, finding_ids):
+    assert fix_finding_ids(arguments) == finding_ids
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [("foo",), ("F-001", "please"), ("F-001,",), ("F-",), ("F001",), ("#F-001",), ("F-٣",)],
+)
+def test_fix_arguments_other_than_finding_ids_are_refused(arguments):
+    assert fix_finding_ids(arguments) is None
 
 
 def test_kill_targets_keep_each_agentcore_session_once():

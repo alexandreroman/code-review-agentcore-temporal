@@ -13,6 +13,8 @@ from agentcore_review_worker.publishing import (
     comment_body,
     failed_reply,
     no_longer_open_reply,
+    not_open_fix_comment,
+    off_thread_fix_reply,
     reply_body,
     split_changes,
     unavailable_check_output,
@@ -136,12 +138,35 @@ def test_unavailable_check_output_lists_every_reviewer():
 
 
 def test_closing_comment_calls_out_a_bypass():
-    text = closing_comment("admin", [finding("F-004", severity="medium"), finding("F-001", severity="high")])
-    assert text == "⚠️ Merged by @admin bypassing AI Review, 2 open findings: F-001 (high), F-004 (medium)."
+    findings = [finding("F-004", severity="medium"), finding("F-001", severity="high")]
+    text = closing_comment("admin", findings, "<!-- m -->")
+    assert (
+        text == "⚠️ Merged by @admin bypassing AI Review, 2 open findings: F-001 (high), F-004 (medium).\n\n<!-- m -->"
+    )
 
 
 def test_closing_comment_without_blocking_findings():
-    assert closing_comment(None, [finding("F-002", severity="low")]) == "Merged with 1 open finding: F-002 (low)."
+    text = closing_comment(None, [finding("F-002", severity="low")], "<!-- m -->")
+    assert text == "Merged with 1 open finding: F-002 (low).\n\n<!-- m -->"
+
+
+def test_a_fix_refused_in_a_thread_points_to_both_ways_of_fixing():
+    text = off_thread_fix_reply("F-001", ["F-001", "F-003"], "<!-- m -->")
+    assert text == (
+        "This thread is about F-001: `/fix F-001 F-003` was not applied. Comment `/fix` here to fix F-001, "
+        "or `/fix F-001 F-003` in the conversation.\n\n<!-- m -->"
+    )
+
+
+def test_a_fix_refused_in_the_conversation_lists_the_open_findings_most_severe_first():
+    open_findings = [finding("F-010", severity="low"), finding("F-009", severity="high")]
+    text = not_open_fix_comment(["F-099"], open_findings, "<!-- m -->")
+    assert text == "F-099 is not an open finding: nothing was fixed. Open findings: F-009, F-010.\n\n<!-- m -->"
+
+
+def test_a_fix_refused_with_no_open_finding():
+    text = not_open_fix_comment(["F-001", "F-002"], [], "<!-- m -->")
+    assert text == "F-001, F-002 are not open findings: nothing was fixed. No finding is open.\n\n<!-- m -->"
 
 
 def test_a_thread_reply_starts_with_the_verdict_and_ends_with_its_marker():

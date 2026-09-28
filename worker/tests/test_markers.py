@@ -2,6 +2,7 @@ from agentcore_review_worker.markers import (
     closing_marker,
     extract_finding_ids,
     finding_marker,
+    fix_refusal_marker,
     fix_trailer,
     reply_marker,
     round_marker,
@@ -14,6 +15,7 @@ def test_marker_formats_match_the_spec():
     assert closing_marker("pr-o-r-3") == "<!-- closing:pr-o-r-3 -->"
     assert fix_trailer("pr-o-r-3", 1) == "Review-Fix: pr-o-r-3/1"
     assert reply_marker("pr-o-r-3", 777) == "<!-- reply:pr-o-r-3:777 -->"
+    assert fix_refusal_marker("pr-o-r-3", "d-1") == "<!-- fix-refused:pr-o-r-3:d-1 -->"
 
 
 def test_extract_finding_ids():

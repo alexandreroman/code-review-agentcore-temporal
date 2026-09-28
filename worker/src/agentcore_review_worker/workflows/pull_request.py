@@ -2,7 +2,7 @@
 
 It handles metadata only (paths, SHAs, snapshot keys, findings); patches and file contents stay in the
 agents' child workflows. Continue-as-new happens between two rounds only, since it would terminate
-running children, and carries the pending push, fix request and thread replies over.
+running children, and carries the pending push, fix requests and thread replies over.
 """
 
 import asyncio
@@ -37,7 +37,7 @@ with workflow.unsafe.imports_passed_through():
         BatchInput,
         ChangeSet,
         CheckInput,
-        ClosingInput,
+        CommentInput,
         CommitResult,
         DiscussionInput,
         DiscussionReply,
@@ -359,22 +359,21 @@ class PullRequestWorkflow:
     # --- fix ---
 
     async def _fix(self) -> None:
+        """One fixer run for every accepted /fix request; each refused one gets its own explanation."""
         state = self._state
-        request, state.pending_fix = state.pending_fix, None
-        thread_root_ids, state.pending_fix_roots = state.pending_fix_roots, None
-        assert request is not None
-        findings = lifecycle.fix_targets(state, thread_root_ids)
-        if thread_root_ids is not None:
-            targeted = {f.comment_id for f in findings}
-            for root in thread_root_ids:
-                if root not in targeted:
-                    # Keyed on the thread: a /fix in a closed thread gets this answer once.
-                    await self._answer_closed_thread(root, markers.reply_marker(self._id, root))
-        if not findings or state.last_reviewed_sha is None:
-            workflow.logger.info("fix requested by %s ignored: no open finding", request.requested_by)
+        requests, state.pending_fixes = state.pending_fixes, []
+        plan = lifecycle.plan_fix(state, requests)
+        for root in plan.closed_threads:
+            # Keyed on the thread: a /fix in a closed thread gets this answer once.
+            await self._answer_closed_thread(root, markers.reply_marker(self._id, root))
+        for refusal in plan.refusals:
+            await self._refuse_fix(refusal)
+        if not plan.findings or state.last_reviewed_sha is None:
+            workflow.logger.info("fix requests of %s ignored: no open finding", [r.requested_by for r in requests])
             return
+        requested_by = plan.accepted[-1].requested_by
         state.fix_count += 1
-        self._memo(f"fixing for @{request.requested_by}")
+        self._memo(f"fixing for @{requested_by}")
         try:
             snapshot = await self._snapshot(state.last_reviewed_sha)
             fixer = FixerInput(
@@ -383,7 +382,7 @@ class PullRequestWorkflow:
                 fix_number=state.fix_count,
                 expected_head_sha=state.last_reviewed_sha,
                 snapshot=snapshot,
-                findings=findings,
+                findings=plan.findings,
             )
             result: CommitResult = await workflow.execute_child_workflow(
                 FixerWorkflow.run,
@@ -398,6 +397,21 @@ class PullRequestWorkflow:
         except (ActivityError, ChildWorkflowError) as error:
             workflow.logger.error("fix %d failed: %s", state.fix_count, error.cause or error)
             self._memo("fix failed, waiting for changes")
+
+    async def _refuse_fix(self, refusal: lifecycle.FixRefusal) -> None:
+        """Explain a refused /fix where it was posted: in its thread, or in the Conversation."""
+        request = refusal.request
+        marker = markers.fix_refusal_marker(self._id, request.delivery_id)
+        workflow.logger.info("fix request of %s refused (delivery %s)", request.requested_by, request.delivery_id)
+        try:
+            if refusal.thread_finding_id is not None and request.thread_root_id is not None:
+                body = publishing.off_thread_fix_reply(refusal.thread_finding_id, request.finding_ids, marker)
+                await self._post_reply(request.thread_root_id, body, marker)
+            else:
+                body = publishing.not_open_fix_comment(refusal.not_open_ids, self._state.open_findings, marker)
+                await self._post_comment(body, marker)
+        except ActivityError as error:
+            workflow.logger.warning("fix refusal not posted: %s", error.cause or error)
 
     # --- discussion in a finding's thread ---
 
@@ -469,6 +483,11 @@ class PullRequestWorkflow:
             **policies.POST_THREAD_REPLY,
         )
 
+    async def _post_comment(self, body: str, marker: str) -> None:
+        await workflow.execute_activity(
+            "post_pr_comment", CommentInput(pr=self._pr, body=body, marker=marker), **policies.POST_PR_COMMENT
+        )
+
     async def _refresh_check(self) -> None:
         """Recompute the last round's check after a dismissal: it turns green once no blocking finding is left."""
         state = self._state
@@ -491,13 +510,10 @@ class PullRequestWorkflow:
         assert closed is not None
         self._memo("merged" if closed.merged else "closed")
         if closed.merged and self._state.open_findings:
-            body = publishing.closing_comment(closed.closed_by, self._state.open_findings)
+            marker = markers.closing_marker(self._id)
+            body = publishing.closing_comment(closed.closed_by, self._state.open_findings, marker)
             try:
-                await workflow.execute_activity(
-                    "post_closing_comment",
-                    ClosingInput(pr=self._pr, workflow_id=self._id, body=body),
-                    **policies.POST_CLOSING_COMMENT,
-                )
+                await self._post_comment(body, marker)
             except ActivityError as error:
                 workflow.logger.warning("closing comment not posted: %s", error.cause or error)
         try:

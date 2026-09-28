@@ -138,6 +138,15 @@ def test_fix_in_the_conversation_fixes_everything():
     assert isinstance(result, RunCommand) and result.thread_root_id is None
 
 
+@pytest.mark.parametrize("event", COMMENT_EVENTS)
+@pytest.mark.parametrize(("body", "arguments"), [("/fix", ()), ("/fix  F-001\nF-003 ", ("F-001", "F-003"))])
+def test_a_command_carries_the_words_after_it(event, body, arguments):
+    payload = load(event)
+    payload["comment"]["body"] = body
+    result = route(event, payload, "d", CONFIG)
+    assert isinstance(result, RunCommand) and result.arguments == arguments
+
+
 @pytest.mark.parametrize("body", ["Why? The input is validated upstream.", "please /fix", "/FIX"])
 def test_plain_replies_in_a_review_thread_are_forwarded(body):
     payload = load("pull_request_review_comment")
