@@ -13,7 +13,7 @@ from agentcore_review_shared.contract import FINDING_ID_PATTERN, Finding
 from pydantic import BaseModel
 
 from agentcore_review_worker.hunks import is_commentable
-from agentcore_review_worker.lifecycle import MAX_BOT_REPLIES_PER_THREAD, sort_key
+from agentcore_review_worker.lifecycle import MAX_BOT_REPLIES_PER_THREAD, merge_status, sort_key
 from agentcore_review_worker.markers import finding_marker
 from agentcore_review_worker.models import DiscussionReply, FileChange, ReviewContent, ThreadComment
 from agentcore_review_worker.navigation import is_outside_repository
@@ -73,15 +73,6 @@ def _with_severity(findings: list[Finding]) -> str:
     return ", ".join(f"{f.id} ({f.severity})" for f in findings)
 
 
-def _merge_status(open_findings: list[Finding]) -> str:
-    """Whether the open findings let the pull request merge: none of critical or high severity may be open."""
-    blocking = [f.id for f in sorted(open_findings, key=sort_key) if f.severity.blocking]
-    if blocking:
-        findings = count(len(blocking), "critical or high finding")
-        return f"**Merge blocked** by {findings}: {', '.join(blocking)}."
-    return "**Mergeable**: no critical or high finding is open."
-
-
 def _split_inline(
     findings: list[Finding], commentable: dict[str, set[int]], cap: int
 ) -> tuple[list[Finding], list[Finding]]:
@@ -107,7 +98,7 @@ def build_review(content: ReviewContent, commentable: dict[str, set[int]], marke
     sections = [
         marker,
         f"## AI Review — round {content.round}",
-        _merge_status(content.findings + content.still_open),
+        merge_status(content.findings + content.still_open),
         content.summary_markdown.strip() or "No summary.",
     ]
     if in_body:

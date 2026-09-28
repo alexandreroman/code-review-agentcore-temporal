@@ -80,14 +80,14 @@ class PullRequestWorkflow:
         self._state = input.state
         self._closed: PrClosed | None = None
         self._reviewing_sha: str | None = None
-        self._phase = ""  # the memo's state, restored once a reply is answered
+        self._phase = ""  # shown in Temporal UI, restored once a reply is answered
 
     @workflow.run
     async def run(self, input: PullRequestInput) -> PullRequestOutcome:
         # A started run has an empty state; a continued one carries its counters over, and must not recover them.
         if workflow.info().continued_run_id is None:
             await self._take_over_earlier_run()
-        self._memo("waiting for changes")
+        self._set_phase("waiting for changes")
         if self._state.idle_since is None:  # a state carried over from a version without the idle timer
             lifecycle.start_idle(self._state, workflow.now())
         while True:
@@ -145,9 +145,22 @@ class PullRequestWorkflow:
     def _next(self) -> lifecycle.Action | None:
         return lifecycle.next_action(self._state, self._closed is not None)
 
-    def _memo(self, phase: str) -> None:
+    def _set_phase(self, phase: str) -> None:
+        """Show the phase in Temporal UI: in the memo, readable without a worker, and in the current details.
+
+        A continue-as-new drops the current details: the new run sets them again when it starts.
+        """
         self._phase = phase
         workflow.upsert_memo(lifecycle.memo(phase, self._state))
+        self._show_details()
+
+    def _show_details(self) -> None:
+        """Show the open findings as they change within a phase (a published round, a dismissal).
+
+        Only the current details: they live in the worker's memory, whereas a memo upsert here would add a command
+        that the histories of running workflows lack, and break their replay.
+        """
+        workflow.set_current_details(lifecycle.current_details(self._phase, self._state))
 
     async def _continue_as_new_if_needed(self) -> None:
         """Between rounds only: on a long history, or to move to a newly deployed worker version."""
@@ -257,7 +270,7 @@ class PullRequestWorkflow:
             lifecycle.start_idle(state, workflow.now())
             return None
         # GitHub's closed webhook signals this run while it ends, or finds none: harmless either way.
-        self._memo("closed for inactivity")
+        self._set_phase("closed for inactivity")
         marker = markers.idle_close_marker(self._id, since)
         body = publishing.idle_close_comment(self._input.idle_close_seconds, marker)
         try:
@@ -292,7 +305,7 @@ class PullRequestWorkflow:
                 return  # a late signal for a head already reviewed
             state.round += 1
             self._reviewing_sha = change.head_sha
-            self._memo(f"reviewing round {state.round}")
+            self._set_phase(f"reviewing round {state.round}")
             check = CheckInput(
                 pr=self._pr, head_sha=change.head_sha, external_id=f"{self._id}:{state.round}", status="in_progress"
             )
@@ -316,7 +329,7 @@ class PullRequestWorkflow:
                     )
         finally:
             self._reviewing_sha = None
-            self._memo(phase)
+            self._set_phase(phase)
 
     async def _run_round(self, change: ChangeSet, check: CheckInput) -> bool:
         """Review the change; False when no reviewer completed, which leaves the head unreviewed."""
@@ -372,6 +385,7 @@ class PullRequestWorkflow:
         state.last_finding_numbers = last_finding_numbers
         lifecycle.record_resolved(state, resolved)
         state.open_findings = still_open + [f.model_copy(update={"comment_id": comment_ids.get(f.id)}) for f in kept]
+        self._show_details()
         state.last_reviewed_sha = change.head_sha
         state.last_reviewed_round = number
         if resolved:
@@ -524,7 +538,7 @@ class PullRequestWorkflow:
         assert state.last_reviewed_sha is not None  # a finding is open only after a published round
         requested_by = triage.accepted[-1].requested_by
         state.fix_count += 1
-        self._memo(f"fixing for @{requested_by}")
+        self._set_phase(f"fixing for @{requested_by}")
         try:
             snapshot = await self._snapshot(state.last_reviewed_sha)
             fixer = FixerInput(
@@ -545,10 +559,10 @@ class PullRequestWorkflow:
             )
             # The commit's synchronize webhook starts the next round.
             workflow.logger.info("fix %d pushed as %s (rejected: %s)", state.fix_count, result.sha, result.rejected)
-            self._memo("fix pushed, waiting for its review")
+            self._set_phase("fix pushed, waiting for its review")
         except (ActivityError, ChildWorkflowError) as error:
             workflow.logger.error("fix %d failed: %s", state.fix_count, error.cause or error)
-            self._memo("fix failed, waiting for changes")
+            self._set_phase("fix failed, waiting for changes")
 
     async def _refuse_fix(self, refusal: lifecycle.FixRefusal) -> None:
         """Explain a refused /fix where it was posted: in its thread, or in the Conversation."""
@@ -577,7 +591,7 @@ class PullRequestWorkflow:
             await self._answer_closed_thread(reply.thread_root_id, marker)
             return
         phase = self._phase
-        self._memo(f"answering @{reply.author} on {finding.id}")
+        self._set_phase(f"answering @{reply.author} on {finding.id}")
         try:
             thread: ThreadRead = await workflow.execute_activity(
                 "ReadThread",
@@ -611,12 +625,13 @@ class PullRequestWorkflow:
             await self._post_reply(reply.thread_root_id, body, marker, finding.id)
             if answer.verdict == "dismiss":
                 lifecycle.dismiss(state, finding.id, answer.answer, reply.author)
+                self._show_details()
                 await self._resolve([finding.id])
                 await self._refresh_check()
         except ActivityError as error:
             workflow.logger.error("reply to %s on %s failed: %s", reply.author, finding.id, error.cause or error)
         finally:
-            self._memo(phase)
+            self._set_phase(phase)
 
     async def _answer_closed_thread(self, thread_root_id: int, marker: str) -> None:
         """A reply or /fix in the thread of a dismissed or resolved finding: a short answer, no agent.
@@ -673,7 +688,7 @@ class PullRequestWorkflow:
     async def _finish(self) -> PullRequestOutcome:
         closed = self._closed
         assert closed is not None
-        self._memo("merged" if closed.merged else "closed")
+        self._set_phase("merged" if closed.merged else "closed")
         if closed.merged and self._state.open_findings:
             marker = markers.closing_marker(self._id)
             body = publishing.closing_comment(closed.closed_by, self._state.open_findings, marker)

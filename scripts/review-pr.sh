@@ -15,7 +15,10 @@ delivery="manual-$(date +%s)"
 
 case "$action" in
   update)
-    head=$(gh pr view "$number" --repo "$owner/$repo" --json headRefOid --jq .headRefOid)
+    pr=$(gh pr view "$number" --repo "$owner/$repo" --json headRefOid,title)
+    head=$(jq -r .headRefOid <<<"$pr")
+    # The router's summary: `#3 · Add customer search`, on a single line.
+    summary=$(jq -r --arg number "$number" '"#\($number) · \(.title | gsub("\\s+"; " "))"' <<<"$pr")
     installation=$(uv run --quiet python -m agentcore_review_tools.github_app installation-id \
       --owner "$owner" --repo "$repo")
     input=$(jq -nc --arg owner "$owner" --arg repo "$repo" --argjson number "$number" \
@@ -25,7 +28,7 @@ case "$action" in
         idle_warning_seconds: $warning, idle_close_seconds: $close}')
     signal=$(jq -nc --arg sha "$head" --arg delivery "$delivery" '{head_sha: $sha, delivery_id: $delivery}')
     tcli workflow signal-with-start --type PullRequestWorkflow --task-queue "$queue" --workflow-id "$workflow_id" \
-      --input "$input" --signal-name pr_updated --signal-input "$signal" \
+      --input "$input" --signal-name pr_updated --signal-input "$signal" --static-summary "$summary" \
       --id-conflict-policy UseExisting --id-reuse-policy AllowDuplicate
     ;;
   fix)

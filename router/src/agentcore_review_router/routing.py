@@ -11,6 +11,8 @@ from temporalio.common import WorkflowIDReusePolicy
 Command = Literal["fix", "kill"]
 COMMANDS: dict[str, Command] = {"/fix": "fix", "/kill": "kill"}
 
+MAX_SUMMARY_BYTES = 200  # Temporal's cap on a workflow's static summary
+
 # Where a command was posted: "issue" for the PR's Conversation tab (issue_comment), "review" for a review
 # thread, such as a reply to a finding (pull_request_review_comment). GitHub reacts on each through its own endpoint.
 CommentKind = Literal["issue", "review"]
@@ -32,6 +34,7 @@ class StartOrSignal:
     pr: PrRef
     signal: PrUpdated
     reuse_policy: WorkflowIDReusePolicy
+    summary: str  # the workflow's static summary in Temporal UI: only a new run takes it
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,17 @@ def load_payload(body: bytes) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
+def workflow_summary(number: int, title: str) -> str:
+    """`#3 · Add customer search`, on a single line of at most 200 bytes, cut with an ellipsis."""
+    summary = " ".join(f"#{number} · {title}".split())
+    if len(summary.encode()) <= MAX_SUMMARY_BYTES:
+        return summary
+    ellipsis = "…"
+    kept_bytes = summary.encode()[: MAX_SUMMARY_BYTES - len(ellipsis.encode())]
+    # The cut may split a multibyte character: its leftover bytes are dropped.
+    return kept_bytes.decode(errors="ignore") + ellipsis
+
+
 def _pr_ref(payload: dict, number: int) -> PrRef:
     repository = payload["repository"]
     return PrRef(
@@ -127,6 +141,7 @@ def _route_pull_request(payload: dict, delivery_id: str, config: RouterConfig) -
             pr=ref,
             signal=PrUpdated(head_sha=pull_request["head"]["sha"], delivery_id=delivery_id),
             reuse_policy=policy,
+            summary=workflow_summary(ref.number, pull_request["title"]),
         )
     if action == "closed":
         merged = bool(pull_request.get("merged"))

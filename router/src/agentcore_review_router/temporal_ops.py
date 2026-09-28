@@ -38,6 +38,7 @@ async def start_or_signal(
             id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
             start_signal=SIGNAL_PR_UPDATED,
             start_signal_args=[action.signal],
+            static_summary=action.summary,
             rpc_timeout=RPC_TIMEOUT,
         )
     except WorkflowAlreadyStartedError:

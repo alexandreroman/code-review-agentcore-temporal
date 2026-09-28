@@ -317,6 +317,29 @@ def fallback_summary(input: SynthesisInput) -> ReviewSummary:
     )
 
 
+def merge_status(open_findings: list[Finding]) -> str:
+    """Whether the open findings let the pull request merge: none of critical or high severity may be open."""
+    blocking = [f.id for f in sorted(open_findings, key=sort_key) if f.severity.blocking]
+    if blocking:
+        findings = count(len(blocking), "critical or high finding")
+        return f"**Merge blocked** by {findings}: {', '.join(blocking)}."
+    return "**Mergeable**: no critical or high finding is open."
+
+
+def current_details(phase: str, state: PullRequestState) -> str:
+    """The current details shown in Temporal UI (Markdown): the phase and its round, the merge status, the open count.
+
+    A worker serves them, so they show only while one runs: the memo holds the same state for when none does.
+    """
+    heading = f"**{phase[:1].upper()}{phase[1:]}**"
+    # Phases such as "reviewing round 3" name the round already.
+    if state.round > 0 and f"round {state.round}" not in phase:
+        heading += f" · round {state.round}"
+    open_count = len(state.open_findings)
+    open_line = f"{count(open_count, 'open finding')}." if open_count else "No open finding."
+    return "\n\n".join([heading, merge_status(state.open_findings), open_line])
+
+
 def memo(phase: str, state: PullRequestState) -> dict[str, object]:
     """The memo shown in Temporal UI, readable even when no worker runs."""
     return {

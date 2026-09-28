@@ -19,6 +19,7 @@ from agentcore_review_worker.lifecycle import (
     apply_summary,
     clean_report,
     closed_finding_id,
+    current_details,
     discussion_thread,
     dismiss,
     fallback_summary,
@@ -373,3 +374,24 @@ def test_memo_lists_open_findings_most_severe_first():
         "round": 2,
         "open_findings": ["S-02 critical app/search.py:5 SQL injection", "S-01 low app/search.py:5 SQL injection"],
     }
+
+
+def test_current_details_name_the_blocking_findings():
+    open_findings = [finding("P-01", severity="high"), finding("S-02", severity="low"), finding("S-01")]
+    state = PullRequestState(round=3, open_findings=open_findings)
+    assert current_details("reviewing round 3", state) == (
+        "**Reviewing round 3**\n\n**Merge blocked** by 2 critical or high findings: S-01, P-01.\n\n3 open findings."
+    )
+
+
+def test_current_details_add_the_round_the_phase_does_not_name():
+    state = PullRequestState(round=3, open_findings=[finding("S-01", severity="low")])
+    assert current_details("waiting for changes", state) == (
+        "**Waiting for changes** · round 3\n\n**Mergeable**: no critical or high finding is open.\n\n1 open finding."
+    )
+
+
+def test_current_details_without_round_or_finding():
+    assert current_details("waiting for changes", PullRequestState()) == (
+        "**Waiting for changes**\n\n**Mergeable**: no critical or high finding is open.\n\nNo open finding."
+    )

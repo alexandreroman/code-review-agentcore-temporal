@@ -11,6 +11,7 @@ from agentcore_review_router.routing import (
     StartOrSignal,
     load_payload,
     route,
+    workflow_summary,
 )
 from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed
 from temporalio.common import WorkflowIDReusePolicy
@@ -43,12 +44,24 @@ def test_pr_updates_start_or_signal(action, policy):
     assert isinstance(result, StartOrSignal)
     assert result.workflow_id == WF and result.task_queue == "review" and result.reuse_policy == policy
     assert result.signal.head_sha == "a1b2c3d4e5f6" and result.signal.delivery_id == "delivery-1"
+    assert result.summary == "#3 · Add customer search"
     assert (result.pr.owner, result.pr.repo, result.pr.number, result.pr.installation_id) == (
         "octocat",
         "agentcore-review-demo-app",
         3,
         90210,
     )
+
+
+def test_workflow_summary_is_a_single_line():
+    assert workflow_summary(3, "Add customer\n  search\r\n") == "#3 · Add customer search"
+
+
+def test_long_workflow_summary_is_cut_to_200_bytes_on_a_character_boundary():
+    # "#3 · " takes 6 bytes and each "é" 2: the cut at 197 bytes splits the 96th "é", which is dropped.
+    summary = workflow_summary(3, "é" * 200)
+    assert summary == "#3 · " + "é" * 95 + "…"
+    assert len(summary.encode()) <= 200
 
 
 def test_dev_branch_goes_to_the_dev_queue():
