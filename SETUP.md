@@ -155,12 +155,14 @@ make up
 
 `make up` chains `bootstrap` (OpenTofu state bucket and KMS key), `infra`
 (Lambda router, ECR repository, IAM roles, secret containers, snapshots
-bucket, optional custom domain), `secrets` (Anthropic key and certificates
-into Secrets Manager) and `deploy` (image build and push, AgentCore runtime
-and endpoint, Temporal Worker Deployment Version). The AgentCore runtime
-only exists once there is a build to run: `infra` alone never creates it.
-The first image push uploads about 95 MB: on a slow uplink it takes a long
-time; later pushes only send the changed layers.
+bucket, optional custom domain, and the AgentCore Identity workload identity
+and API key provider through which the worker reads the Anthropic key),
+`secrets` (Anthropic key and certificates into Secrets Manager) and `deploy`
+(image build and push, AgentCore runtime and endpoint, Temporal Worker
+Deployment Version). The AgentCore runtime only exists once there is a
+build to run: `infra` alone never creates it. The first image push uploads
+about 95 MB: on a slow uplink it takes a long time; later pushes only send
+the changed layers.
 
 This first run stops on purpose:
 

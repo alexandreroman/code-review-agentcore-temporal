@@ -1,12 +1,16 @@
 """Worker settings, read from the environment: AgentCore runtime variables, or the local .env via make.
 
-Settings hold where secrets live (Secrets Manager ARNs or names), never their values.
+Settings hold where secrets live (Secrets Manager ARNs or names, AgentCore Identity names), never their values.
 """
 
 from collections.abc import Mapping
 from dataclasses import dataclass
 
-from agentcore_review_shared.secrets import ANTHROPIC_SECRET, GITHUB_APP_SECRET
+from agentcore_review_shared.secrets import (
+    ANTHROPIC_CREDENTIAL_PROVIDER,
+    GITHUB_APP_SECRET,
+    WORKER_WORKLOAD_IDENTITY,
+)
 from temporalio.worker import WorkerDeploymentVersion
 
 
@@ -16,7 +20,8 @@ class AppSettings:
 
     snapshots_bucket: str
     github_app_secret: str  # Secrets Manager ARN or name
-    anthropic_secret: str  # Secrets Manager ARN or name
+    workload_identity: str  # AgentCore Identity workload identity name
+    anthropic_credential_provider: str  # AgentCore Identity API key credential provider name
     anthropic_model: str
     anthropic_effort: str
     max_parallel_agents: int
@@ -42,7 +47,8 @@ def agentcore_settings(env: Mapping[str, str]) -> WorkerSettings:
         app=_app_settings(
             env,
             github_app_secret=env["GITHUB_APP_SECRET_ID"],
-            anthropic_secret=env["ANTHROPIC_SECRET_ARN"],
+            workload_identity=env["WORKLOAD_IDENTITY_NAME"],
+            anthropic_credential_provider=env["ANTHROPIC_CREDENTIAL_PROVIDER"],
         ),
     )
 
@@ -54,15 +60,23 @@ def dev_settings(env: Mapping[str, str]) -> WorkerSettings:
         task_queue=env["DEV_TASK_QUEUE"],
         deployment=None,
         # The dev worker reads the same secrets by name, with the developer's AWS credentials.
-        app=_app_settings(env, github_app_secret=GITHUB_APP_SECRET, anthropic_secret=ANTHROPIC_SECRET),
+        app=_app_settings(
+            env,
+            github_app_secret=GITHUB_APP_SECRET,
+            workload_identity=WORKER_WORKLOAD_IDENTITY,
+            anthropic_credential_provider=ANTHROPIC_CREDENTIAL_PROVIDER,
+        ),
     )
 
 
-def _app_settings(env: Mapping[str, str], *, github_app_secret: str, anthropic_secret: str) -> AppSettings:
+def _app_settings(
+    env: Mapping[str, str], *, github_app_secret: str, workload_identity: str, anthropic_credential_provider: str
+) -> AppSettings:
     return AppSettings(
         snapshots_bucket=env["SNAPSHOTS_BUCKET"],
         github_app_secret=github_app_secret,
-        anthropic_secret=anthropic_secret,
+        workload_identity=workload_identity,
+        anthropic_credential_provider=anthropic_credential_provider,
         anthropic_model=env["ANTHROPIC_MODEL"],
         anthropic_effort=env["ANTHROPIC_EFFORT"],
         max_parallel_agents=int(env["MAX_PARALLEL_AGENTS"]),

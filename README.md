@@ -58,7 +58,8 @@ graph LR
    with `Glob`, `Grep` and `Read` tools. A **synthesis** agent deduplicates
    and orders their findings into a summary, skipped when a round finds
    nothing new; the workflow publishes the review and sets the
-   `AI Review` check.
+   `AI Review` check. The worker gets the Anthropic API key from
+   **AgentCore Identity**, which reads it from Secrets Manager.
 4. Temporal starts **workers on AgentCore** only when a task waits:
    nothing runs between two events. Every model call and tool call is an
    activity, so a killed session loses nothing but the call in flight.
