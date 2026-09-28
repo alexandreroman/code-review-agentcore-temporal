@@ -6,11 +6,6 @@ from pydantic import BaseModel, StringConstraints
 
 GITHUB_APP_SECRET = "code-review-agentcore-temporal/github-app"
 
-# The worker reads the Anthropic API key through AgentCore Identity, as its own workload identity, from an API key
-# credential provider backed by the Secrets Manager secret that make secrets fills (infra/aws/secrets.tf).
-WORKER_WORKLOAD_IDENTITY = "code-review-agentcore-temporal-worker"
-ANTHROPIC_CREDENTIAL_PROVIDER = "agentcore-review-demo-anthropic"
-
 NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 
 

@@ -19,10 +19,8 @@ from .settings import AppSettings
 SELFCHECK = AppSettings(
     snapshots_bucket="selfcheck",
     github_app_secret="selfcheck",
-    workload_identity="selfcheck",
-    anthropic_credential_provider="selfcheck",
-    anthropic_model="selfcheck",
-    anthropic_effort="selfcheck",
+    bedrock_model_id="selfcheck",
+    model_effort="selfcheck",
     max_parallel_agents=1,
 )
 

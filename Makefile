@@ -19,9 +19,8 @@ DEV_TASK_QUEUE ?= review-dev
 DEV_BRANCH_PREFIX ?= dev/
 PR_IDLE_WARNING_SECONDS ?= 600
 PR_IDLE_CLOSE_SECONDS ?= 900
-ANTHROPIC_API_KEY ?=
-ANTHROPIC_MODEL ?= claude-opus-5
-ANTHROPIC_EFFORT ?= high
+BEDROCK_MODEL_ID ?= global.anthropic.claude-opus-5
+MODEL_EFFORT ?= high
 MAX_PARALLEL_AGENTS ?= 3
 DEMO_REPO ?= agentcore-review-demo-app
 GITHUB_APP_NAME ?= Code Review AgentCore x Temporal
@@ -46,7 +45,7 @@ endif
 # a bare `export` would expand $(GITHUB_OWNER), hence run gh, for every recipe.
 export AWS_REGION TEMPORAL_NAMESPACE TEMPORAL_ADDRESS TEMPORAL_TLS_CERT_PATH TEMPORAL_TLS_KEY_PATH \
 	TEMPORAL_DEPLOYMENT_NAME TASK_QUEUE DEV_TASK_QUEUE PR_IDLE_WARNING_SECONDS PR_IDLE_CLOSE_SECONDS \
-	ANTHROPIC_API_KEY ANTHROPIC_MODEL ANTHROPIC_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO DOMAIN_NAME \
+	BEDROCK_MODEL_ID MODEL_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO DOMAIN_NAME \
 	CLOUDFLARE_ZONE_ID CLOUDFLARE_API_TOKEN TRACING
 export AWS_DEFAULT_REGION = $(AWS_REGION)
 
@@ -60,8 +59,8 @@ export TF_VAR_dev_branch_prefix = $(DEV_BRANCH_PREFIX)
 export TF_VAR_pr_idle_warning_seconds = $(PR_IDLE_WARNING_SECONDS)
 export TF_VAR_pr_idle_close_seconds = $(PR_IDLE_CLOSE_SECONDS)
 export TF_VAR_deployment_name = $(TEMPORAL_DEPLOYMENT_NAME)
-export TF_VAR_anthropic_model = $(ANTHROPIC_MODEL)
-export TF_VAR_anthropic_effort = $(ANTHROPIC_EFFORT)
+export TF_VAR_bedrock_model_id = $(BEDROCK_MODEL_ID)
+export TF_VAR_model_effort = $(MODEL_EFFORT)
 export TF_VAR_max_parallel_agents = $(MAX_PARALLEL_AGENTS)
 export TF_VAR_idle_timeout = $(AGENTCORE_IDLE_TIMEOUT)
 export TF_VAR_demo_repo = $(DEMO_REPO)
@@ -153,7 +152,7 @@ infra: router-build infra-init ## Apply the aws stack (keeps the deployed build 
 	scripts/infra.sh
 
 .PHONY: secrets
-secrets: ## Push the Anthropic key and the mTLS certificates from .env to Secrets Manager
+secrets: ## Push the mTLS certificates from .env to Secrets Manager
 	scripts/secrets.sh
 
 .PHONY: github-app

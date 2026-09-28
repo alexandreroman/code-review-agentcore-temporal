@@ -6,7 +6,7 @@ description: >-
   (default, 8 to 10 min) after a change to the worker, the router or the
   infrastructure; mode full (about 30 min) before a conference. It opens,
   comments on and merges pull requests in the demo repository and spends
-  Anthropic tokens.
+  Bedrock tokens.
 argument-hint: "[smoke|full]"
 disable-model-invocation: true
 ---

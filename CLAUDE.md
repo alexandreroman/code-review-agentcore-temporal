@@ -9,7 +9,7 @@ for the installation and [DEMO.md](DEMO.md) for the talk run-through.
 ## Tech stack
 
 - Python (uv workspace), Temporal Python SDK with the Strands Agents plugin
-- Claude through the Anthropic API
+- Claude on Amazon Bedrock (Strands `BedrockModel`, Converse API)
 - Temporal Cloud (mTLS), Amazon Bedrock AgentCore Runtime, AWS Lambda, S3
 - OpenTofu for all infrastructure; GitHub App for PR integration
 
@@ -38,7 +38,7 @@ The `e2e-validation` project skill
 `/e2e-validation` (smoke, 8 to 10 minutes) after a change to the worker,
 the router or the infrastructure, `/e2e-validation full` (about 30
 minutes) before a conference. It uses real resources, opens pull requests
-in the demo repository and spends Anthropic tokens: run it only when asked.
+in the demo repository and spends Bedrock tokens: run it only when asked.
 The planted defects it expects live in `expected-findings.yaml` next to it.
 
 ## Agents

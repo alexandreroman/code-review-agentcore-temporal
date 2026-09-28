@@ -48,12 +48,20 @@ variable "deployment_name" {
   type = string
 }
 
-variable "anthropic_model" {
-  type = string
+variable "bedrock_model_id" {
+  description = "Bedrock global cross-region inference profile ID of the model (global.anthropic.claude-opus-5)"
+  type        = string
+
+  validation {
+    # The worker's IAM policy follows the global inference profile's resource ARNs.
+    condition     = startswith(var.bedrock_model_id, "global.")
+    error_message = "bedrock_model_id must be a global cross-region inference profile ID (global.<model>)."
+  }
 }
 
-variable "anthropic_effort" {
-  type = string
+variable "model_effort" {
+  description = "How much effort Claude spends per answer (low, medium, high, ...), checked by Bedrock"
+  type        = string
 }
 
 variable "max_parallel_agents" {

@@ -20,8 +20,9 @@ Accounts:
   to its settings.
 - An **AWS** account where you can create IAM roles, Lambda functions, S3
   buckets, ECR repositories and Bedrock AgentCore runtimes, in a region
-  where AgentCore is available (`ca-central-1` by default).
-- An **Anthropic** API key.
+  where AgentCore is available (`ca-central-1` by default), with access to
+  **Claude Opus 5 on Amazon Bedrock** (see
+  [Bedrock model access](#bedrock-model-access)).
 - A **GitHub** account (personal or organization) to own the demo
   repository.
 
@@ -102,14 +103,14 @@ them up from environment variables.
 cp .env.example .env
 ```
 
-Set at least:
+Set at least `TEMPORAL_NAMESPACE`: your namespace (`your-namespace.a1b2c`
+is the placeholder).
 
-- `TEMPORAL_NAMESPACE`: your namespace (`your-namespace.a1b2c` is the
-  placeholder);
-- `ANTHROPIC_API_KEY`: your API key.
-
-Optional: `GITHUB_OWNER` when the demo repository belongs to an
-organization (the default is the account logged in to `gh`),
+Optional: `BEDROCK_MODEL_ID` for another model (a global cross-region
+inference profile ID, `global.anthropic.claude-opus-5` by default),
+`MODEL_EFFORT` for another effort level (`high` by default),
+`GITHUB_OWNER` when the demo repository belongs to an organization (the
+default is the account logged in to `gh`),
 `AWS_REGION` for another region, `TEMPORAL_TLS_CERT_PATH` and
 `TEMPORAL_TLS_KEY_PATH` for certificates outside `certs/`,
 `PR_IDLE_WARNING_SECONDS` and `PR_IDLE_CLOSE_SECONDS` for when an idle pull
@@ -135,6 +136,42 @@ Export `AWS_PROFILE` in your shell: the AWS CLI does not read `.env`. SSO
 sessions expire after a few hours; log in again before a deployment or a
 talk.
 
+### Bedrock model access
+
+The worker calls Claude Opus 5 through the global cross-region inference
+profile `global.anthropic.claude-opus-5`, the only way to call it from
+`ca-central-1`. In the Amazon Bedrock console of your region, open
+**Model catalog**, find Claude Opus 5 and, if the console asks for it, fill
+in the Anthropic use case form once for the account. Then check the access
+with a one-token call, in the project's region (the AWS CLI does not read
+`.env`, and the inference profile lives in the region that calls it):
+
+```bash
+aws bedrock-runtime converse --region ca-central-1 \
+  --model-id global.anthropic.claude-opus-5 \
+  --messages '[{"role":"user","content":[{"text":"ping"}]}]' \
+  --inference-config '{"maxTokens":1}'
+```
+
+Replace `ca-central-1` if you set another `AWS_REGION`.
+
+`make infra` grants the AgentCore worker's role this access. The local
+worker (`make dev`) calls Bedrock with your own credentials: your identity
+needs `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on
+the three resources a global inference profile involves, as the worker's
+role has them (`infra/aws/worker.tf`):
+
+- the inference profile in the source region,
+  `arn:aws:bedrock:<region>:<account-id>:inference-profile/global.anthropic.claude-opus-5`;
+- the foundation model in that region,
+  `arn:aws:bedrock:<region>::foundation-model/anthropic.claude-opus-5`;
+- the region-less global foundation model,
+  `arn:aws:bedrock:::foundation-model/anthropic.claude-opus-5`.
+
+An administrator identity already has them. The Bedrock user guide details
+the policy and its conditions:
+[Global cross-Region inference](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html).
+
 ## 6. GitHub CLI
 
 ```bash
@@ -156,10 +193,9 @@ make up
 ```
 
 `make up` chains `bootstrap` (OpenTofu state bucket and KMS key), `infra`
-(Lambda router, ECR repository, IAM roles, secret containers, snapshots
-bucket, optional custom domain, and the AgentCore Identity workload identity
-and API key provider through which the worker reads the Anthropic key),
-`secrets` (Anthropic key and certificates into Secrets Manager) and `deploy`
+(Lambda router, ECR repository, IAM roles, including the worker's Bedrock
+access, secret containers, snapshots bucket and optional custom domain),
+`secrets` (mTLS certificates into Secrets Manager) and `deploy`
 (image build and push, AgentCore runtime and endpoint, Temporal Worker
 Deployment Version). The AgentCore runtime only exists once there is a
 build to run: `infra` alone never creates it. The first image push uploads
@@ -321,6 +357,10 @@ While `DOMAIN_NAME` is set, the deployment targets stop at once if
 - **`Docker is not running`**: start Docker, then run the target again.
 - **AWS `ExpiredToken` or SSO errors**: `aws sso login --profile
   <profile>`.
+- **A review fails with `AccessDeniedException` or
+  `ResourceNotFoundException`** in the model activity: the account has no
+  access to the model, or the identity lacks the Bedrock permissions. See
+  [Bedrock model access](#bedrock-model-access).
 - **A workflow waits and no worker starts**: in Temporal UI, **Worker
   Deployments**, `agentcore-review-demo-worker` must have a current version
   with the `review` task queue. `make deploy` restores it.

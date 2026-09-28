@@ -22,7 +22,7 @@
 > rewrite it.
 
 - [Project objective](references/project_objective.md) — 15-min talk, two screens, four moments; stage reliability first
-- [Stack choices](references/project_stack.md) — mTLS, Anthropic API (no Bedrock), Python, and why
+- [Stack choices](references/project_stack.md) — mTLS, Claude on Bedrock (no Anthropic API key), Python, and why
 - [Demo app is Java / Spring Boot](references/project_demo_app_java.md) — reviewed repo is Java for enterprise audiences
 - [Local dev uses Temporal Cloud](references/project_dev_on_temporal_cloud.md) — no local Temporal server; make dev targets Cloud
 - [Design docs location](references/reference_design_docs.md) — specs, plans, decisions, status and spike results in git-ignored docs/

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Runs the local worker on the dev task queue, with hot reload (make dev).
 #
-# The worker reads its snapshots bucket from the aws stack outputs and its
-# secrets (GitHub App, Anthropic key) from Secrets Manager by name, with the
-# developer's AWS credentials; no secret goes through the environment.
+# The worker reads its snapshots bucket from the aws stack outputs and the
+# GitHub App secret from Secrets Manager by name, and calls Claude on Bedrock,
+# with the developer's AWS credentials; no secret goes through the environment.
 set -euo pipefail
 
 source scripts/lib.sh

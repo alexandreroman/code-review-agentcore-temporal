@@ -38,7 +38,8 @@ graph LR
     R -->|/kill| A
     T -->|scale out| A[AgentCore worker]
     D[Local dev worker] --> T
-    A --> C[Claude API]
+    A --> C[Claude on Bedrock]
+    D --> C
     A --> S[(S3 snapshots)]
     A -->|review, check, fix| GH
 ```
@@ -53,13 +54,13 @@ graph LR
    the workflow ends when the pull request is merged or closed, or when it
    closes an idle pull request itself.
 3. A round snapshots the repository into **S3**, then runs three
-   **reviewer agents** (Strands Agents with Claude, through the Anthropic
-   API) as child workflows. They read the diff and navigate the snapshot
-   with `Glob`, `Grep` and `Read` tools. A **synthesis** agent deduplicates
-   and orders their findings into a summary, skipped when a round finds
+   **reviewer agents** (Strands Agents with Claude on **Amazon Bedrock**)
+   as child workflows. They read the diff and navigate the snapshot with
+   `Glob`, `Grep` and `Read` tools. A **synthesis** agent deduplicates and
+   orders their findings into a summary, skipped when a round finds
    nothing new; the workflow publishes the review and sets the
-   `AI Review` check. The worker gets the Anthropic API key from
-   **AgentCore Identity**, which reads it from Secrets Manager.
+   `AI Review` check. The worker calls Bedrock with its AWS credentials
+   (the runtime role on AgentCore): no model API key exists.
 4. Temporal starts **workers on AgentCore** only when a task waits:
    nothing runs between two events. Every model call and tool call is an
    activity, so a killed session loses nothing but the call in flight.
@@ -75,7 +76,8 @@ graph LR
   and `tcld`, the GitHub CLI, `jq`, and Docker or a Docker-compatible CLI
   (arm64 image builds)
 - A Temporal Cloud namespace with Serverless Workers enabled, an AWS
-  account, an Anthropic API key and a GitHub account
+  account with access to Claude Opus 5 on Amazon Bedrock, and a GitHub
+  account
 
 ## Getting started
 
@@ -114,10 +116,10 @@ Operate:
 
 ## Configuration
 
-Copy [`.env.example`](.env.example) to `.env` and set `TEMPORAL_NAMESPACE`
-and `ANTHROPIC_API_KEY`; the file documents every other setting with its
-default. The Makefile loads `.env` for every target. Both `.env` and the
-`certs/` directory are git-ignored.
+Copy [`.env.example`](.env.example) to `.env` and set `TEMPORAL_NAMESPACE`;
+the file documents every other setting with its default, such as
+`BEDROCK_MODEL_ID` and `MODEL_EFFORT`. The Makefile loads `.env` for every
+target. Both `.env` and the `certs/` directory are git-ignored.
 
 Optionally, `DOMAIN_NAME`, `SUBDOMAIN`, `CLOUDFLARE_ZONE_ID` and
 `CLOUDFLARE_API_TOKEN` serve the webhook on a custom domain of a

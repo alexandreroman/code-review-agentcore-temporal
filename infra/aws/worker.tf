@@ -4,6 +4,17 @@ resource "aws_ecr_repository" "worker" {
   force_delete         = true
 }
 
+# A global cross-region inference profile: IAM checks the profile in the source region, the foundation model in that
+# region and the region-less global foundation model, as in the three statements of the Bedrock user guide
+# (https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html).
+locals {
+  bedrock_actions          = ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"]
+  bedrock_foundation_model = trimprefix(var.bedrock_model_id, "global.")
+  bedrock_inference_profile_arn = format(
+    "arn:aws:bedrock:%s:%s:inference-profile/%s", var.region, local.account_id, var.bedrock_model_id
+  )
+}
+
 resource "aws_iam_role" "agentcore" {
   name = "${local.name}-agentcore"
   assume_role_policy = jsonencode({
@@ -40,32 +51,37 @@ resource "aws_iam_role_policy" "agentcore" {
         Resource = "*"
       },
       {
-        Effect = "Allow"
-        Action = ["secretsmanager:GetSecretValue"]
-        # The Anthropic secret stays: AgentCore Identity reads it with the caller's permissions (EXTERNAL provider).
-        Resource = [
-          local.github_app_secret_arn_pattern,
-          aws_secretsmanager_secret.anthropic.arn,
-          aws_secretsmanager_secret.worker_cert.arn,
-        ]
+        Effect   = "Allow"
+        Action   = ["secretsmanager:GetSecretValue"]
+        Resource = [local.github_app_secret_arn_pattern, aws_secretsmanager_secret.worker_cert.arn]
       },
       {
-        Effect = "Allow"
-        Action = ["bedrock-agentcore:GetWorkloadAccessToken"]
-        Resource = [
-          local.workload_identity_directory_arn,
-          aws_bedrockagentcore_workload_identity.worker.workload_identity_arn,
-        ]
+        Effect    = "Allow"
+        Action    = local.bedrock_actions
+        Resource  = local.bedrock_inference_profile_arn
+        Condition = { StringEquals = { "aws:RequestedRegion" = var.region } }
       },
       {
-        Effect = "Allow"
-        Action = ["bedrock-agentcore:GetResourceApiKey"]
-        Resource = [
-          local.workload_identity_directory_arn,
-          aws_bedrockagentcore_workload_identity.worker.workload_identity_arn,
-          local.token_vault_arn,
-          aws_bedrockagentcore_api_key_credential_provider.anthropic.credential_provider_arn,
-        ]
+        Effect   = "Allow"
+        Action   = local.bedrock_actions
+        Resource = "arn:aws:bedrock:${var.region}::foundation-model/${local.bedrock_foundation_model}"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion"         = var.region
+            "bedrock:InferenceProfileArn" = local.bedrock_inference_profile_arn
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = local.bedrock_actions
+        Resource = "arn:aws:bedrock:::foundation-model/${local.bedrock_foundation_model}"
+        Condition = {
+          StringEquals = {
+            "aws:RequestedRegion"         = "unspecified"
+            "bedrock:InferenceProfileArn" = local.bedrock_inference_profile_arn
+          }
+        }
       },
       {
         Effect   = "Allow"
@@ -97,22 +113,20 @@ resource "aws_bedrockagentcore_agent_runtime" "worker" {
     idle_runtime_session_timeout = var.idle_timeout
     max_lifetime                 = 3600
   }
-  # Names and ARNs only: the worker reads secret values from Secrets Manager and AgentCore Identity.
+  # Names and ARNs only: the worker reads secret values from Secrets Manager.
   environment_variables = {
-    TEMPORAL_ADDRESS              = var.temporal_address
-    TEMPORAL_NAMESPACE            = var.temporal_namespace
-    TASK_QUEUE                    = var.task_queue
-    TEMPORAL_DEPLOYMENT_NAME      = var.deployment_name
-    TEMPORAL_BUILD_ID             = var.build_id
-    TEMPORAL_CERT_SECRET_ARN      = aws_secretsmanager_secret.worker_cert.arn
-    GITHUB_APP_SECRET_ID          = local.github_app_secret_name
-    WORKLOAD_IDENTITY_NAME        = aws_bedrockagentcore_workload_identity.worker.name
-    ANTHROPIC_CREDENTIAL_PROVIDER = aws_bedrockagentcore_api_key_credential_provider.anthropic.name
-    SNAPSHOTS_BUCKET              = aws_s3_bucket.snapshots.bucket
-    ANTHROPIC_MODEL               = var.anthropic_model
-    ANTHROPIC_EFFORT              = var.anthropic_effort
-    MAX_PARALLEL_AGENTS           = tostring(var.max_parallel_agents)
-    TRACING                       = var.tracing
+    TEMPORAL_ADDRESS         = var.temporal_address
+    TEMPORAL_NAMESPACE       = var.temporal_namespace
+    TASK_QUEUE               = var.task_queue
+    TEMPORAL_DEPLOYMENT_NAME = var.deployment_name
+    TEMPORAL_BUILD_ID        = var.build_id
+    TEMPORAL_CERT_SECRET_ARN = aws_secretsmanager_secret.worker_cert.arn
+    GITHUB_APP_SECRET_ID     = local.github_app_secret_name
+    SNAPSHOTS_BUCKET         = aws_s3_bucket.snapshots.bucket
+    BEDROCK_MODEL_ID         = var.bedrock_model_id
+    MODEL_EFFORT             = var.model_effort
+    MAX_PARALLEL_AGENTS      = tostring(var.max_parallel_agents)
+    TRACING                  = var.tracing
   }
 
   depends_on = [aws_iam_role_policy.agentcore]

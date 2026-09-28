@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Pushes the Anthropic key and the Temporal mTLS certificates from .env to
-# Secrets Manager (make secrets).
+# Pushes the Temporal mTLS certificates from .env to Secrets Manager
+# (make secrets).
 #
 # Every value is validated before anything is written. Each secret is
 # compared against its current value first, so re-running this is a no-op
@@ -50,7 +50,6 @@ sync_secret() {
   echo "$name: updated"
 }
 
-[[ -n "${ANTHROPIC_API_KEY:-}" ]] || die "make secrets: ANTHROPIC_API_KEY is empty in .env"
 require_pem "${TEMPORAL_TLS_CERT_PATH:-}" TEMPORAL_TLS_CERT_PATH
 require_pem "${TEMPORAL_TLS_KEY_PATH:-}" TEMPORAL_TLS_KEY_PATH
 
@@ -59,6 +58,5 @@ require_pem "${TEMPORAL_TLS_KEY_PATH:-}" TEMPORAL_TLS_KEY_PATH
 CERT_JSON=$(jq -n --rawfile cert "$TEMPORAL_TLS_CERT_PATH" --rawfile key "$TEMPORAL_TLS_KEY_PATH" \
   '{cert: $cert, key: $key}')
 
-sync_secret "$PREFIX/anthropic-api-key" "$(jq -n '{api_key: env.ANTHROPIC_API_KEY}')"
 sync_secret "$PREFIX/temporal-worker-cert" "$CERT_JSON"
 sync_secret "$PREFIX/temporal-router-cert" "$CERT_JSON"

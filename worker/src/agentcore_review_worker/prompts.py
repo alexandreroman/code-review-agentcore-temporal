@@ -1,7 +1,7 @@
 """Agent prompts.
 
 The reviewers share their system prompt, their tools and the start of their first message (the diff,
-then the tree); only the focus section differs, after a cache point. Anthropic's prompt cache then
+then the tree); only the focus section differs, after a cache point. Bedrock's prompt cache then
 serves the diff to every reviewer that starts after the first one.
 """
 

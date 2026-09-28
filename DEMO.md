@@ -22,7 +22,9 @@ On a stable network, never on conference Wi-Fi:
    minutes on a slow uplink; on stage, nothing big must travel.
 3. Validate: `/e2e-validation full` in Claude Code (about 30 minutes). It
    checks all four moments, the reset, the dev mode and the return to zero.
-4. Check the Anthropic console: credits and rate limits for a few reviews.
+4. Check the Bedrock quotas of the region (Service Quotas, Amazon
+   Bedrock, the global cross-region tokens and requests per minute of
+   Claude Opus 5): enough for a few reviews.
 5. Afterwards, leave `pyproject.toml`, `uv.lock`, the member
    `pyproject.toml` files, `shared/src/`, `worker/src/` and
    `worker/Dockerfile` untouched, committed or not: the build ID hashes
@@ -43,7 +45,7 @@ On a stable network, never on conference Wi-Fi:
    `gh workflow run reset-demo.yml --repo <owner>/agentcore-review-demo-app`.
    Wait for the green run.
 5. **Blank PR** to check the keys and quotas end to end (webhook, AgentCore,
-   Anthropic key, GitHub App): in the demo repository, edit `README.md` in
+   Bedrock access, GitHub App): in the demo repository, edit `README.md` in
    the browser, commit to a new branch `warmup/check`, open the PR, and wait
    for the `AI Review` check (a minute or two). Then close the PR and delete
    the branch.
