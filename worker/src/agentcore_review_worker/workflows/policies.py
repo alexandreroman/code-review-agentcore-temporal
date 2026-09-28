@@ -49,6 +49,7 @@ POST_COMMENT = _options(15, FIVE_ATTEMPTS)
 CLOSE_PR = _options(15, FIVE_ATTEMPTS)
 COMMIT_FIX = _options(60, THREE_ATTEMPTS)
 DELETE_SNAPSHOTS = _options(30, SINGLE_ATTEMPT)  # never fatal: the S3 lifecycle rule is the safety net
+PING = _options(30, THREE_ATTEMPTS)  # a broken worker must fail make ping, not hang it
 
 # Children never retry: their activities do.
 CHILD_RUN_TIMEOUT = timedelta(minutes=10)
