@@ -13,18 +13,14 @@ conference demo that makes durable execution visible on stage.
   publishes one GitHub review.
 - **Durability**: a `/kill` comment stops the AgentCore sessions
   mid-review; the review resumes on a new session without repeating
-  finished LLM calls.
+  finished LLM calls. Durable timers warn on a pull request idle for 10
+  minutes, then close it 5 minutes later, across worker restarts and
+  deploys (`PR_IDLE_WARNING_SECONDS`, `PR_IDLE_CLOSE_SECONDS`).
 - **Human in the loop**: a reply to a finding gets an answer from an
   agent, which may dismiss the finding when the human is right. A `/fix`
   comment lets an agent push a fix, for every open finding on the PR or
   for that finding only in its thread; an incremental review then turns
   the `AI Review` check green.
-- **Durable timers**: a pull request idle for 10 minutes gets a warning
-  comment, then the bot closes it 5 minutes later; the countdown survives
-  worker restarts and deploys (`PR_IDLE_WARNING_SECONDS`,
-  `PR_IDLE_CLOSE_SECONDS`). A reopened pull request gets a new review that
-  continues the numbering of rounds, findings and fixes; the previous
-  run's open threads are resolved with a note.
 
 [DEMO.md](DEMO.md) is the timed run-through of the talk, with its
 checklist and plan B.
@@ -69,15 +65,18 @@ graph LR
 
 ## Prerequisites
 
-- [uv](https://docs.astral.sh/uv/) (it installs Python 3.14 for you), GNU
-  Make (the 3.81 shipped with macOS is enough) and
-  [OpenTofu](https://opentofu.org/) 1.12
-- To deploy: AWS CLI v2, the [Temporal CLI](https://docs.temporal.io/cli)
+- Accounts: a Temporal Cloud namespace with Serverless Workers enabled, an
+  AWS account with access to Claude Opus 5 on Amazon Bedrock, and a GitHub
+  account.
+- To build and test: [uv](https://docs.astral.sh/uv/) (it installs Python
+  3.14 for you), GNU Make (the 3.81 shipped with macOS is enough) and
+  [OpenTofu](https://opentofu.org/) 1.12 or later.
+- To deploy: the AWS CLI v2, the [Temporal CLI](https://docs.temporal.io/cli)
   and `tcld`, the GitHub CLI, `jq`, and Docker or a Docker-compatible CLI
-  (arm64 image builds)
-- A Temporal Cloud namespace with Serverless Workers enabled, an AWS
-  account with access to Claude Opus 5 on Amazon Bedrock, and a GitHub
-  account
+  that builds arm64 images.
+
+[SETUP.md](SETUP.md#1-accounts-and-tools) details the accounts and lists
+the tool versions the project is tested with.
 
 ## Getting started
 

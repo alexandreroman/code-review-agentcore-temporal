@@ -17,7 +17,8 @@ Four moments, in this order:
 
 On a stable network, never on conference Wi-Fi:
 
-1. `aws sso login --profile <profile>`, start Docker.
+1. `aws sso login --profile <profile>` and `export AWS_PROFILE=<profile>`
+   in the demo terminal, start Docker.
 2. `make up`: deploy everything now. A first image push takes tens of
    minutes on a slow uplink; on stage, nothing big must travel.
 3. Validate: `/e2e-validation full` in Claude Code (about 30 minutes). It
@@ -35,7 +36,8 @@ On a stable network, never on conference Wi-Fi:
 
 1. **Network**: connect, and keep a tested phone hotspot at hand.
 2. **Credentials**: `aws sso login --profile <profile>` (the session must
-   outlast the talk), `gh auth status`.
+   outlast the talk), `AWS_PROFILE` exported in the demo terminal,
+   `gh auth status`.
 3. **`make up`**: it must be a no-op ("already in ECR", "already the
    current version"). If it starts building an image, stop it (`Ctrl-C`)
    and keep the deployed build. After any `make deploy`, demo on a fresh
@@ -44,7 +46,7 @@ On a stable network, never on conference Wi-Fi:
 4. **Reset**: Actions, **Reset demo**, **Run workflow**, or
    `gh workflow run reset-demo.yml --repo <owner>/agentcore-review-demo-app`.
    Wait for the green run.
-5. **Blank PR** to check the keys and quotas end to end (webhook, AgentCore,
+5. **Blank PR** to check access and quotas end to end (webhook, AgentCore,
    Bedrock access, GitHub App): in the demo repository, edit `README.md` in
    the browser, commit to a new branch `warmup/check`, open the PR, and wait
    for the `AI Review` check (a minute or two). Then close the PR and delete
@@ -130,8 +132,9 @@ Talking points:
 
 ## After the talk
 
-Run the reset. Nothing else: sessions drain by themselves, and the
-infrastructure costs nothing at rest beyond storage.
+Run the reset. Nothing else: sessions drain by themselves, and at rest
+the infrastructure only costs its storage, secrets and KMS key, a few
+dollars a month.
 
 ## Plan B: AgentCore fails
 

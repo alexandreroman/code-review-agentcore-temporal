@@ -8,8 +8,9 @@ Commands run from the repository root unless stated otherwise. Values in
 angle brackets and `your-namespace.a1b2c` are placeholders for your own
 identifiers: `<this-repo-owner>` owns the copy of this repository you
 clone, `<owner>` owns your demo repository, `<your-org>` names your
-organization in the certificates, `<upstream-owner>` owns the upstream demo
-repository and `<profile>` is your AWS CLI profile.
+organization in the certificates, `<upstream-owner>` is the GitHub account
+that publishes this repository and its upstream demo repository, and
+`<profile>` is your AWS CLI profile.
 
 ## 1. Accounts and tools
 
@@ -18,30 +19,34 @@ Accounts:
 - A **Temporal Cloud** namespace with Serverless Workers enabled (a
   prerelease feature: ask your Temporal contact to enable it), and access
   to its settings.
-- An **AWS** account where you can create IAM roles, Lambda functions, S3
-  buckets, ECR repositories and Bedrock AgentCore runtimes, in a region
-  where AgentCore is available (`ca-central-1` by default), with access to
-  **Claude Opus 5 on Amazon Bedrock** (see
-  [Bedrock model access](#bedrock-model-access)).
+- An **AWS** account with administrator access (the deployment creates
+  IAM roles, a Lambda function, S3 buckets, an ECR repository, secrets, a
+  KMS key and an AgentCore runtime), in a region where AgentCore is
+  available (`ca-central-1` by default), with access to **Claude Opus 5 on
+  Amazon Bedrock** (see [Bedrock model access](#bedrock-model-access)).
 - A **GitHub** account (personal or organization) to own the demo
   repository.
 
 Tools:
 
-| Tool                               | Version       | Check                |
+| Tool                               | Tested with   | Check                |
 |------------------------------------|---------------|----------------------|
 | [uv](https://docs.astral.sh/uv/)   | 0.12.19       | `uv --version`       |
-| GNU Make                           | 3.81 or later | `make --version`     |
+| GNU Make                           | 3.81          | `make --version`     |
 | [OpenTofu](https://opentofu.org/)  | 1.12.6        | `tofu version`       |
-| AWS CLI                            | v2            | `aws --version`      |
-| Temporal CLI                       | 1.9 or later  | `temporal --version` |
-| tcld                               | latest        | `tcld version`       |
-| GitHub CLI                         | 2.x           | `gh --version`       |
-| jq                                 | 1.7           | `jq --version`       |
+| AWS CLI                            | 2.37          | `aws --version`      |
+| Temporal CLI                       | 1.9.1         | `temporal --version` |
+| tcld                               | 0.55.0        | `tcld version`       |
+| GitHub CLI                         | 2.101         | `gh --version`       |
+| jq                                 | 1.7.1         | `jq --version`       |
 | Docker or a compatible CLI         | arm64 builds  | `docker info`        |
 
+OpenTofu must be 1.12 or later and the Temporal CLI 1.9 or later (its
+AgentCore options); the other tools only need a recent version.
+
 The worker image targets `linux/arm64`. Docker Desktop builds it on any
-host; on a Linux x86 host, install QEMU and binfmt support first.
+host; on a Linux x86 host, install QEMU and binfmt support first, and
+`uuidgen` (package `uuid-runtime`) if it is missing.
 
 ## 2. Clone and install
 
@@ -81,9 +86,9 @@ Add the CA to the namespace, **appending** it to the accepted bundle:
    the certificates already there, then save.
 
 `tcld namespace accepted-client-ca set` replaces the whole bundle and cuts
-off every client of the other CAs: prefer the UI. A namespace accepts at
-most 16 CAs and 32 KB. Optionally, add a certificate filter on the common
-name `agentcore-review-demo` so that only these identities get in.
+off every client of the other CAs: prefer the UI. Optionally, add a
+certificate filter on the common name `agentcore-review-demo` so that only
+these identities get in.
 
 The change takes a few minutes. Check it:
 
@@ -94,32 +99,24 @@ temporal workflow list --limit 1 \
   --tls-cert-path certs/client.pem --tls-key-path certs/client.key
 ```
 
-Pass the TLS flags explicitly, as above: this CLI does not reliably pick
-them up from environment variables.
-
 ## 4. Configuration (`.env`)
 
 ```bash
 cp .env.example .env
 ```
 
-Set at least `TEMPORAL_NAMESPACE`: your namespace (`your-namespace.a1b2c`
-is the placeholder).
+Set `TEMPORAL_NAMESPACE` to your namespace (`your-namespace.a1b2c` is the
+placeholder). Every other setting is optional, and
+[`.env.example`](.env.example) documents each one with its default. The
+most common ones:
 
-Optional: `BEDROCK_MODEL_ID` for another model (a global cross-region
-inference profile ID, `global.anthropic.claude-opus-5` by default),
-`MODEL_EFFORT` for another effort level (`high` by default),
-`GITHUB_OWNER` when the demo repository belongs to an organization (the
-default is the account logged in to `gh`),
-`AWS_REGION` for another region, `TEMPORAL_TLS_CERT_PATH` and
-`TEMPORAL_TLS_KEY_PATH` for certificates outside `certs/`,
-`PR_IDLE_WARNING_SECONDS` and `PR_IDLE_CLOSE_SECONDS` for when an idle pull
-request is warned, then closed (10 and 15 minutes), `TRACING=on` for
-[traces in CloudWatch](README.md#observability), which needs CloudWatch
-Transaction Search enabled in the account and region, and the settings of
-a [custom domain](#custom-domain-cloudflare-optional) for the webhook.
+- `GITHUB_OWNER` when the demo repository belongs to an organization (the
+  default is the account logged in to `gh`);
+- `AWS_REGION` for another region than `ca-central-1`;
+- `BEDROCK_MODEL_ID` and `MODEL_EFFORT` for another model (a global
+  cross-region inference profile) or effort level.
+
 Plain `KEY=value` lines, no quotes: the Makefile includes the file.
-[`.env.example`](.env.example) documents every variable and its default.
 
 ## 5. AWS credentials
 
@@ -139,12 +136,10 @@ talk.
 ### Bedrock model access
 
 The worker calls Claude Opus 5 through the global cross-region inference
-profile `global.anthropic.claude-opus-5`, the only way to call it from
-`ca-central-1`. In the Amazon Bedrock console of your region, open
-**Model catalog**, find Claude Opus 5 and, if the console asks for it, fill
-in the Anthropic use case form once for the account. Then check the access
-with a one-token call, in the project's region (the AWS CLI does not read
-`.env`, and the inference profile lives in the region that calls it):
+profile `global.anthropic.claude-opus-5`. In the Amazon Bedrock console of
+your region, open **Model catalog**, find Claude Opus 5 and, if the console
+asks for it, fill in the Anthropic use case form once for the account. Then
+check the access with a one-token call:
 
 ```bash
 aws bedrock-runtime converse --region ca-central-1 \
@@ -156,20 +151,9 @@ aws bedrock-runtime converse --region ca-central-1 \
 Replace `ca-central-1` if you set another `AWS_REGION`.
 
 `make infra` grants the AgentCore worker's role this access. The local
-worker (`make dev`) calls Bedrock with your own credentials: your identity
-needs `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on
-the three resources a global inference profile involves, as the worker's
-role has them (`infra/aws/worker.tf`):
-
-- the inference profile in the source region,
-  `arn:aws:bedrock:<region>:<account-id>:inference-profile/global.anthropic.claude-opus-5`;
-- the foundation model in that region,
-  `arn:aws:bedrock:<region>::foundation-model/anthropic.claude-opus-5`;
-- the region-less global foundation model,
-  `arn:aws:bedrock:::foundation-model/anthropic.claude-opus-5`.
-
-An administrator identity already has them. The Bedrock user guide details
-the policy and its conditions:
+worker (`make dev`) uses your own credentials: an administrator identity
+has the permissions; otherwise grant yourself the three Bedrock statements
+of `infra/aws/worker.tf`, explained in
 [Global cross-Region inference](https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html).
 
 ## 6. GitHub CLI
@@ -195,12 +179,11 @@ make up
 `make up` chains `bootstrap` (OpenTofu state bucket and KMS key), `infra`
 (Lambda router, ECR repository, IAM roles, including the worker's Bedrock
 access, secret containers, snapshots bucket and optional custom domain),
-`secrets` (mTLS certificates into Secrets Manager) and `deploy`
-(image build and push, AgentCore runtime and endpoint, Temporal Worker
-Deployment Version). The AgentCore runtime only exists once there is a
-build to run: `infra` alone never creates it. The first image push uploads
-about 95 MB: on a slow uplink it takes a long time; later pushes only send
-the changed layers.
+`secrets` (mTLS certificates into Secrets Manager), `deploy` (image build
+and push, AgentCore runtime and endpoint, Temporal Worker Deployment
+Version) and `github` (GitHub App webhook, demo repository). The first
+image push uploads about 100 MB: on a slow uplink it takes a long time;
+later pushes only send the changed layers.
 
 This first run stops on purpose:
 
@@ -273,7 +256,12 @@ branches:
 
 ```bash
 gh workflow run reset-demo.yml --repo <owner>/agentcore-review-demo-app
-gh run list --repo <owner>/agentcore-review-demo-app --workflow reset-demo.yml --limit 1
+```
+
+Wait for the run to turn green in the repository's **Actions** tab (under a
+minute), then list the branches:
+
+```bash
 gh api repos/<owner>/agentcore-review-demo-app/branches --jq '.[].name'
 ```
 
@@ -304,9 +292,12 @@ make dev
 ```
 
 The local worker connects to the same Temporal Cloud namespace and polls
-the `review-dev` task queue. The router sends every pull request opened
-from a `dev/` branch there, so a PR from `dev/customer-search` is reviewed
-by your laptop, with hot reload, without deploying anything.
+the `review-dev` task queue. It calls Bedrock, reads the GitHub App secret
+and uses the snapshots bucket with your AWS credentials (see
+[Bedrock model access](#bedrock-model-access)).
+The router sends every pull request opened from a `dev/` branch there, so
+a PR from `dev/customer-search` is reviewed by your laptop, with hot
+reload, without deploying anything.
 
 ## Custom domain (Cloudflare, optional)
 
@@ -337,8 +328,8 @@ stack:
 `make up` then points the app's webhook at the new URL by itself: an app
 registered earlier switches over without a visit to its settings, and
 emptying `DOMAIN_NAME` switches it back to the Function URL the same way.
-While `DOMAIN_NAME` is set, the deployment targets stop at once if
-`CLOUDFLARE_ZONE_ID` or `CLOUDFLARE_API_TOKEN` is missing.
+While `DOMAIN_NAME` is set, `make up`, `make infra` and `make destroy`
+stop at once if `CLOUDFLARE_ZONE_ID` or `CLOUDFLARE_API_TOKEN` is missing.
 
 ## Troubleshooting
 
@@ -368,9 +359,10 @@ While `DOMAIN_NAME` is set, the deployment targets stop at once if
 ## Updating and tearing down
 
 - After a code change, `make deploy` builds a new version (build ID
-  `b_…`), creates its AgentCore endpoint and makes it current. Open pull
-  requests stay pinned to the version that started them; after a reset,
-  `make prune` removes the endpoints no workflow uses any more.
+  `b_…`), creates its AgentCore endpoint and makes it current. An open
+  pull request stays on its build until its next action or idle timer,
+  then moves to the new one; `make prune` then removes the endpoints no
+  workflow uses any more.
 - `make destroy` stops the sessions, removes the AWS resources after a
   confirmation, then deletes the Temporal Worker Deployment and the
   AgentCore log groups. The OpenTofu state bucket, its KMS key, the demo
@@ -380,19 +372,9 @@ While `DOMAIN_NAME` is set, the deployment targets stop at once if
   the same hostname; without one, the recreated Function URL gets a new
   address. Either way, `make up` repoints the app's webhook if its URL
   differs.
-- Renaming the GitHub App in its settings changes its slug, which the
-  router and the worker use to recognize the bot's own comments. The next
-  `make github` (or `make up`) stores the new slug and prints
-  `GitHub App slug: <old> -> <new>`. Then run `make kill-sessions`: the
-  running worker sessions keep the old slug until they stop. The router
-  picks up the new slug on its next cold start; until then, replies in a
-  finding's thread go unanswered.
-- To delete the GitHub App for good, delete it in the GitHub settings
-  (`https://github.com/settings/apps/<slug>`, **Advanced**), then its
-  credentials; `make github-app` registers a new app afterwards:
-
-  ```bash
-  aws secretsmanager delete-secret \
-    --secret-id code-review-agentcore-temporal/github-app \
-    --force-delete-without-recovery
-  ```
+- Renaming the GitHub App changes its slug: run `make up`, then
+  `make kill-sessions`; the router picks up the new slug on its next cold
+  start.
+- To replace the GitHub App, delete it in the GitHub settings
+  (`https://github.com/settings/apps/<slug>`, **Advanced**), then run
+  `make github-app FORCE=1` and `make up`.
