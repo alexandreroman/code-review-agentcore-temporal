@@ -8,6 +8,7 @@ import signal
 import socket
 from pathlib import Path
 
+from . import tracing
 from .runtime import build_worker, connect
 from .settings import dev_settings
 
@@ -31,6 +32,7 @@ async def run() -> None:
         loop.add_signal_handler(sig, stop.set)
     async with worker:
         await stop.wait()
+    tracing.flush()
 
 
 def main() -> None:

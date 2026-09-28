@@ -73,6 +73,8 @@ resource "aws_iam_role_policy" "agentcore" {
         Resource = "${aws_s3_bucket.snapshots.arn}/*"
       },
       { Effect = "Allow", Action = ["s3:ListBucket"], Resource = aws_s3_bucket.snapshots.arn },
+      # Spans (TRACING=on), sent to the X-Ray OTLP endpoint: the write actions of the AWSXrayWriteOnlyAccess policy.
+      { Effect = "Allow", Action = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"], Resource = "*" },
     ]
   })
 }
@@ -110,6 +112,7 @@ resource "aws_bedrockagentcore_agent_runtime" "worker" {
     ANTHROPIC_MODEL               = var.anthropic_model
     ANTHROPIC_EFFORT              = var.anthropic_effort
     MAX_PARALLEL_AGENTS           = tostring(var.max_parallel_agents)
+    TRACING                       = var.tracing
   }
 
   depends_on = [aws_iam_role_policy.agentcore]

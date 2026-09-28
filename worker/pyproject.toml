@@ -11,6 +11,8 @@ dependencies = [
     "bedrock-agentcore==1.23.1",
     "boto3==1.43.103",
     "httpx2==2.13.1",
+    # The requests extra: in 1.45 only a requests session (SigV4-signed here) can wrap the export call.
+    "opentelemetry-exporter-otlp-proto-http[requests]==1.45.0",
     "regex==2026.9.10",
 ]
 

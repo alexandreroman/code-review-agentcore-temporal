@@ -55,6 +55,8 @@ resource "aws_iam_role_policy" "router" {
         Action   = ["lambda:InvokeFunction"]
         Resource = "arn:aws:lambda:${var.region}:${local.account_id}:function:${local.router_name}"
       },
+      # Active tracing (TRACING=on): Lambda sends the invocation's segments with the function's role.
+      { Effect = "Allow", Action = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"], Resource = "*" },
     ]
   })
 }
@@ -76,6 +78,11 @@ resource "aws_lambda_function" "router" {
     log_group  = aws_cloudwatch_log_group.router.name
   }
 
+  # PassThrough is Lambda's default: no segment of its own, the invocations are not traced.
+  tracing_config {
+    mode = var.tracing == "on" ? "Active" : "PassThrough"
+  }
+
   environment {
     variables = {
       GITHUB_APP_SECRET_ID     = local.github_app_secret_name
@@ -88,6 +95,7 @@ resource "aws_lambda_function" "router" {
       PR_IDLE_WARNING_SECONDS  = tostring(var.pr_idle_warning_seconds)
       PR_IDLE_CLOSE_SECONDS    = tostring(var.pr_idle_close_seconds)
       AGENTCORE_RUNTIME_ARN    = local.deployed ? aws_bedrockagentcore_agent_runtime.worker[0].agent_runtime_arn : ""
+      TRACING                  = var.tracing
     }
   }
 

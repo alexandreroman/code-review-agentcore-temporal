@@ -2,12 +2,17 @@
 
 from collections.abc import Callable, Sequence
 from datetime import timedelta
+from functools import cache
 
 from temporalio.client import Client
 from temporalio.common import VersioningBehavior
+from temporalio.contrib.opentelemetry import OpenTelemetryPlugin
+from temporalio.plugin import SimplePlugin
+from temporalio.runtime import Runtime, TelemetryConfig
 from temporalio.service import TLSConfig
 from temporalio.worker import Interceptor, Worker, WorkerDeploymentConfig
 
+from . import tracing
 from .activities import commits, github_api, reviews, threads, tools
 from .activities.ping import PingActivities
 from .activities.pulls import PullActivities
@@ -20,6 +25,9 @@ from .workflows.ping import PingWorkflow
 from .workflows.pull_request import PullRequestWorkflow
 from .workflows.reviewer import ReviewerWorkflow
 from .workflows.synthesis import SynthesisWorkflow
+
+# Temporal UI's Workers page shows each worker's heartbeat: every 10 s instead of the SDK's 60 s keeps it current.
+WORKER_HEARTBEAT_INTERVAL = timedelta(seconds=10)
 
 WORKFLOWS: list[type] = [
     PingWorkflow,
@@ -56,7 +64,20 @@ def activities(settings: AppSettings, identity: str) -> list[Callable]:
     ]
 
 
+def plugins(app: AppSettings, *, with_tracing: bool) -> list[SimplePlugin]:
+    """Without tracing, no OpenTelemetry plugin: its interceptors and sandbox passthrough are not even installed."""
+    if not with_tracing:
+        return [strands_plugin(app)]
+    # Temporal spans (RunWorkflow, StartActivity...) around the Strands agent spans, which nest in them.
+    return [OpenTelemetryPlugin(add_temporal_spans=True), strands_plugin(app)]
+
+
 async def connect(settings: WorkerSettings, identity: str, cert: bytes, key: bytes) -> Client:
+    if settings.tracing:
+        if settings.deployment is None:
+            tracing.start(environment="dev", version=None)
+        else:
+            tracing.start(environment="agentcore", version=settings.deployment.build_id)
     # The Worker inherits the client's plugins: the Strands model activities, sandbox passthrough and converter.
     # No explicit data converter: StrandsPlugin installs the Pydantic converter with its failure converter
     # (Strands errors stay typed and non-retryable), and only does so over the default converter.
@@ -65,8 +86,15 @@ async def connect(settings: WorkerSettings, identity: str, cert: bytes, key: byt
         namespace=settings.namespace,
         tls=TLSConfig(client_cert=cert, client_private_key=key),
         identity=identity,
-        plugins=[strands_plugin(settings.app)],
+        plugins=plugins(settings.app, with_tracing=settings.tracing),
+        runtime=_temporal_runtime(),
     )
+
+
+@cache
+def _temporal_runtime() -> Runtime:
+    # Created once: each Runtime starts its own thread pool. TelemetryConfig() keeps the SDK's default logging.
+    return Runtime(telemetry=TelemetryConfig(), worker_heartbeat_interval=WORKER_HEARTBEAT_INTERVAL)
 
 
 def build_worker(

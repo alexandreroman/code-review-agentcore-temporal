@@ -31,6 +31,7 @@ DOMAIN_NAME ?=
 SUBDOMAIN ?= codereview
 CLOUDFLARE_ZONE_ID ?=
 CLOUDFLARE_API_TOKEN ?=
+TRACING ?= off
 
 # Derived defaults, also applied when .env sets these to an empty value.
 ifeq ($(strip $(TEMPORAL_ADDRESS)),)
@@ -46,7 +47,7 @@ endif
 export AWS_REGION TEMPORAL_NAMESPACE TEMPORAL_ADDRESS TEMPORAL_TLS_CERT_PATH TEMPORAL_TLS_KEY_PATH \
 	TEMPORAL_DEPLOYMENT_NAME TASK_QUEUE DEV_TASK_QUEUE PR_IDLE_WARNING_SECONDS PR_IDLE_CLOSE_SECONDS \
 	ANTHROPIC_API_KEY ANTHROPIC_MODEL ANTHROPIC_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO DOMAIN_NAME \
-	CLOUDFLARE_ZONE_ID CLOUDFLARE_API_TOKEN
+	CLOUDFLARE_ZONE_ID CLOUDFLARE_API_TOKEN TRACING
 export AWS_DEFAULT_REGION = $(AWS_REGION)
 
 # OpenTofu input variables (no secret among them: the Cloudflare provider reads CLOUDFLARE_API_TOKEN itself).
@@ -67,6 +68,7 @@ export TF_VAR_demo_repo = $(DEMO_REPO)
 export TF_VAR_domain_name = $(DOMAIN_NAME)
 export TF_VAR_subdomain = $(SUBDOMAIN)
 export TF_VAR_cloudflare_zone_id = $(CLOUDFLARE_ZONE_ID)
+export TF_VAR_tracing = $(TRACING)
 
 PROJECT := code-review-agentcore-temporal
 NAMESPACE_PLACEHOLDER := your-namespace.a1b2c

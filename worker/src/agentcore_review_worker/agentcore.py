@@ -6,7 +6,10 @@ import os
 from agentcore_review_shared.contract import agentcore_identity
 from agentcore_review_shared.secrets import TemporalCertSecret
 from bedrock_agentcore.runtime import BedrockAgentCoreApp
+from opentelemetry import baggage
+from opentelemetry import context as otel_context
 
+from . import tracing
 from .aws import read_secret
 from .drain import ActivityTracker
 from .runtime import build_worker, connect
@@ -22,6 +25,9 @@ _worker_task: asyncio.Task[None] | None = None
 async def _run(session_id: str) -> None:
     settings = agentcore_settings(os.environ)
     assert settings.deployment is not None  # agentcore_settings always sets it
+    if settings.tracing:
+        # This task inherited the context of the /invocations request that created it: the worker starts afresh.
+        otel_context.attach(baggage.set_baggage("session.id", session_id, context=otel_context.Context()))
     # The endpoint is named after the build, so the identity gives /kill its StopRuntimeSession qualifier.
     identity = agentcore_identity(settings.deployment.build_id, session_id)
     secret = TemporalCertSecret.model_validate_json(read_secret(os.environ["TEMPORAL_CERT_SECRET_ARN"]))
@@ -40,6 +46,8 @@ async def _run_until_idle(task_id: int, session_id: str) -> None:
     except Exception:
         log.exception("worker failed")
     finally:
+        # A blocking call, off the event loop that still answers /ping.
+        await asyncio.to_thread(tracing.flush)
         # Without this, /ping stays HealthyBusy and the session is billed until its maximum lifetime.
         app.complete_async_task(task_id)
 

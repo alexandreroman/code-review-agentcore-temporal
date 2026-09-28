@@ -9,10 +9,15 @@ counted from the start of the idle period kept in the state.
 
 A new run under the same workflow ID (a reopened pull request, or after a failed run) takes over the earlier run's
 numbering and finding threads.
+
+With TRACING=on, each action (a round, a fix, a reply, an idle step, the close) is a trace of its own, linked to
+the signals that queued it: in the run's context, every action would join the trace of the webhook that started the
+run, open as long as the pull request.
 """
 
 import asyncio
 import contextlib
+from collections import defaultdict
 from datetime import datetime, timedelta
 
 from temporalio import workflow
@@ -39,6 +44,11 @@ with workflow.unsafe.imports_passed_through():
         PullRequestInput,
         format_finding_id,
     )
+
+    # The process's own opentelemetry, shared with Strands and the plugin (a sandboxed copy has its own context and
+    # provider), with or without OpenTelemetryPlugin, which passes it through only when tracing is on.
+    from opentelemetry import trace
+    from opentelemetry.context import Context
 
     from agentcore_review_worker import lifecycle, markers, publishing, summaries
     from agentcore_review_worker.batching import make_batches
@@ -69,6 +79,9 @@ with workflow.unsafe.imports_passed_through():
         ThreadReplyInput,
     )
 
+# A no-op tracer unless OpenTelemetryPlugin's replay-safe provider is installed. Spans add no command to the history.
+tracer = trace.get_tracer(__name__)
+
 
 @workflow.defn(name=PULL_REQUEST_WORKFLOW)
 class PullRequestWorkflow:
@@ -81,6 +94,9 @@ class PullRequestWorkflow:
         self._closed: PrClosed | None = None
         self._reviewing_sha: str | None = None
         self._phase = ""  # shown in Temporal UI, restored once a reply is answered
+        # The spans of the signals behind the pending work, by action ("reply <comment ID>" for a reply). Worker
+        # memory only, never in the state: a replay captures them again, a continue-as-new drops them.
+        self._signal_links: defaultdict[str, list[trace.Link]] = defaultdict(list)
 
     @workflow.run
     async def run(self, input: PullRequestInput) -> PullRequestOutcome:
@@ -101,26 +117,35 @@ class PullRequestWorkflow:
                     return outcome
                 continue
             if action == "close":
-                return await self._finish()
+                with self._trace_action("Close", "close"):
+                    return await self._finish()
             if action == "review":
-                await self._review()
+                with self._trace_action("Review", "review"):
+                    await self._review()
             elif action == "fix":
-                await self._fix()
+                with self._trace_action("Fix", "fix"):
+                    await self._fix()
             else:
-                await self._reply()
+                reply_key = f"reply {self._state.pending_replies[0].comment_id}"
+                with self._trace_action("Reply", reply_key):
+                    await self._reply()
             # Time spent in an action is never idle: the countdown starts when it ends.
             lifecycle.start_idle(self._state, workflow.now())
 
     @workflow.signal(name=SIGNAL_PR_UPDATED)
     def pr_updated(self, update: PrUpdated) -> None:
         lifecycle.start_idle(self._state, workflow.now())
-        if not lifecycle.record_head(self._state, update.head_sha, self._reviewing_sha):
+        if lifecycle.record_head(self._state, update.head_sha, self._reviewing_sha):
+            self._link_signal("review")
+        else:
             workflow.logger.info("head %s ignored (delivery %s)", update.head_sha, update.delivery_id)
 
     @workflow.signal(name=SIGNAL_FIX_REQUESTED)
     def fix_requested(self, request: FixRequested) -> None:
         lifecycle.start_idle(self._state, workflow.now())
-        if not lifecycle.record_fix_request(self._state, request):
+        if lifecycle.record_fix_request(self._state, request):
+            self._link_signal("fix")
+        else:
             workflow.logger.info("fix request ignored: delivery %s already seen", request.delivery_id)
 
     @workflow.signal(name=SIGNAL_COMMENT_POSTED)
@@ -128,6 +153,7 @@ class PullRequestWorkflow:
         lifecycle.start_idle(self._state, workflow.now())
         queue_full = len(self._state.pending_replies) >= lifecycle.MAX_PENDING_REPLIES
         if lifecycle.record_reply(self._state, reply):
+            self._link_signal(f"reply {reply.comment_id}")
             if queue_full:
                 workflow.logger.warning("reply queue full: the oldest queued reply is dropped")
             workflow.logger.info("reply by %s queued (thread %d)", reply.author, reply.thread_root_id)
@@ -136,7 +162,9 @@ class PullRequestWorkflow:
 
     @workflow.signal(name=SIGNAL_PR_CLOSED)
     def pr_closed(self, closed: PrClosed) -> None:
-        self._closed = self._closed or closed
+        if self._closed is None:
+            self._closed = closed
+            self._link_signal("close")
 
     @property
     def _id(self) -> str:
@@ -144,6 +172,17 @@ class PullRequestWorkflow:
 
     def _next(self) -> lifecycle.Action | None:
         return lifecycle.next_action(self._state, self._closed is not None)
+
+    def _link_signal(self, key: str) -> None:
+        """Keep the span of the signal being handled (HandleSignal, under the router's webhook) for the action."""
+        self._signal_links[key].append(trace.Link(trace.get_current_span().get_span_context()))
+
+    def _trace_action(self, name: str, key: str | None = None) -> contextlib.AbstractContextManager[trace.Span]:
+        """A root span, linked to the signals kept under key; the action may rename it once it knows its number."""
+        links = self._signal_links.pop(key, []) if key is not None else []
+        return tracer.start_as_current_span(
+            name, context=Context(), links=links, attributes={"temporalWorkflowID": self._id}
+        )
 
     def _set_phase(self, phase: str) -> None:
         """Show the phase in Temporal UI: in the memo, readable without a worker, and in the current details.
@@ -246,9 +285,11 @@ class PullRequestWorkflow:
                 )
             return None
         if timer.step == "warning":
-            await self._warn_idle(timer.since)
+            with self._trace_action("Idle warning"):
+                await self._warn_idle(timer.since)
             return None
-        return await self._close_idle(timer.since)
+        with self._trace_action("Idle close"):
+            return await self._close_idle(timer.since)
 
     async def _warn_idle(self, since: datetime) -> None:
         # Marked before the comment: a signal during the post starts a new period, which gets its own warning.
@@ -304,6 +345,7 @@ class PullRequestWorkflow:
             if change.head_sha == state.last_reviewed_sha:
                 return  # a late signal for a head already reviewed
             state.round += 1
+            trace.get_current_span().update_name(f"Review round {state.round}")
             self._reviewing_sha = change.head_sha
             self._set_phase(f"reviewing round {state.round}")
             check = CheckInput(
@@ -538,6 +580,7 @@ class PullRequestWorkflow:
         assert state.last_reviewed_sha is not None  # a finding is open only after a published round
         requested_by = triage.accepted[-1].requested_by
         state.fix_count += 1
+        trace.get_current_span().update_name(f"Fix {state.fix_count}")
         self._set_phase(f"fixing for @{requested_by}")
         try:
             snapshot = await self._snapshot(state.last_reviewed_sha)
@@ -590,6 +633,7 @@ class PullRequestWorkflow:
         if finding is None:
             await self._answer_closed_thread(reply.thread_root_id, marker)
             return
+        trace.get_current_span().update_name(f"Reply {finding.id}")
         phase = self._phase
         self._set_phase(f"answering @{reply.author} on {finding.id}")
         try:

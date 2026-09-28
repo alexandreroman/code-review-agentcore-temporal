@@ -33,6 +33,7 @@ class WorkerSettings:
     namespace: str
     task_queue: str
     deployment: WorkerDeploymentVersion | None  # None for the unversioned dev worker
+    tracing: bool  # TRACING=on: spans exported to CloudWatch
     app: AppSettings
 
 
@@ -44,6 +45,7 @@ def agentcore_settings(env: Mapping[str, str]) -> WorkerSettings:
         deployment=WorkerDeploymentVersion(
             deployment_name=env["TEMPORAL_DEPLOYMENT_NAME"], build_id=env["TEMPORAL_BUILD_ID"]
         ),
+        tracing=_tracing(env),
         app=_app_settings(
             env,
             github_app_secret=env["GITHUB_APP_SECRET_ID"],
@@ -59,6 +61,7 @@ def dev_settings(env: Mapping[str, str]) -> WorkerSettings:
         namespace=env["TEMPORAL_NAMESPACE"],
         task_queue=env["DEV_TASK_QUEUE"],
         deployment=None,
+        tracing=_tracing(env),
         # The dev worker reads the same secrets by name, with the developer's AWS credentials.
         app=_app_settings(
             env,
@@ -67,6 +70,13 @@ def dev_settings(env: Mapping[str, str]) -> WorkerSettings:
             anthropic_credential_provider=ANTHROPIC_CREDENTIAL_PROVIDER,
         ),
     )
+
+
+def _tracing(env: Mapping[str, str]) -> bool:
+    value = env.get("TRACING", "off")
+    if value not in ("on", "off"):
+        raise ValueError(f"TRACING must be on or off, not {value!r}")
+    return value == "on"
 
 
 def _app_settings(

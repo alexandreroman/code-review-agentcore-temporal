@@ -66,6 +66,17 @@ variable "max_parallel_agents" {
   }
 }
 
+variable "tracing" {
+  description = "on to trace the worker and the router into CloudWatch (needs Transaction Search), off otherwise"
+  type        = string
+  default     = "off"
+
+  validation {
+    condition     = contains(["on", "off"], var.tracing)
+    error_message = "tracing must be on or off."
+  }
+}
+
 variable "idle_timeout" {
   description = "AgentCore session idle timeout, in seconds"
   type        = number

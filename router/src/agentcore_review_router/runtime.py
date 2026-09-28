@@ -21,6 +21,7 @@ from temporalio.contrib.pydantic import pydantic_data_converter
 from temporalio.service import TLSConfig
 
 from .routing import RouterConfig
+from .tracing import XRayTraceInterceptor
 
 IDENTITY = "agentcore-review-demo-router"
 GITHUB_TIMEOUT = 5.0
@@ -41,6 +42,7 @@ class Settings:
     github_app_secret_id: str
     temporal_cert_secret_arn: str
     function_name: str
+    tracing: bool  # TRACING=on: the workflows join the invocation's X-Ray trace
 
 
 _runner = asyncio.Runner()
@@ -66,6 +68,7 @@ def settings() -> Settings:
         github_app_secret_id=env["GITHUB_APP_SECRET_ID"],
         temporal_cert_secret_arn=env["TEMPORAL_CERT_SECRET_ARN"],
         function_name=env["AWS_LAMBDA_FUNCTION_NAME"],
+        tracing=env.get("TRACING") == "on",
     )
 
 
@@ -114,6 +117,7 @@ async def temporal_client() -> Client:
             tls=TLSConfig(client_cert=cert.cert.encode(), client_private_key=cert.key.encode()),
             data_converter=pydantic_data_converter,
             identity=IDENTITY,
+            interceptors=[XRayTraceInterceptor()] if current.tracing else [],
         )
     return _temporal
 

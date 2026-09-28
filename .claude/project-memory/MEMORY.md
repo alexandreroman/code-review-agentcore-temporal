@@ -36,3 +36,4 @@
 - [Tests cover business logic only](references/feedback_tests_business_only.md) — pure review, routing and contract rules; no plumbing tests
 - [Lean, optimized artifacts](references/feedback_lean_artifacts.md) — small images/zips from the start, few moving parts
 - [Temporal UI labels and details](references/project_temporal_ui_labels.md) — short activity type names, summaries hold the detail only
+- [Observability choices](references/project_observability.md) — opt-in TRACING, OTel + SigV4 exporter, no Transaction Search in infra, heartbeats

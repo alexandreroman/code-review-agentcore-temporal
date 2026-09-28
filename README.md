@@ -124,6 +124,27 @@ Optionally, `DOMAIN_NAME`, `SUBDOMAIN`, `CLOUDFLARE_ZONE_ID` and
 Cloudflare zone, such as `codereview.example.com`: see
 [SETUP.md](SETUP.md#custom-domain-cloudflare-optional).
 
+`TRACING=on` (off by default) sends traces of the worker and the router to
+CloudWatch: see [Observability](#observability).
+
+## Observability
+
+Temporal UI shows every workflow with its activities and child workflows.
+Its Workers page lists the workers polling the task queues, on AgentCore
+and on a laptop: each one sends a heartbeat every 10 seconds.
+
+With `TRACING=on` in `.env`, the worker and the router also send
+OpenTelemetry traces to CloudWatch, through the X-Ray OTLP endpoint. Each
+pull request action (a review round, a fix, a reply) is a trace of its
+own, linked to the webhooks that queued it. It holds the workflow,
+activity and child workflow spans, and the Strands agent spans (agent,
+model and tool calls, without prompts or file contents). The traces
+appear in the CloudWatch console under Application Signals (Transaction
+Search) and under GenAI Observability. Turning tracing on needs CloudWatch
+Transaction Search enabled in the account and region; `make infra` then
+applies it to the deployed worker and router, and `make dev` to the local
+worker.
+
 ## Validation
 
 `make check` runs the unit tests (review logic, routing, contract) and the
