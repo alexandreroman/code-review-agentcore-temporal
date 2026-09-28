@@ -1,4 +1,5 @@
-"""Workflow definitions. These modules import only temporalio, Strands (sandbox passthrough) and pure code.
+"""Workflow definitions. They import temporalio, Strands and pure code; worker modules through the sandbox passthrough.
 
-Activities are called by name, except the navigation tools, which agents wrap by reference.
+Activities are called by name, except the navigation tools: agents.py imports them through the passthrough and wraps
+them by reference.
 """

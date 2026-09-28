@@ -22,7 +22,7 @@ class PullActivities:
         self._max_parallel_agents = settings.max_parallel_agents
 
     @activity.defn(name="ListFiles")
-    async def list_changed_files(self, input: ListFilesInput) -> ChangeSet:
+    async def list_files(self, input: ListFilesInput) -> ChangeSet:
         """The real head, and the files changed since the last reviewed SHA (the whole pull request at first).
 
         Webhook order is not guaranteed, so the round reviews the head read here, not the signal's SHA.
@@ -44,7 +44,7 @@ class PullActivities:
         )
 
     @activity.defn(name="FetchDiff")
-    async def fetch_batch_patches(self, input: BatchInput) -> BatchPatches:
+    async def fetch_diff(self, input: BatchInput) -> BatchPatches:
         """The patches of a reviewer's files (the comparison ListFiles read) and the top-level tree."""
         pr = input.pr
         with github_errors():

@@ -21,9 +21,9 @@ _worker_task: asyncio.Task[None] | None = None
 
 async def _run(session_id: str) -> None:
     settings = agentcore_settings(os.environ)
-    assert settings.build_id is not None  # agentcore_settings always reads TEMPORAL_BUILD_ID
+    assert settings.deployment is not None  # agentcore_settings always sets it
     # The endpoint is named after the build, so the identity gives /kill its StopRuntimeSession qualifier.
-    identity = agentcore_identity(settings.build_id, session_id)
+    identity = agentcore_identity(settings.deployment.build_id, session_id)
     secret = TemporalCertSecret.model_validate_json(read_secret(os.environ["TEMPORAL_CERT_SECRET_ARN"]))
     client = await connect(settings, identity, secret.cert.encode(), secret.key.encode())
     tracker = ActivityTracker()

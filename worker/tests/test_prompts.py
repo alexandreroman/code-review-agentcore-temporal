@@ -27,34 +27,30 @@ def finding(finding_id: str, suggestion: str | None = None, category: str = "sec
 
 
 def test_reviewers_share_everything_before_their_focus():
-    prompts = {category: reviewer_prompt(category, PATCHES, []) for category in Category}
+    prompts = {category: reviewer_prompt(category, PATCHES, [], []) for category in Category}
     assert len({p[0]["text"] for p in prompts.values()}) == 1
     assert all(p[1] == {"cachePoint": {"type": "default"}} for p in prompts.values())
     assert len({p[2]["text"] for p in prompts.values()}) == 3
 
 
 def test_the_diff_comes_before_the_focus():
-    shared, _, focus = reviewer_prompt(Category.PERFORMANCE, PATCHES, [])
+    shared, _, focus = reviewer_prompt(Category.PERFORMANCE, PATCHES, [], [])
     assert "run(f'{name}')" in shared["text"] and "README.md" in shared["text"]
     assert "performance" not in shared["text"].lower()
     assert "performance" in focus["text"]
 
 
 def test_open_findings_appear_only_in_incremental_rounds():
-    assert "F-001" not in reviewer_prompt(Category.SECURITY, PATCHES, [])[2]["text"]
-    focus = reviewer_prompt(Category.SECURITY, PATCHES, [finding("F-001")])[2]["text"]
+    assert "F-001" not in reviewer_prompt(Category.SECURITY, PATCHES, [], [])[2]["text"]
+    focus = reviewer_prompt(Category.SECURITY, PATCHES, [finding("F-001")], [])[2]["text"]
     assert "F-001" in focus and "resolved_ids" in focus
 
 
-def test_reviewers_see_the_dismissed_findings_of_their_category_only():
-    security = DismissedFinding(finding=finding("F-001"), reason="validated upstream", dismissed_by="alice")
-    performance = DismissedFinding(
-        finding=finding("F-002", category="performance"), reason="cached", dismissed_by="alice"
-    )
-    focus = reviewer_prompt(Category.SECURITY, PATCHES, [], [security, performance])[2]["text"]
+def test_dismissed_findings_appear_with_their_reason():
+    dismissed = DismissedFinding(finding=finding("F-001"), reason="validated upstream", dismissed_by="alice")
+    focus = reviewer_prompt(Category.SECURITY, PATCHES, [], [dismissed])[2]["text"]
     assert "F-001" in focus and "validated upstream" in focus
-    assert "F-002" not in focus
-    assert "dismissed" not in reviewer_prompt(Category.SECURITY, PATCHES, [])[2]["text"]
+    assert "dismissed" not in reviewer_prompt(Category.SECURITY, PATCHES, [], [])[2]["text"]
 
 
 def test_discussion_prompt_shows_the_finding_then_the_thread_in_order():

@@ -7,13 +7,13 @@ running children, and carries the pending push, fix requests and thread replies 
 An idle pull request gets a warning comment, then is closed: a durable timer waits for the next deadline,
 counted from the start of the idle period kept in the state.
 
-A new run under the same workflow ID (a reopened pull request, or one whose earlier run failed) continues the
-numbering the earlier run left on GitHub, then closes that run's open finding threads.
+A new run under the same workflow ID (a reopened pull request, or after a failed run) takes over the earlier run's
+numbering and finding threads.
 """
 
 import asyncio
 import contextlib
-from datetime import timedelta
+from datetime import datetime, timedelta
 
 from temporalio import workflow
 from temporalio.exceptions import ActivityError, ChildWorkflowError
@@ -69,32 +69,14 @@ with workflow.unsafe.imports_passed_through():
     )
 
 
-def _reviewer_workflow_id(pr_id: str, round_number: int, category: str, batch: int | None = None) -> str:
-    suffix = f"-b{batch}" if batch is not None else ""
-    return f"{pr_id}-r{round_number}-{category}{suffix}"
-
-
-def _synthesis_workflow_id(pr_id: str, round_number: int) -> str:
-    return f"{pr_id}-r{round_number}-synthesis"
-
-
-def _fixer_workflow_id(pr_id: str, fix_number: int) -> str:
-    return f"{pr_id}-fix{fix_number}"
-
-
-def _discussion_workflow_id(pr_id: str, discussion_number: int) -> str:
-    return f"{pr_id}-discussion-{discussion_number}"
-
-
 @workflow.defn(name=PULL_REQUEST_WORKFLOW)
 class PullRequestWorkflow:
     @workflow.init
     def __init__(self, input: PullRequestInput) -> None:
         # Signal-with-start delivers pr_updated before run() starts: the state must exist already.
+        self._input = input
         self._pr = input.pr
         self._state = input.state
-        self._idle_warning_seconds = input.idle_warning_seconds
-        self._idle_close_seconds = input.idle_close_seconds
         self._closed: PrClosed | None = None
         self._reviewing_sha: str | None = None
         self._phase = ""  # the memo's state, restored once a reply is answered
@@ -175,32 +157,21 @@ class PullRequestWorkflow:
             return
         await workflow.wait_condition(workflow.all_handlers_finished)
         workflow.continue_as_new(
-            PullRequestInput(
-                pr=self._pr,
-                state=self._state,
-                idle_warning_seconds=self._idle_warning_seconds,
-                idle_close_seconds=self._idle_close_seconds,
-            ),
+            self._input.model_copy(update={"state": self._state}),
             initial_versioning_behavior=workflow.ContinueAsNewVersioningBehavior.AUTO_UPGRADE,
         )
 
     async def _take_over_earlier_run(self) -> None:
         """Continue the numbering an earlier run of this workflow ID left on GitHub, then close its open threads.
 
-        A reopened pull request, or one whose earlier run failed or was terminated, starts a new run with an empty
-        state: numbering from 1 again would collide with the earlier run's round markers, finding IDs and Review-Fix
-        trailers. A check external ID may still repeat, that of a round which published no review: UpdateCheck,
-        which looks it up on the round's head, then updates that round's check instead of creating one, which is
-        harmless. Child workflow IDs follow the counters; a discussion's may repeat a completed one, which Temporal
-        allows (ALLOW_DUPLICATE, the children's default reuse policy).
+        Numbering from 1 again would collide with that run's round markers, finding IDs and Review-Fix trailers.
         """
-        recovered = await self._recover_counters()
+        await self._recover_counters()
         # Without an earlier round there is no earlier finding thread: a new pull request skips the closing.
-        if recovered is not None and recovered.last_round > 0:
+        if self._state.round > 0:
             await self._close_earlier_threads()
 
-    async def _recover_counters(self) -> RecoveredCounters | None:
-        """Apply the counters an earlier run left; None when they could not be read."""
+    async def _recover_counters(self) -> None:
         try:
             recovered: RecoveredCounters = await workflow.execute_activity(
                 "RecoverCounters",
@@ -210,9 +181,10 @@ class PullRequestWorkflow:
                 **policies.RECOVER_COUNTERS,
             )
         except ActivityError as error:
-            # Never blocks the pull request: its review goes on, numbered from 1 as on a new pull request.
+            # The review goes on, numbered from 1. On a reopened pull request, round 1 then finds the earlier run's
+            # review by its marker and publishes nothing, and its new findings are linked to the earlier threads.
             workflow.logger.warning("earlier numbering not recovered: %s", error.cause or error)
-            return None
+            return
         state = self._state
         state.round = recovered.last_round
         state.next_finding_number = recovered.last_finding_number + 1
@@ -223,7 +195,6 @@ class PullRequestWorkflow:
             recovered.last_finding_number,
             recovered.last_fix_number,
         )
-        return recovered
 
     async def _close_earlier_threads(self) -> None:
         """Best effort: an earlier finding thread left open only misleads a reader, the new review goes on."""
@@ -247,7 +218,9 @@ class PullRequestWorkflow:
 
         None when the loop goes on: an action is pending, a deadline has come, or the close failed.
         """
-        timer = lifecycle.idle_timer(self._state, workflow.now(), self._idle_warning_seconds, self._idle_close_seconds)
+        timer = lifecycle.idle_timer(
+            self._state, workflow.now(), self._input.idle_warning_seconds, self._input.idle_close_seconds
+        )
         if timer.left > timedelta(0):
             # A timeout means the deadline has passed: the next turn of the loop acts on it.
             with contextlib.suppress(TimeoutError):
@@ -256,27 +229,23 @@ class PullRequestWorkflow:
                 )
             return None
         if timer.step == "warning":
-            await self._warn_idle()
+            await self._warn_idle(timer.since)
             return None
-        return await self._close_idle()
+        return await self._close_idle(timer.since)
 
-    async def _warn_idle(self) -> None:
-        state = self._state
-        assert state.idle_since is not None  # set by run() before the first wait
+    async def _warn_idle(self, since: datetime) -> None:
         # Marked before the comment: a signal during the post starts a new period, which gets its own warning.
-        state.idle_warned = True
-        marker = markers.idle_warning_marker(self._id, state.idle_since)
-        body = publishing.idle_warning_comment(self._idle_warning_seconds, self._idle_close_seconds, marker)
+        self._state.idle_warned = True
+        marker = markers.idle_warning_marker(self._id, since)
+        body = publishing.idle_warning_comment(self._input.idle_warning_seconds, self._input.idle_close_seconds, marker)
         try:
             await self._post_comment(body, marker, "idle warning")
         except ActivityError as error:
             workflow.logger.warning("idle warning not posted: %s", error.cause or error)
 
-    async def _close_idle(self) -> PullRequestOutcome | None:
+    async def _close_idle(self, since: datetime) -> PullRequestOutcome | None:
         """Close the idle pull request and end; None when GitHub refused, which starts a new idle period."""
         state = self._state
-        assert state.idle_since is not None  # set by run() before the first wait
-        marker = markers.idle_close_marker(self._id, state.idle_since)
         try:
             await workflow.execute_activity("ClosePR", self._pr, summary="inactivity", **policies.CLOSE_PR)
         except ActivityError as error:
@@ -285,8 +254,9 @@ class PullRequestWorkflow:
             return None
         # GitHub's closed webhook signals this run while it ends, or finds none: harmless either way.
         self._memo("closed for inactivity")
+        marker = markers.idle_close_marker(self._id, since)
+        body = publishing.idle_close_comment(self._input.idle_close_seconds, marker)
         try:
-            body = publishing.idle_close_comment(self._idle_close_seconds, marker)
             await self._post_comment(body, marker, "idle close")
         except ActivityError as error:
             workflow.logger.warning("inactivity comment not posted: %s", error.cause or error)
@@ -351,17 +321,17 @@ class PullRequestWorkflow:
             # No review is published for this round: only the check can report the files GitHub did not list.
             state.last_reviewed_sha = change.head_sha
             state.last_reviewed_round = number
-            output = publishing.check_output(state.open_findings, [], change.unlisted)
+            output = publishing.check_output(state.open_findings, unlisted=change.unlisted)
             await self._complete_check(check, number, *output)
             return True
         snapshot = await self._snapshot(change.head_sha)
-        title = f"Round {number}: reviewing {len(change.files)} files"
-        await self._set_check(check.model_copy(update={"title": title}), number)
+        title = f"Round {number}: reviewing {summaries.count(len(change.files), 'file')}"
+        await self._update_check(check.model_copy(update={"title": title}), number)
         reports, unavailable = await self._run_reviewers(change, snapshot)
         if not reports:
             # Publishing "no new finding" would pass a head nobody reviewed: the check fails instead.
             output = publishing.unavailable_check_output(number, unavailable)
-            await self._complete_check(check, number, "failure", *output)
+            await self._complete_check(check, number, *output)
             return False
         # IDs are committed to the state only once the review is published.
         new, next_finding_number = lifecycle.number_findings(reports, state.next_finding_number)
@@ -402,7 +372,7 @@ class PullRequestWorkflow:
         state.last_reviewed_round = number
         if resolved:
             await self._resolve(resolved)
-        output = publishing.check_output(state.open_findings, unavailable, change.unlisted)
+        output = publishing.check_output(state.open_findings, unavailable=unavailable, unlisted=change.unlisted)
         await self._complete_check(check, number, *output)
         return True
 
@@ -415,8 +385,12 @@ class PullRequestWorkflow:
             open_in_category = [f for f in self._state.open_findings if f.category == category]
             dismissed_in_category = [d for d in self._state.dismissed_findings if d.finding.category == category]
             for index, batch in enumerate(batches, start=1):
-                batch_number = index if len(batches) > 1 else None
-                label = str(category) if batch_number is None else f"{category} (batch {index})"
+                if len(batches) > 1:
+                    child_id = f"{self._id}-r{number}-{category}-b{index}"
+                    label = f"{category} (batch {index})"
+                else:
+                    child_id = f"{self._id}-r{number}-{category}"
+                    label = str(category)
                 reviewer = ReviewerInput(
                     category=category,
                     snapshot=snapshot,
@@ -426,7 +400,7 @@ class PullRequestWorkflow:
                     open_findings=open_in_category,
                     dismissed_findings=dismissed_in_category,
                 )
-                jobs.append((_reviewer_workflow_id(self._id, number, category, batch_number), label, reviewer))
+                jobs.append((child_id, label, reviewer))
         slots = asyncio.Semaphore(change.max_parallel_agents)
 
         async def review(child_id: str, label: str, reviewer: ReviewerInput) -> ReviewerReport:
@@ -460,12 +434,10 @@ class PullRequestWorkflow:
             return await workflow.execute_child_workflow(
                 SynthesisWorkflow.run,
                 input,
-                id=_synthesis_workflow_id(self._id, self._state.round),
+                id=f"{self._id}-r{self._state.round}-synthesis",
                 run_timeout=policies.CHILD_RUN_TIMEOUT,
                 static_summary=f"round {self._state.round}",
-                static_details=summaries.synthesis_details(
-                    len(input.new_findings), len(input.still_open), len(input.resolved_ids), len(input.unavailable)
-                ),
+                static_details=summaries.synthesis_details(input),
             )
         except ChildWorkflowError as error:
             workflow.logger.warning("synthesis failed, deterministic merge instead: %s", error.cause or error)
@@ -473,32 +445,30 @@ class PullRequestWorkflow:
 
     async def _publish(self, input: PublishInput) -> dict[str, int]:
         """The IDs of the inline comments, by finding ID."""
-        try:
+
+        async def publish(attempt: PublishInput) -> dict[str, int]:
+            content = attempt.content
             return await workflow.execute_activity(
                 "PublishReview",
-                input,
+                attempt,
                 result_type=dict[str, int],
-                summary=summaries.publish(input.content.round, len(input.content.findings), inline=True),
+                summary=summaries.publish(content.round, len(content.findings), inline=attempt.inline),
                 **policies.PUBLISH_REVIEW,
             )
+
+        try:
+            return await publish(input)
         except ActivityError as error:
             if not policies.failed_with(error, "GitHubUnprocessable"):
                 raise
             workflow.logger.warning("GitHub refused the inline comments: every finding goes into the review body")
-            return await workflow.execute_activity(
-                "PublishReview",
-                input.model_copy(update={"inline": False}),
-                result_type=dict[str, int],
-                summary=summaries.publish(input.content.round, len(input.content.findings), inline=False),
-                **policies.PUBLISH_REVIEW,
-            )
+            return await publish(input.model_copy(update={"inline": False}))
 
     async def _resolve(self, finding_ids: list[str]) -> None:
         try:
             await workflow.execute_activity(
                 "ResolveThreads",
                 ResolveInput(pr=self._pr, finding_ids=finding_ids),
-                result_type=int,
                 summary=summaries.finding_ids(finding_ids),
                 **policies.RESOLVE_THREADS,
             )
@@ -518,10 +488,9 @@ class PullRequestWorkflow:
             if not policies.failed_with(error, "SnapshotTooLarge"):
                 raise
             # No snapshot: the tools read through the GitHub API instead.
-            pr = self._pr
-            return SnapshotRef(owner=pr.owner, repo=pr.repo, installation_id=pr.installation_id, sha=sha)
+            return SnapshotRef(pr=self._pr, sha=sha)
 
-    async def _set_check(self, check: CheckInput, round_number: int) -> None:
+    async def _update_check(self, check: CheckInput, round_number: int) -> None:
         summary = summaries.check(round_number, check.status, check.conclusion)
         await workflow.execute_activity("UpdateCheck", check, summary=summary, **policies.UPDATE_CHECK)
 
@@ -529,7 +498,7 @@ class PullRequestWorkflow:
         self, check: CheckInput, round_number: int, conclusion: str, title: str, summary: str
     ) -> None:
         update = {"status": "completed", "conclusion": conclusion, "title": title, "summary": summary}
-        await self._set_check(check.model_copy(update=update), round_number)
+        await self._update_check(check.model_copy(update=update), round_number)
 
     # --- fix ---
 
@@ -537,16 +506,19 @@ class PullRequestWorkflow:
         """One fixer run for every accepted /fix request; each refused one gets its own explanation."""
         state = self._state
         requests, state.pending_fixes = state.pending_fixes, []
-        plan = lifecycle.plan_fix(state, requests)
-        for root in plan.closed_threads:
+        triage = lifecycle.triage_fixes(state, requests)
+        for root in triage.closed_threads:
             # Keyed on the thread: a /fix in a closed thread gets this answer once.
             await self._answer_closed_thread(root, markers.reply_marker(self._id, root))
-        for refusal in plan.refusals:
+        for refusal in triage.refusals:
             await self._refuse_fix(refusal)
-        if not plan.findings or state.last_reviewed_sha is None:
-            workflow.logger.info("fix requests of %s ignored: no open finding", [r.requested_by for r in requests])
+        if not triage.findings:
+            if triage.accepted:
+                accepted_by = [r.requested_by for r in triage.accepted]
+                workflow.logger.info("fix requests of %s ignored: no open finding", accepted_by)
             return
-        requested_by = plan.accepted[-1].requested_by
+        assert state.last_reviewed_sha is not None  # a finding is open only after a published round
+        requested_by = triage.accepted[-1].requested_by
         state.fix_count += 1
         self._memo(f"fixing for @{requested_by}")
         try:
@@ -557,17 +529,17 @@ class PullRequestWorkflow:
                 fix_number=state.fix_count,
                 expected_head_sha=state.last_reviewed_sha,
                 snapshot=snapshot,
-                findings=plan.findings,
+                findings=triage.findings,
             )
             result: CommitResult = await workflow.execute_child_workflow(
                 FixerWorkflow.run,
                 fixer,
-                id=_fixer_workflow_id(self._id, state.fix_count),
+                id=f"{self._id}-fix{state.fix_count}",
                 run_timeout=policies.CHILD_RUN_TIMEOUT,
-                static_summary=summaries.finding_ids([f.id for f in plan.findings]),
-                static_details=summaries.finding_list(plan.findings),
+                static_summary=summaries.finding_ids([f.id for f in triage.findings]),
+                static_details=summaries.finding_list(triage.findings),
             )
-            # The commit's synchronize webhook brings the incremental round; the bot's commit never asks for a fix.
+            # The commit's synchronize webhook starts the next round.
             workflow.logger.info("fix %d pushed as %s (rejected: %s)", state.fix_count, result.sha, result.rejected)
             self._memo("fix pushed, waiting for its review")
         except (ActivityError, ChildWorkflowError) as error:
@@ -596,7 +568,7 @@ class PullRequestWorkflow:
         state = self._state
         reply = state.pending_replies.pop(0)
         marker = markers.reply_marker(self._id, reply.comment_id)
-        finding = lifecycle.reply_target(state, reply.thread_root_id)
+        finding = lifecycle.open_finding_in_thread(state, reply.thread_root_id)
         if finding is None:
             await self._answer_closed_thread(reply.thread_root_id, marker)
             return
@@ -610,10 +582,10 @@ class PullRequestWorkflow:
                 summary=finding.id,
                 **policies.READ_THREAD,
             )
-            if not lifecycle.reply_budget_left(publishing.bot_answers(thread.comments, thread.bot_login)):
+            if publishing.bot_answers(thread.comments, thread.bot_login) >= lifecycle.MAX_BOT_REPLIES_PER_THREAD:
                 await self._post_reply(reply.thread_root_id, publishing.budget_reply(marker), marker, finding.id)
                 return
-            assert state.last_reviewed_sha is not None  # a finding exists only after a published round
+            assert state.last_reviewed_sha is not None  # a finding is open only after a published round
             snapshot = await self._snapshot(state.last_reviewed_sha)
             comments = lifecycle.discussion_thread(thread.comments, thread.bot_login, reply.author, reply.comment_id)
             state.discussion_count += 1
@@ -622,7 +594,7 @@ class PullRequestWorkflow:
                 answer: DiscussionReply = await workflow.execute_child_workflow(
                     DiscussionWorkflow.run,
                     DiscussionInput(finding=finding, thread=comments, author=reply.author, snapshot=snapshot),
-                    id=_discussion_workflow_id(self._id, number),
+                    id=f"{self._id}-discussion-{number}",
                     run_timeout=policies.CHILD_RUN_TIMEOUT,
                     static_summary=finding.id,
                     static_details=f"{summaries.finding_line(finding)}\n\nReply by @{reply.author}",
@@ -647,7 +619,7 @@ class PullRequestWorkflow:
 
         Any other thread is not a finding of this pull request: it is left alone.
         """
-        finding_id = lifecycle.was_finding_thread(self._state, thread_root_id)
+        finding_id = lifecycle.closed_finding_id(self._state, thread_root_id)
         if finding_id is None:
             return
         try:
@@ -689,7 +661,7 @@ class PullRequestWorkflow:
         # The round's notes on unavailable reviewers and unlisted files drop out of the check here: accepted,
         # for simplicity, even in the rare round where every listed file was excluded and the check was the
         # only place reporting the unlisted files.
-        output = publishing.check_output(state.open_findings, [], 0)
+        output = publishing.check_output(state.open_findings)
         await self._complete_check(check, state.last_reviewed_round, *output)
 
     # --- end ---
@@ -718,7 +690,6 @@ class PullRequestWorkflow:
             await workflow.execute_activity(
                 "DeleteSnapshots",
                 self._pr,
-                result_type=int,
                 summary=summaries.pull_request(self._pr.number),
                 **policies.DELETE_SNAPSHOTS,
             )

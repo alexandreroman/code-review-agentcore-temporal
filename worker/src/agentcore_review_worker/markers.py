@@ -5,7 +5,6 @@ from collections.abc import Iterable
 from datetime import datetime
 
 _FINDING = re.compile(r"<!-- finding:(F-\d+) -->")
-_REPLY = re.compile(r"<!-- reply:\S+:\d+ -->")
 
 
 def finding_marker(finding_id: str) -> str:
@@ -21,7 +20,7 @@ def closing_marker(workflow_id: str) -> str:
 
 
 def reply_marker(workflow_id: str, comment_id: int) -> str:
-    """Marks the bot's reply to one human comment: posted once, whatever the retries."""
+    """Marks the bot's answer keyed on a comment (a reply, or a thread root): posted once, whatever the retries."""
     return f"<!-- reply:{workflow_id}:{comment_id} -->"
 
 
@@ -43,10 +42,6 @@ def idle_close_marker(workflow_id: str, idle_since: datetime) -> str:
 def superseded_marker(workflow_id: str, thread_root_id: int) -> str:
     """Marks the note that closes an earlier run's finding thread once a new run takes over: posted once."""
     return f"<!-- superseded:{workflow_id}:{thread_root_id} -->"
-
-
-def has_reply_marker(text: str) -> bool:
-    return _REPLY.search(text) is not None
 
 
 def fix_trailer(workflow_id: str, fix_number: int) -> str:

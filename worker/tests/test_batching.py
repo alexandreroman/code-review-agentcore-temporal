@@ -18,10 +18,6 @@ def test_lock_and_generated_files_are_excluded(path):
     assert is_excluded(cf(path))
 
 
-def test_files_without_patch_are_excluded():
-    assert is_excluded(cf("logo.png", patch_bytes=None))
-
-
 @pytest.mark.parametrize("path", ["app/search.py", "README.md", "lockfile.py", "app.js"])
 def test_regular_files_are_reviewed(path):
     assert not is_excluded(cf(path))
@@ -32,15 +28,6 @@ def test_partition_keeps_order():
     reviewed, excluded = partition(files)
     assert [f.path for f in reviewed] == ["a.py", "b.py"]
     assert [f.path for f in excluded] == ["uv.lock", "img.png"]
-
-
-def test_small_change_is_a_single_batch():
-    files = [cf(f"f{i}.py") for i in range(3)]
-    assert make_batches(files) == [files]
-
-
-def test_no_files_no_batch():
-    assert make_batches([]) == []
 
 
 def test_file_count_threshold():

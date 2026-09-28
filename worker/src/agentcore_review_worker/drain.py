@@ -8,18 +8,18 @@ from temporalio.worker import ActivityInboundInterceptor, ExecuteActivityInput, 
 
 class ActivityTracker(Interceptor):
     def __init__(self) -> None:
-        self.inflight = 0
+        self._inflight = 0
         self._changed = asyncio.Event()
 
     def intercept_activity(self, next: ActivityInboundInterceptor) -> ActivityInboundInterceptor:
         return _TrackedActivities(next, self)
 
     def activity_started(self) -> None:
-        self.inflight += 1
+        self._inflight += 1
         self._changed.set()
 
     def activity_finished(self) -> None:
-        self.inflight -= 1
+        self._inflight -= 1
         self._changed.set()
 
     async def wait_until_idle(self, idle_seconds: float) -> None:
@@ -29,7 +29,7 @@ class ActivityTracker(Interceptor):
             try:
                 await asyncio.wait_for(self._changed.wait(), timeout=idle_seconds)
             except TimeoutError:
-                if self.inflight == 0:
+                if self._inflight == 0:
                     return
 
 

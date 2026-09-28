@@ -10,6 +10,8 @@ from typing import Any
 
 from agentcore_review_shared.contract import Finding
 
+from agentcore_review_worker.models import SynthesisInput
+
 MAX_SUMMARY_CHARS = 120
 MAX_SUMMARY_BYTES = 200
 MAX_LIST_ITEMS = 20
@@ -116,15 +118,15 @@ def _tool_call(tool_name: str, tool_input: Any) -> str | None:
     if not isinstance(tool_input, dict):
         return None
     if tool_name == "Read":
-        return read_call(tool_input)
+        return _read_call(tool_input)
     if tool_name == "Grep":
-        return grep_call(tool_input)
+        return _grep_call(tool_input)
     if tool_name == "Glob":
-        return glob_call(tool_input)
+        return _glob_call(tool_input)
     return None
 
 
-def read_call(tool_input: dict[str, Any]) -> str | None:
+def _read_call(tool_input: dict[str, Any]) -> str | None:
     """`app/main.py:1-400`, `app/main.py:120-`, or the path alone when no valid line range was given."""
     path = _text(tool_input.get("file_path"))
     if path is None:
@@ -140,7 +142,7 @@ def read_call(tool_input: dict[str, Any]) -> str | None:
     return fit(path)
 
 
-def grep_call(tool_input: dict[str, Any]) -> str | None:
+def _grep_call(tool_input: dict[str, Any]) -> str | None:
     """`/select\\(/ in app/ (*.py)`, leaving out the parts the model did not give."""
     parts = []
     pattern = _text(tool_input.get("pattern"))
@@ -155,7 +157,7 @@ def grep_call(tool_input: dict[str, Any]) -> str | None:
     return fit(" ".join(parts)) if parts else None
 
 
-def glob_call(tool_input: dict[str, Any]) -> str | None:
+def _glob_call(tool_input: dict[str, Any]) -> str | None:
     """`app/**/*.py`, followed by `in <path>` when a directory was given."""
     parts = []
     pattern = _text(tool_input.get("pattern"))
@@ -185,7 +187,7 @@ def _positive_int(value: Any) -> int | None:
 # --- child workflow details (Markdown) ---
 
 
-def bullet_list(items: list[str]) -> str:
+def _bullet_list(items: list[str]) -> str:
     """A Markdown list of at most 20 items, then how many were left out."""
     lines = [f"- {item}" for item in items[:MAX_LIST_ITEMS]]
     left_out = len(items) - MAX_LIST_ITEMS
@@ -195,7 +197,7 @@ def bullet_list(items: list[str]) -> str:
 
 
 def file_list(paths: list[str]) -> str:
-    return bullet_list([f"`{path}`" for path in paths])
+    return _bullet_list([f"`{path}`" for path in paths])
 
 
 def finding_line(finding: Finding) -> str:
@@ -204,15 +206,15 @@ def finding_line(finding: Finding) -> str:
 
 
 def finding_list(findings: list[Finding]) -> str:
-    return bullet_list([finding_line(finding) for finding in findings])
+    return _bullet_list([finding_line(finding) for finding in findings])
 
 
-def synthesis_details(new: int, still_open: int, resolved: int, unavailable: int) -> str:
-    return bullet_list(
+def synthesis_details(input: SynthesisInput) -> str:
+    return _bullet_list(
         [
-            f"New findings: {new}",
-            f"Still open: {still_open}",
-            f"Resolved: {resolved}",
-            f"Unavailable reviewers: {unavailable}",
+            f"New findings: {len(input.new_findings)}",
+            f"Still open: {len(input.still_open)}",
+            f"Resolved: {len(input.resolved_ids)}",
+            f"Unavailable reviewers: {len(input.unavailable)}",
         ]
     )

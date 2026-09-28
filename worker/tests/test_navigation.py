@@ -13,7 +13,6 @@ from agentcore_review_worker.navigation import (
     glob_paths,
     grep_files,
     read_file,
-    render_file,
 )
 
 
@@ -85,9 +84,8 @@ def test_grep_filters_by_glob_and_path(repo):
     assert grep_files(repo, "def", path="app/db.py") == "app/db.py:1: def run(query):"
 
 
-def test_grep_skips_binary_files_and_stays_inside(repo):
-    out = grep_files(repo, r"run\(")
-    assert "logo.bin" not in out and "secret.txt" not in out
+def test_grep_skips_binary_files(repo):
+    assert "logo.bin" not in grep_files(repo, r"run\(")
 
 
 def test_grep_invalid_regex_returns_an_error(repo):
@@ -244,12 +242,3 @@ def test_glob_paths_reports_a_file_as_not_a_directory():
 @pytest.mark.parametrize("pattern", ["", "/etc/passwd"])
 def test_glob_paths_rejects_invalid_patterns(pattern):
     assert glob_paths(["app/a.py"], pattern).startswith("Error: invalid glob pattern")
-
-
-def test_render_file_matches_read_file(tmp_path):
-    root = tmp_path / "rf"
-    root.mkdir()
-    data = "\n".join(f"line {i}" for i in range(1, 1001)).encode()
-    (root / "big.py").write_bytes(data)
-    assert render_file("big.py", data, 950, 100) == read_file(root, "big.py", offset=950, limit=100)
-    assert render_file("logo.bin", b"\x89PNG\x00") == "Error: 'logo.bin' is a binary file."

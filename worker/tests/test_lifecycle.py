@@ -10,14 +10,15 @@ from agentcore_review_shared.contract import (
     PullRequestState,
 )
 from agentcore_review_worker.lifecycle import (
+    MAX_DELIVERIES,
     MAX_DISMISSED,
-    MAX_FIX_DELIVERIES,
     MAX_PENDING_REPLIES,
     MAX_RESOLVED_THREADS,
     FixRefusal,
     IdleTimer,
     apply_summary,
     clean_report,
+    closed_finding_id,
     discussion_thread,
     dismiss,
     fallback_summary,
@@ -25,16 +26,14 @@ from agentcore_review_worker.lifecycle import (
     memo,
     next_action,
     number_findings,
-    plan_fix,
+    open_finding_in_thread,
     record_fix_request,
     record_head,
     record_reply,
     record_resolved,
-    reply_budget_left,
-    reply_target,
     resolved_ids,
     start_idle,
-    was_finding_thread,
+    triage_fixes,
 )
 from agentcore_review_worker.models import ReviewerReport, ReviewSummary, SynthesisInput, ThreadComment
 
@@ -51,24 +50,20 @@ def reply(delivery_id="d1", thread_root_id=100) -> CommentPosted:
     return CommentPosted(comment_id=900, thread_root_id=thread_root_id, author="alice", delivery_id=delivery_id)
 
 
-def test_close_wins_then_review_then_fix():
-    state = PullRequestState(pending_head_sha="b", pending_fixes=[FixRequested(requested_by="dev", delivery_id="d")])
+def test_close_wins_then_review_then_fix_then_reply():
+    state = PullRequestState(
+        pending_head_sha="b",
+        pending_fixes=[FixRequested(requested_by="alice", delivery_id="f")],
+        pending_replies=[reply()],
+    )
     assert next_action(state, closed=True) == "close"
     assert next_action(state, closed=False) == "review"
     state.pending_head_sha = None
     assert next_action(state, closed=False) == "fix"
     state.pending_fixes = []
-    assert next_action(state, closed=False) is None
-
-
-def test_a_reply_comes_after_a_review_and_a_fix():
-    state = PullRequestState(pending_replies=[reply()])
     assert next_action(state, closed=False) == "reply"
-    state.pending_fixes = [FixRequested(requested_by="alice", delivery_id="f")]
-    assert next_action(state, closed=False) == "fix"
-    state.pending_head_sha = "abc"
-    assert next_action(state, closed=False) == "review"
-    assert next_action(state, closed=True) == "close"
+    state.pending_replies = []
+    assert next_action(state, closed=False) is None
 
 
 IDLE_START = datetime(2026, 9, 28, 14, 0, tzinfo=UTC)
@@ -83,16 +78,16 @@ def idle_after(state: PullRequestState, minutes: float) -> IdleTimer:
 
 
 def test_an_idle_period_waits_for_the_warning_first():
-    assert idle_after(idle_state(), minutes=4) == IdleTimer("warning", timedelta(minutes=6))
+    assert idle_after(idle_state(), minutes=4) == IdleTimer("warning", IDLE_START, timedelta(minutes=6))
 
 
 def test_the_warning_is_due_at_its_deadline():
-    assert idle_after(idle_state(), minutes=10) == IdleTimer("warning", timedelta(0))
+    assert idle_after(idle_state(), minutes=10) == IdleTimer("warning", IDLE_START, timedelta(0))
 
 
 def test_once_warned_the_timer_counts_down_to_the_close():
-    assert idle_after(idle_state(warned=True), minutes=11) == IdleTimer("close", timedelta(minutes=4))
-    assert idle_after(idle_state(warned=True), minutes=16) == IdleTimer("close", timedelta(minutes=-1))
+    assert idle_after(idle_state(warned=True), minutes=11) == IdleTimer("close", IDLE_START, timedelta(minutes=4))
+    assert idle_after(idle_state(warned=True), minutes=16) == IdleTimer("close", IDLE_START, timedelta(minutes=-1))
 
 
 def test_past_the_close_deadline_the_close_comes_without_a_warning():
@@ -102,12 +97,7 @@ def test_past_the_close_deadline_the_close_comes_without_a_warning():
 def test_a_warning_not_before_the_close_is_never_posted():
     state = idle_state()
     timer = idle_timer(state, IDLE_START + timedelta(minutes=15), warning_seconds=900, close_seconds=900)
-    assert timer == IdleTimer("close", timedelta(0))
-
-
-def test_an_idle_timer_needs_an_idle_period():
-    with pytest.raises(ValueError):
-        idle_timer(PullRequestState(), IDLE_START, warning_seconds=600, close_seconds=900)
+    assert timer == IdleTimer("close", IDLE_START, timedelta(0))
 
 
 def test_activity_starts_a_new_idle_period_with_a_new_warning():
@@ -116,7 +106,7 @@ def test_activity_starts_a_new_idle_period_with_a_new_warning():
     start_idle(state, later)
     assert state.idle_since == later and state.idle_warned is False
     assert idle_timer(state, later, warning_seconds=600, close_seconds=900) == IdleTimer(
-        "warning", timedelta(minutes=10)
+        "warning", later, timedelta(minutes=10)
     )
 
 
@@ -156,11 +146,11 @@ def test_fix_requests_queue_apart_once_per_delivery():
 
 def test_seen_fix_deliveries_keep_only_the_most_recent():
     state = PullRequestState()
-    for number in range(MAX_FIX_DELIVERIES + 5):
+    for number in range(MAX_DELIVERIES + 5):
         record_fix_request(state, FixRequested(requested_by="alice", delivery_id=f"d{number}"))
-    assert len(state.fix_deliveries) == MAX_FIX_DELIVERIES
+    assert len(state.fix_deliveries) == MAX_DELIVERIES
     assert state.fix_deliveries[0] == "d5"
-    assert state.fix_deliveries[-1] == f"d{MAX_FIX_DELIVERIES + 4}"
+    assert state.fix_deliveries[-1] == f"d{MAX_DELIVERIES + 4}"
 
 
 def test_a_reply_is_queued_once_per_delivery_and_the_oldest_are_dropped():
@@ -183,82 +173,82 @@ def three_open_findings() -> PullRequestState:
     )
 
 
-def planned_ids(plan) -> list[str]:
-    return [f.id for f in plan.findings]
+def triaged_ids(triage) -> list[str]:
+    return [f.id for f in triage.findings]
 
 
 def test_a_bare_fix_in_the_conversation_fixes_every_open_finding():
-    plan = plan_fix(three_open_findings(), [fix_request("d1")])
-    assert planned_ids(plan) == ["F-001", "F-002", "F-003"]
-    assert plan.refusals == [] and plan.closed_threads == []
+    triage = triage_fixes(three_open_findings(), [fix_request("d1")])
+    assert triaged_ids(triage) == ["F-001", "F-002", "F-003"]
+    assert triage.refusals == [] and triage.closed_threads == []
 
 
 def test_a_fix_naming_open_findings_fixes_only_those():
-    plan = plan_fix(three_open_findings(), [fix_request("d1", finding_ids=["F-003", "F-001"])])
-    assert planned_ids(plan) == ["F-001", "F-003"]
+    triage = triage_fixes(three_open_findings(), [fix_request("d1", finding_ids=["F-003", "F-001"])])
+    assert triaged_ids(triage) == ["F-001", "F-003"]
 
 
 def test_a_fix_naming_a_finding_that_is_not_open_fixes_nothing():
     request = fix_request("d1", finding_ids=["F-001", "F-099"])
-    plan = plan_fix(three_open_findings(), [request])
-    assert plan.findings == [] and plan.accepted == []
-    assert plan.refusals == [FixRefusal(request, not_open_ids=["F-099"])]
+    triage = triage_fixes(three_open_findings(), [request])
+    assert triage.findings == [] and triage.accepted == []
+    assert triage.refusals == [FixRefusal(request, not_open_ids=["F-099"])]
 
 
 def test_a_bare_fix_in_a_thread_fixes_its_finding():
-    plan = plan_fix(three_open_findings(), [fix_request("d1", thread_root_id=200)])
-    assert planned_ids(plan) == ["F-002"]
+    triage = triage_fixes(three_open_findings(), [fix_request("d1", thread_root_id=200)])
+    assert triaged_ids(triage) == ["F-002"]
 
 
 def test_a_fix_in_a_thread_may_name_its_own_finding():
-    plan = plan_fix(three_open_findings(), [fix_request("d1", thread_root_id=200, finding_ids=["F-002"])])
-    assert planned_ids(plan) == ["F-002"]
+    triage = triage_fixes(three_open_findings(), [fix_request("d1", thread_root_id=200, finding_ids=["F-002"])])
+    assert triaged_ids(triage) == ["F-002"]
 
 
 @pytest.mark.parametrize("finding_ids", [["F-003"], ["F-002", "F-003"], ["F-099"]])
 def test_a_fix_in_a_thread_naming_another_finding_fixes_nothing(finding_ids):
     request = fix_request("d1", thread_root_id=200, finding_ids=finding_ids)
-    plan = plan_fix(three_open_findings(), [request])
-    assert plan.findings == []
-    assert plan.refusals == [FixRefusal(request, thread_finding_id="F-002")]
+    triage = triage_fixes(three_open_findings(), [request])
+    assert triage.findings == []
+    assert triage.refusals == [FixRefusal(request, thread_finding_id="F-002")]
 
 
 def test_a_refused_request_does_not_widen_the_accepted_ones():
     refused = fix_request("d2", finding_ids=["F-003", "F-099"])
     requests = [fix_request("d1", thread_root_id=100), refused, fix_request("d3", finding_ids=["F-002"])]
-    plan = plan_fix(three_open_findings(), requests)
-    assert planned_ids(plan) == ["F-001", "F-002"]
-    assert [r.delivery_id for r in plan.accepted] == ["d1", "d3"]
-    assert [refusal.request for refusal in plan.refusals] == [refused]
+    triage = triage_fixes(three_open_findings(), requests)
+    assert triaged_ids(triage) == ["F-001", "F-002"]
+    assert [r.delivery_id for r in triage.accepted] == ["d1", "d3"]
+    assert [refusal.request for refusal in triage.refusals] == [refused]
 
 
 def test_threads_without_an_open_finding_are_listed_once():
     requests = [fix_request("d1", thread_root_id=900), fix_request("d2", thread_root_id=900, finding_ids=["F-001"])]
-    plan = plan_fix(three_open_findings(), requests)
-    assert plan.findings == [] and plan.refusals == []
-    assert plan.closed_threads == [900]
+    triage = triage_fixes(three_open_findings(), requests)
+    assert triage.findings == [] and triage.refusals == []
+    assert triage.closed_threads == [900]
 
 
 def test_a_reply_targets_only_an_open_finding():
     first = finding("F-001", comment_id=100)
     state = PullRequestState(open_findings=[first])
-    assert reply_target(state, 100) == first
-    assert reply_target(state, 999) is None
+    assert open_finding_in_thread(state, 100) == first
+    assert open_finding_in_thread(state, 999) is None
 
 
 def test_the_thread_of_a_dismissed_finding_is_still_known():
     state = PullRequestState(open_findings=[finding("F-003", comment_id=300)])
     dismiss(state, "F-003", "validated upstream", "alice")
-    assert reply_target(state, 300) is None
-    assert was_finding_thread(state, 300) == "F-003"
-    assert was_finding_thread(state, 999) is None
+    assert open_finding_in_thread(state, 300) is None
+    assert closed_finding_id(state, 300) == "F-003"
+    assert closed_finding_id(state, 999) is None
 
 
 def test_the_thread_of_a_finding_resolved_by_a_round_is_still_known():
     state = PullRequestState(open_findings=[finding("F-001", comment_id=100), finding("F-002", comment_id=200)])
     record_resolved(state, ["F-001"])
-    assert was_finding_thread(state, 100) == "F-001"
-    assert was_finding_thread(state, 200) is None
+    assert closed_finding_id(state, 100) == "F-001"
+    assert closed_finding_id(state, 200) is None
 
 
 def test_resolved_threads_keep_only_the_most_recent():
@@ -267,8 +257,8 @@ def test_resolved_threads_keep_only_the_most_recent():
         state.open_findings = [finding(f"F-{number}", comment_id=number)]
         record_resolved(state, [f"F-{number}"])
     assert len(state.resolved_threads) == MAX_RESOLVED_THREADS
-    assert was_finding_thread(state, 0) is None
-    assert was_finding_thread(state, MAX_RESOLVED_THREADS + 2) == f"F-{MAX_RESOLVED_THREADS + 2}"
+    assert closed_finding_id(state, 0) is None
+    assert closed_finding_id(state, MAX_RESOLVED_THREADS + 2) == f"F-{MAX_RESOLVED_THREADS + 2}"
 
 
 def test_the_discussion_agent_reads_only_the_bot_and_the_author_up_to_the_reply():
@@ -295,11 +285,6 @@ def test_dismiss_moves_the_finding_and_keeps_only_the_most_recent():
         state.open_findings.append(finding(f"F-{100 + number}", comment_id=1000 + number))
         dismiss(state, f"F-{100 + number}", "reason", "alice")
     assert len(state.dismissed_findings) == MAX_DISMISSED
-
-
-@pytest.mark.parametrize(("bot_replies", "left"), [(0, True), (2, True), (3, False), (5, False)])
-def test_the_bot_answers_at_most_three_times_per_thread(bot_replies, left):
-    assert reply_budget_left(bot_replies) is left
 
 
 def test_clean_report_pins_the_category_and_keeps_known_open_ids():

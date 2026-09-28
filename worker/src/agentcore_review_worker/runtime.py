@@ -6,9 +6,9 @@ from datetime import timedelta
 from temporalio.client import Client
 from temporalio.common import VersioningBehavior
 from temporalio.service import TLSConfig
-from temporalio.worker import Interceptor, Worker, WorkerDeploymentConfig, WorkerDeploymentVersion
+from temporalio.worker import Interceptor, Worker, WorkerDeploymentConfig
 
-from .activities import commits, github_api, reviews, tools
+from .activities import commits, github_api, reviews, threads, tools
 from .activities.ping import PingActivities
 from .activities.pulls import PullActivities
 from .activities.snapshots import SnapshotActivities
@@ -32,28 +32,27 @@ WORKFLOWS: list[type] = [
 
 
 def activities(settings: AppSettings, identity: str) -> list[Callable]:
-    github_api.configure(settings.github_app_secret)
     pulls = PullActivities(settings)
     snapshots = SnapshotActivities(settings)
     return [
         PingActivities(identity).ping,
-        pulls.list_changed_files,
-        pulls.fetch_batch_patches,
-        snapshots.snapshot_repo,
+        pulls.list_files,
+        pulls.fetch_diff,
+        snapshots.snapshot,
         snapshots.delete_snapshots,
-        reviews.set_check,
+        reviews.update_check,
         reviews.publish_review,
-        reviews.resolve_threads,
         reviews.recover_counters,
-        reviews.close_earlier_threads,
-        reviews.read_thread,
-        reviews.post_thread_reply,
-        reviews.post_pr_comment,
-        reviews.close_pull_request,
-        commits.commit_changes,
-        tools.glob_tool,
-        tools.grep_tool,
-        tools.read_tool,
+        reviews.post_comment,
+        reviews.close_pr,
+        threads.resolve_threads,
+        threads.close_earlier_threads,
+        threads.read_thread,
+        threads.reply_in_thread,
+        commits.commit_fix,
+        tools.glob,
+        tools.grep,
+        tools.read,
     ]
 
 
@@ -73,16 +72,16 @@ async def connect(settings: WorkerSettings, identity: str, cert: bytes, key: byt
 def build_worker(
     client: Client, settings: WorkerSettings, identity: str, interceptors: Sequence[Interceptor] = ()
 ) -> Worker:
+    github_api.configure(settings.app.github_app_secret)
     deployment = None
-    if settings.deployment_name is not None and settings.build_id is not None:
+    if settings.deployment is not None:
         deployment = WorkerDeploymentConfig(
-            version=WorkerDeploymentVersion(deployment_name=settings.deployment_name, build_id=settings.build_id),
+            version=settings.deployment,
             use_worker_versioning=True,
             default_versioning_behavior=VersioningBehavior.PINNED,
         )
-    # The dev worker's Ctrl-C stands in for AgentCore's /kill: it must cancel activities at once,
-    # like a crash, so the same run resumes at attempt 2 when a worker comes back. The AgentCore
-    # worker keeps a normal graceful shutdown: it stops only once idle, so there is rarely anything to finish.
+    # The dev worker's Ctrl-C mimics AgentCore's /kill: activities stop at once, as in a crash, and resume at
+    # attempt 2. An AgentCore worker only stops once idle, so its graceful shutdown rarely has anything to finish.
     graceful_shutdown_timeout = timedelta(seconds=120) if deployment is not None else timedelta(0)
     return Worker(
         client,

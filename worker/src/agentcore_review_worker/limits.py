@@ -1,4 +1,4 @@
-"""The agents' round budget: each model call is a 10-20 s round trip, and a review round must stay under 3 min."""
+"""The agents' model call budget: each call is a 10-20 s round trip, and a review round must stay under 3 min."""
 
 MAX_MODEL_CALLS = 8
 HARD_TURN_LIMIT = MAX_MODEL_CALLS + 3

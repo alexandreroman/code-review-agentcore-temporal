@@ -6,6 +6,7 @@ dependencies = [
     "agentcore-review-shared",
     "temporalio[pydantic,strands-agents]==1.33.0",
     "strands-agents==1.57.0",
+    # Pinned directly: the strands-agents[anthropic] extra caps anthropic below 1.0.
     "anthropic==1.8.0",
     "bedrock-agentcore==1.23.1",
     "boto3==1.43.103",

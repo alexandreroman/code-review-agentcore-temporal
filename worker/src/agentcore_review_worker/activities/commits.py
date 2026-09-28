@@ -16,11 +16,12 @@ from ..models import CommitInput, CommitResult
 from ..publishing import split_changes
 from .github_api import get, github_errors, repo_path, send
 
-FILE_MODE = "100644"  # the fixer edits regular source files
+REGULAR_FILE = "100644"
+EXECUTABLE_FILE = "100755"
 
 
 @activity.defn(name="CommitFix")
-async def commit_changes(input: CommitInput) -> CommitResult:
+async def commit_fix(input: CommitInput) -> CommitResult:
     pr = input.pr
     trailer = fix_trailer(input.workflow_id, input.fix_number)
     accepted, rejected = split_changes(input.plan.changes)
@@ -30,7 +31,8 @@ async def commit_changes(input: CommitInput) -> CommitResult:
         raise ApplicationError("the fix plan has no change the bot may push", type="EmptyFixPlan", non_retryable=True)
     with github_errors():
         pull = await get(pr, f"{repo_path(pr)}/pulls/{pr.number}")
-        if pull["head"]["repo"]["full_name"].lower() != f"{pr.owner}/{pr.repo}".lower():
+        head_repo = pull["head"]["repo"]  # None once the fork is deleted
+        if head_repo is None or head_repo["full_name"].lower() != f"{pr.owner}/{pr.repo}".lower():
             raise ApplicationError(
                 "the pull request comes from a fork: the bot cannot push to it",
                 type="ForkNotSupported",
@@ -44,10 +46,18 @@ async def commit_changes(input: CommitInput) -> CommitResult:
         if ref["object"]["sha"] != input.expected_head_sha:
             await _abandon(pr, branch)
         parent = await get(pr, f"{repo_path(pr)}/git/commits/{input.expected_head_sha}")
-        entries = [{"path": c.path, "mode": FILE_MODE, "type": "blob", "content": c.new_content} for c in accepted]
-        tree = await send(
-            pr, "POST", f"{repo_path(pr)}/git/trees", {"base_tree": parent["tree"]["sha"], "tree": entries}
-        )
+        base_tree = parent["tree"]["sha"]
+        executables = await _executable_paths(pr, base_tree)
+        entries = [
+            {
+                "path": change.path,
+                "mode": EXECUTABLE_FILE if change.path in executables else REGULAR_FILE,
+                "type": "blob",
+                "content": change.new_content,
+            }
+            for change in accepted
+        ]
+        tree = await send(pr, "POST", f"{repo_path(pr)}/git/trees", {"base_tree": base_tree, "tree": entries})
         commit = await send(
             pr,
             "POST",
@@ -65,6 +75,12 @@ async def commit_changes(input: CommitInput) -> CommitResult:
                 await _abandon(pr, branch)
             raise
     return CommitResult(sha=commit["sha"], rejected=rejected)
+
+
+async def _executable_paths(pr: PrRef, tree_sha: str) -> set[str]:
+    """The executable files of a tree: a fixed script keeps its executable bit, a new file is a regular one."""
+    tree = await get(pr, f"{repo_path(pr)}/git/trees/{tree_sha}", {"recursive": "1"})
+    return {entry["path"] for entry in tree["tree"] if entry["mode"] == EXECUTABLE_FILE}
 
 
 async def _already_pushed(pr: PrRef, branch: str, trailer: str) -> str | None:

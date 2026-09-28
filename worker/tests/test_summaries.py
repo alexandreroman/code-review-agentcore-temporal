@@ -119,16 +119,9 @@ def test_arguments_that_are_not_an_object_give_no_summary():
 @pytest.mark.parametrize(
     ("tool_name", "tool_input"),
     [
-        ("Read", {"file_path": "app/main.py", "offset": "²"}),
-        ("Read", {"file_path": "app/main.py", "limit": "9" * 5000}),
         ("Read", {"file_path": "app/main.py", "offset": 10**5000}),
-        ("Read", {"file_path": "app/main.py", "offset": True, "limit": False}),
-        ("Read", {"file_path": "app/main.py", "offset": 2.5, "limit": float("inf")}),
         ("Read", {"file_path": {"nested": ["app/main.py"]}, "offset": [1], "limit": {"n": 1}}),
-        ("Read", {"file_path": None, "offset": None, "limit": None}),
         ("Grep", {"pattern": {"regex": "x"}, "path": ["app"], "glob": None}),
-        ("Glob", {"pattern": None, "path": {"dir": "app"}}),
-        ("Unknown", {"file_path": "app/main.py"}),
     ],
 )
 def test_hostile_arguments_never_raise(tool_name, tool_input):

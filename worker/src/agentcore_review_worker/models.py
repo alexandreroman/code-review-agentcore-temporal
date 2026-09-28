@@ -41,9 +41,7 @@ class SnapshotInput(BaseModel):
 
 
 class SnapshotRef(BaseModel):
-    owner: str
-    repo: str
-    installation_id: int
+    pr: PrRef
     sha: str
     bucket: str | None = None
     key: str | None = None  # None: archive over 200 MB, the tools read through the GitHub API

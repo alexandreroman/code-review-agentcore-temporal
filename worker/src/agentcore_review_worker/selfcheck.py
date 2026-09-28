@@ -11,7 +11,7 @@ from temporalio.worker import WorkerConfig
 from temporalio.worker.workflow_sandbox import SandboxedWorkflowRunner
 
 from .agent_model import strands_plugin
-from .runtime import WORKFLOWS, activities
+from .runtime import WORKFLOWS
 from .settings import AppSettings
 
 # Placeholder settings: everything is built without reading a secret or calling AWS.
@@ -20,7 +20,7 @@ SELFCHECK = AppSettings(
     github_app_secret="selfcheck",
     anthropic_secret="selfcheck",
     anthropic_model="selfcheck",
-    anthropic_effort="high",
+    anthropic_effort="selfcheck",
     max_parallel_agents=1,
 )
 
@@ -42,7 +42,6 @@ def main() -> None:
     # Sandbox instance creation needs a running event loop (it initializes the workflow's asyncio
     # runtime), which the real Worker has while it starts. This standalone check has none of its own.
     names = asyncio.run(validate_workflows())
-    activities(SELFCHECK, "selfcheck")
     print(f"selfcheck ok: {', '.join(names)}")
 
 

@@ -17,11 +17,12 @@ from agentcore_review_shared.contract import (
 )
 
 from agentcore_review_worker.models import ReviewerReport, ReviewSummary, SynthesisInput, ThreadComment
+from agentcore_review_worker.summaries import count
 
 Action = Literal["close", "review", "fix", "reply"]
 
-MAX_FIX_DELIVERIES = 50
-"""Fix request deliveries remembered for deduplication; redeliveries come within minutes, not 50 requests later."""
+MAX_DELIVERIES = 50
+"""Deliveries remembered to deduplicate fix requests and replies; redeliveries come within minutes, not 50 later."""
 
 MAX_PENDING_REPLIES = 20
 """Replies queued behind a review or a fix; beyond that, the oldest are dropped."""
@@ -40,15 +41,11 @@ def sort_key(finding: Finding) -> tuple:
     return (finding.severity.rank, finding.path, finding.line, finding.id)
 
 
-def review_pending(state: PullRequestState) -> bool:
-    return state.pending_head_sha is not None and state.pending_head_sha != state.last_reviewed_sha
-
-
 def next_action(state: PullRequestState, closed: bool) -> Action | None:
     """Close first, then a pending review, then a pending fix, then a pending reply."""
     if closed:
         return "close"
-    if review_pending(state):
+    if state.pending_head_sha is not None and state.pending_head_sha != state.last_reviewed_sha:
         return "review"
     if state.pending_fixes:
         return "fix"
@@ -57,15 +54,13 @@ def next_action(state: PullRequestState, closed: bool) -> Action | None:
     return None
 
 
-IdleStep = Literal["warning", "close"]
-
-
 @dataclass(frozen=True)
 class IdleTimer:
-    """The idle timer's next step, and the time left until it is due (zero or less: due now)."""
+    """Where an idle period stands: its next step, its start, and the time left until the step is due."""
 
-    step: IdleStep
-    left: timedelta
+    step: Literal["warning", "close"]
+    since: datetime  # keys the markers of the period's comments
+    left: timedelta  # zero or less: due now
 
 
 def start_idle(state: PullRequestState, now: datetime) -> None:
@@ -80,13 +75,14 @@ def idle_timer(state: PullRequestState, now: datetime, warning_seconds: int, clo
     Both deadlines count from idle_since, so a continue-as-new or a late worker never pushes them back.
     Past the close deadline, the pull request closes without a warning that would announce minutes left.
     """
-    if state.idle_since is None:
+    since = state.idle_since
+    if since is None:
         raise ValueError("no idle period started: call start_idle first")
-    idle = now - state.idle_since
+    idle = now - since
     close_left = timedelta(seconds=close_seconds) - idle
     if state.idle_warned or close_left <= timedelta(0):
-        return IdleTimer("close", close_left)
-    return IdleTimer("warning", timedelta(seconds=warning_seconds) - idle)
+        return IdleTimer("close", since, close_left)
+    return IdleTimer("warning", since, timedelta(seconds=warning_seconds) - idle)
 
 
 def record_head(state: PullRequestState, head_sha: str, reviewing_sha: str | None = None) -> bool:
@@ -104,13 +100,13 @@ def record_head(state: PullRequestState, head_sha: str, reviewing_sha: str | Non
 def record_fix_request(state: PullRequestState, request: FixRequested) -> bool:
     """Queue a fix request, unless its webhook delivery was already seen.
 
-    Requests stay apart until the fix starts: plan_fix checks each one on its own, so a refused request
+    Requests stay apart until the fix starts: triage_fixes checks each one on its own, so a refused request
     never widens the others.
     """
     if request.delivery_id in state.fix_deliveries:
         return False
     recent = state.fix_deliveries + [request.delivery_id]
-    state.fix_deliveries = recent[-MAX_FIX_DELIVERIES:]
+    state.fix_deliveries = recent[-MAX_DELIVERIES:]
     state.pending_fixes = state.pending_fixes + [request]
     return True
 
@@ -120,7 +116,7 @@ def record_reply(state: PullRequestState, reply: CommentPosted) -> bool:
     if reply.delivery_id in state.reply_deliveries:
         return False
     recent = state.reply_deliveries + [reply.delivery_id]
-    state.reply_deliveries = recent[-MAX_FIX_DELIVERIES:]
+    state.reply_deliveries = recent[-MAX_DELIVERIES:]
     queued = state.pending_replies + [reply]
     state.pending_replies = queued[-MAX_PENDING_REPLIES:]
     return True
@@ -138,7 +134,7 @@ class FixRefusal:
 
 
 @dataclass(frozen=True)
-class FixPlan:
+class FixTriage:
     """What the pending /fix requests amount to: one fixer run over the accepted requests' findings."""
 
     accepted: list[FixRequested]
@@ -148,7 +144,7 @@ class FixPlan:
     closed_threads: list[int]
 
 
-def plan_fix(state: PullRequestState, requests: list[FixRequested]) -> FixPlan:
+def triage_fixes(state: PullRequestState, requests: list[FixRequested]) -> FixTriage:
     """Check each request against the open findings, then gather the accepted ones into one fix.
 
     In the Conversation, a bare /fix asks for every open finding, and named findings must all be open.
@@ -166,27 +162,27 @@ def plan_fix(state: PullRequestState, requests: list[FixRequested]) -> FixPlan:
             if not_open:
                 refusals.append(FixRefusal(request, not_open_ids=not_open))
                 continue
-            if request.finding_ids:
-                wanted.update(request.finding_ids)
-            else:
-                wanted.update(open_ids)
+            wanted.update(request.finding_ids or open_ids)
             accepted.append(request)
             continue
-        thread_finding = reply_target(state, request.thread_root_id)
+        thread_finding = open_finding_in_thread(state, request.thread_root_id)
         if thread_finding is None:
-            if request.thread_root_id not in closed_threads:
-                closed_threads.append(request.thread_root_id)
+            closed_threads.append(request.thread_root_id)
             continue
         if any(finding_id != thread_finding.id for finding_id in request.finding_ids):
             refusals.append(FixRefusal(request, thread_finding_id=thread_finding.id))
             continue
         wanted.add(thread_finding.id)
         accepted.append(request)
-    findings = [f for f in state.open_findings if f.id in wanted]
-    return FixPlan(accepted=accepted, findings=findings, refusals=refusals, closed_threads=closed_threads)
+    return FixTriage(
+        accepted=accepted,
+        findings=[f for f in state.open_findings if f.id in wanted],
+        refusals=refusals,
+        closed_threads=list(dict.fromkeys(closed_threads)),
+    )
 
 
-def reply_target(state: PullRequestState, thread_root_id: int) -> Finding | None:
+def open_finding_in_thread(state: PullRequestState, thread_root_id: int) -> Finding | None:
     """The open finding whose review thread starts with this comment."""
     for f in state.open_findings:
         if f.comment_id == thread_root_id:
@@ -194,7 +190,7 @@ def reply_target(state: PullRequestState, thread_root_id: int) -> Finding | None
     return None
 
 
-def was_finding_thread(state: PullRequestState, thread_root_id: int) -> str | None:
+def closed_finding_id(state: PullRequestState, thread_root_id: int) -> str | None:
     """The ID of the dismissed or resolved finding whose thread this is, so a late reply gets a short answer."""
     for dismissed in state.dismissed_findings:
         if dismissed.finding.comment_id == thread_root_id:
@@ -221,10 +217,6 @@ def dismiss(state: PullRequestState, finding_id: str, reason: str, by: str) -> N
             recent = state.dismissed_findings + [entry]
             state.dismissed_findings = recent[-MAX_DISMISSED:]
             return
-
-
-def reply_budget_left(bot_answers: int) -> bool:
-    return bot_answers < MAX_BOT_REPLIES_PER_THREAD
 
 
 def discussion_thread(
@@ -289,8 +281,7 @@ def fallback_summary(input: SynthesisInput) -> ReviewSummary:
     kept = {f.id for f in merged}
     if merged:
         listed = ", ".join(f"{f.id} ({f.severity})" for f in merged)
-        plural = "s" if len(merged) > 1 else ""
-        text = f"{len(merged)} new finding{plural} in this round, most severe first: {listed}."
+        text = f"{count(len(merged), 'new finding')} in this round, most severe first: {listed}."
     else:
         text = "No new finding in this round."
     return ReviewSummary(

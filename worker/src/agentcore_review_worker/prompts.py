@@ -6,7 +6,6 @@ serves the diff to every reviewer that starts after the first one.
 """
 
 import json
-from collections.abc import Sequence
 
 from agentcore_review_shared.contract import Category, DismissedFinding, Finding
 
@@ -104,8 +103,9 @@ def reviewer_prompt(
     category: Category,
     patches: BatchPatches,
     open_findings: list[Finding],
-    dismissed_findings: Sequence[DismissedFinding] = (),
+    dismissed_findings: list[DismissedFinding],
 ) -> list[dict]:
+    """The first message of a reviewer; the open and dismissed findings are those of its category."""
     diff = [_patch(p) for p in patches.patches]
     shared = "\n\n".join(["# Pull request diff", *diff, "# Repository top level", "\n".join(patches.tree)])
     focus = [f"# Your focus: {category}", FOCUS[category]]
@@ -115,11 +115,10 @@ def reviewer_prompt(
             "\n".join(_finding_line(f) for f in open_findings),
             "Put in resolved_ids the IDs of those the current code fixes. Do not report them again.",
         ]
-    dismissed = [d for d in dismissed_findings if d.finding.category == category]
-    if dismissed:
+    if dismissed_findings:
         focus += [
             f"# {category.capitalize()} findings dismissed after discussion",
-            "\n".join(f"{_finding_line(d.finding)} (dismissed: {d.reason})" for d in dismissed),
+            "\n".join(f"{_finding_line(d.finding)} (dismissed: {d.reason})" for d in dismissed_findings),
             "Do not report them again.",
         ]
     focus.append(f"Review the diff for {category} problems only, then submit a ReviewerReport.")

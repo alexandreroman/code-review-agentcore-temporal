@@ -43,7 +43,7 @@ instead of retrying its task forever. A failed model activity needs no entry: St
 and the raw ActivityError fails the workflow like any Temporal failure."""
 
 
-class RoundLimit(HookProvider):
+class ModelCallBudget(HookProvider):
     """Counts model calls and cancels tool calls once the budget is spent, forcing the agent to conclude."""
 
     def __init__(self, output_tool: str) -> None:
@@ -102,7 +102,7 @@ class _SnapshotBound(AgentTool):
 
 
 def navigation_tools(snapshot: SnapshotRef) -> list[AgentTool]:
-    activities = (navigation_activities.glob_tool, navigation_activities.grep_tool, navigation_activities.read_tool)
+    activities = (navigation_activities.glob, navigation_activities.grep, navigation_activities.read)
     return [_SnapshotBound(fn, snapshot) for fn in activities]
 
 
@@ -121,7 +121,7 @@ async def run_agent[T: BaseModel](
         system_prompt=system_prompt,
         tools=tools,
         structured_output_model=output,
-        hooks=[RoundLimit(output.__name__)],
+        hooks=[ModelCallBudget(output.__name__)],
         callback_handler=None,  # no printing from workflow code
     )
     result = await agent.invoke_async(prompt, limits={"turns": HARD_TURN_LIMIT})

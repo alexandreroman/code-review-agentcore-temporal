@@ -1,5 +1,4 @@
-from agentcore_review_shared.contract import Finding, PullRequestState
-from agentcore_review_worker.lifecycle import dismiss
+from agentcore_review_shared.contract import Finding
 from agentcore_review_worker.markers import reply_marker
 from agentcore_review_worker.models import DiscussionReply, FileChange, ReviewContent, ThreadComment
 from agentcore_review_worker.publishing import (
@@ -106,45 +105,38 @@ def test_body_is_truncated_below_the_github_limit():
 
 
 def test_check_output_counts_blocking_findings():
-    _, title, summary = check_output([finding("F-002", severity="low"), finding("F-001", severity="critical")], [], 0)
+    _, title, summary = check_output([finding("F-002", severity="low"), finding("F-001", severity="critical")])
     assert title == "2 open findings, 1 blocking"
     assert summary.index("F-001") < summary.index("F-002")
-    assert check_output([], [], 0)[1] == "No open finding"
+    assert check_output([])[1] == "No open finding"
 
 
 def test_check_is_red_only_for_blocking_findings():
-    assert check_output([], [], 0)[0] == "success"
-    assert check_output([finding("F-1", severity="medium"), finding("F-2", severity="low")], [], 0)[0] == "success"
-    assert check_output([finding("F-1", severity="low"), finding("F-2", severity="high")], [], 0)[0] == "failure"
-    assert check_output([finding("F-1", severity="critical")], [], 0)[0] == "failure"
+    assert check_output([finding("F-1", severity="medium"), finding("F-2", severity="low")])[0] == "success"
+    assert check_output([finding("F-1", severity="low"), finding("F-2", severity="high")])[0] == "failure"
+    assert check_output([finding("F-1", severity="critical")])[0] == "failure"
 
 
 def test_check_output_names_the_unavailable_reviewers():
-    _, title, summary = check_output([finding("F-001", severity="low")], ["security", "performance (batch 2)"], 0)
+    _, title, summary = check_output(
+        [finding("F-001", severity="low")], unavailable=["security", "performance (batch 2)"]
+    )
     assert title == "1 open finding, 0 blocking, 2 reviewers unavailable"
     assert "Not reviewed in this round (reviewer unavailable): security, performance (batch 2)." in summary
-    _, title, summary = check_output([], ["maintainability"], 0)
+    _, title, summary = check_output([], unavailable=["maintainability"])
     assert title == "No open finding, 1 reviewer unavailable"
     assert "maintainability" in summary
 
 
 def test_check_output_counts_the_unlisted_files():
-    conclusion, title, summary = check_output([], [], 42)
+    conclusion, title, summary = check_output([], unlisted=42)
     assert conclusion == "success" and title == "No open finding, 42 files not listed"
     assert "Not reviewed in this round (not listed by GitHub, too many changes): 42 files." in summary
 
 
-def test_dismissing_the_last_blocking_finding_turns_the_check_green():
-    state = PullRequestState(open_findings=[finding("F-001"), finding("F-002", severity="low")])
-    assert check_output(state.open_findings, [], 0)[0] == "failure"
-    dismiss(state, "F-001", "not reachable", "alice")
-    conclusion, title, _ = check_output(state.open_findings, [], 0)
-    assert conclusion == "success" and title == "1 open finding, 0 blocking"
-
-
 def test_unavailable_check_output_lists_every_reviewer():
-    title, summary = unavailable_check_output(3, ["security", "performance", "maintainability"])
-    assert title == "Review unavailable"
+    conclusion, title, summary = unavailable_check_output(3, ["security", "performance", "maintainability"])
+    assert conclusion == "failure" and title == "Review unavailable"
     assert summary == (
         "No reviewer completed round 3 (unavailable: security, performance, maintainability), "
         "so this head was not reviewed. Push a commit to retry."

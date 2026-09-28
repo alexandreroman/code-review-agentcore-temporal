@@ -19,19 +19,19 @@ from temporalio.exceptions import ApplicationError
 from ..aws import s3
 from ..models import SnapshotInput, SnapshotRef
 from ..settings import AppSettings
-from .github_api import github, github_errors
+from .github_api import GITHUB_JSON, github, github_errors, repo_path
 
 MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
 HEARTBEAT_SECONDS = 5.0
 
 
-def snapshot_prefix(owner: str, repo: str, number: int) -> str:
-    return f"{owner.lower()}/{repo.lower()}/pr-{number}/"
+def _snapshot_prefix(pr: PrRef) -> str:
+    return f"{pr.owner.lower()}/{pr.repo.lower()}/pr-{pr.number}/"
 
 
-def snapshot_key(owner: str, repo: str, number: int, sha: str) -> str:
-    return f"{snapshot_prefix(owner, repo, number)}{sha}.tar.gz"
+def _snapshot_key(pr: PrRef, sha: str) -> str:
+    return f"{_snapshot_prefix(pr)}{sha}.tar.gz"
 
 
 class SnapshotActivities:
@@ -39,18 +39,11 @@ class SnapshotActivities:
         self._bucket = settings.snapshots_bucket
 
     @activity.defn(name="Snapshot")
-    async def snapshot_repo(self, input: SnapshotInput) -> SnapshotRef:
+    async def snapshot(self, input: SnapshotInput) -> SnapshotRef:
         """Archive the repository at `sha` into S3; a no-op when the key already exists."""
         pr = input.pr
-        key = snapshot_key(pr.owner, pr.repo, pr.number, input.sha)
-        ref = SnapshotRef(
-            owner=pr.owner,
-            repo=pr.repo,
-            installation_id=pr.installation_id,
-            sha=input.sha,
-            bucket=self._bucket,
-            key=key,
-        )
+        key = _snapshot_key(pr, input.sha)
+        ref = SnapshotRef(pr=pr, sha=input.sha, bucket=self._bucket, key=key)
         if await asyncio.to_thread(_exists, self._bucket, key):
             return ref
         with tempfile.TemporaryDirectory() as work:
@@ -63,7 +56,7 @@ class SnapshotActivities:
     @activity.defn(name="DeleteSnapshots")
     async def delete_snapshots(self, pr: PrRef) -> int:
         """Delete every snapshot of the pull request; deleting nothing is not an error."""
-        return await asyncio.to_thread(_delete_prefix, self._bucket, snapshot_prefix(pr.owner, pr.repo, pr.number))
+        return await asyncio.to_thread(_delete_prefix, self._bucket, _snapshot_prefix(pr))
 
 
 def _exists(bucket: str, key: str) -> bool:
@@ -78,8 +71,8 @@ def _exists(bucket: str, key: str) -> bool:
 
 async def _download_tarball(pr: PrRef, sha: str, archive: Path) -> None:
     token = await github().installation_token(pr.installation_id)
-    url = f"{API_URL}/repos/{pr.owner}/{pr.repo}/tarball/{sha}"
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json"}
+    url = f"{API_URL}{repo_path(pr)}/tarball/{sha}"
+    headers = {"Authorization": f"Bearer {token}", "Accept": GITHUB_JSON}
     # GitHub redirects to codeload with a short-lived token in the URL, also for a private repository.
     async with (
         httpx.AsyncClient(timeout=60.0, follow_redirects=True) as http,

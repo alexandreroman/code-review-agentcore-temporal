@@ -27,6 +27,11 @@ class _ToolError(ValueError):
     """An invalid tool argument; the message is returned to the agent after "Error: "."""
 
 
+def is_outside_repository(path: str) -> bool:
+    """Whether a relative path given by the agent escapes the repository: absolute, or with a ".." part."""
+    return path.startswith("/") or ".." in PurePosixPath(path).parts
+
+
 def _coerce_int(value: int | str | None, name: str) -> int | None:
     """Coerce an offset/limit argument to an int, or None if it was not given.
 
@@ -113,7 +118,7 @@ def _validate_glob_pattern(pattern: str) -> None:
 def glob_paths(paths: list[str], pattern: str, path: str | None = None) -> str:
     """Glob over a list of repository paths (the GitHub tree fallback), answering like glob_files."""
     raw = path or ""
-    if raw.startswith("/") or ".." in PurePosixPath(raw).parts:
+    if is_outside_repository(raw):
         return f"Error: path {path!r} is outside the repository."
     if raw and raw in paths:
         return f"Error: path {path!r} is not a directory."

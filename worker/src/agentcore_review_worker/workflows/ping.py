@@ -12,7 +12,6 @@ with workflow.unsafe.imports_passed_through():
 class PingWorkflow:
     @workflow.run
     async def run(self, message: str) -> str:
-        # Called by name so this module never imports the activity module.
         return await workflow.execute_activity(
             "Ping",
             message,

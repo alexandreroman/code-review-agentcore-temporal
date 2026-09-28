@@ -6,15 +6,14 @@ contents API, and Grep is unavailable.
 """
 
 import asyncio
-from pathlib import PurePosixPath
 from urllib.parse import quote
 
 from agentcore_review_shared.github import GitHubError
 from temporalio import activity
 
 from ..models import SnapshotRef
-from ..navigation import glob_files, glob_paths, grep_files, read_file, render_file
-from .github_api import get, github_errors, repo_path
+from ..navigation import glob_files, glob_paths, grep_files, is_outside_repository, read_file, render_file
+from .github_api import get, get_raw, github_errors, repo_path
 from .snapshot_cache import local_root
 
 GREP_UNAVAILABLE = (
@@ -24,7 +23,7 @@ GREP_UNAVAILABLE = (
 
 
 @activity.defn(name="Glob")
-async def glob_tool(snapshot: SnapshotRef, pattern: str, path: str | None = None) -> str:
+async def glob(snapshot: SnapshotRef, pattern: str, path: str | None = None) -> str:
     """Find files by glob pattern.
 
     Returns the matching paths, relative to the repository root and sorted (at most 500).
@@ -33,13 +32,21 @@ async def glob_tool(snapshot: SnapshotRef, pattern: str, path: str | None = None
         pattern: Glob pattern, e.g. "app/**/*.py"; "**" matches any number of directories.
         path: Directory to search from, relative to the repository root (default: the root).
     """
-    if snapshot.key is None:
-        return glob_paths(await _tree_paths(snapshot), pattern, path)
-    return await asyncio.to_thread(glob_files, await local_root(snapshot), pattern, path)
+    if snapshot.key is not None:
+        return await asyncio.to_thread(glob_files, await local_root(snapshot), pattern, path)
+    pr = snapshot.pr
+    with github_errors():
+        tree = await get(pr, f"{repo_path(pr)}/git/trees/{snapshot.sha}", {"recursive": "1"})
+    paths = [entry["path"] for entry in tree["tree"] if entry["type"] == "blob"]
+    found = glob_paths(paths, pattern, path)
+    if tree["truncated"] and not found.startswith("Error:"):
+        return f"{found}\n... tree truncated by GitHub"
+    return found
 
 
+# The `glob` parameter is part of the tool's schema, as in Claude Code's Grep: it shadows the Glob tool's function.
 @activity.defn(name="Grep")
-async def grep_tool(snapshot: SnapshotRef, pattern: str, path: str | None = None, glob: str | None = None) -> str:
+async def grep(snapshot: SnapshotRef, pattern: str, path: str | None = None, glob: str | None = None) -> str:
     """Search file contents with a regular expression. Returns at most 50 matches as "path:line: text".
 
     Args:
@@ -53,7 +60,7 @@ async def grep_tool(snapshot: SnapshotRef, pattern: str, path: str | None = None
 
 
 @activity.defn(name="Read")
-async def read_tool(
+async def read(
     snapshot: SnapshotRef, file_path: str, offset: int | str | None = None, limit: int | str | None = None
 ) -> str:
     """Read a file with line numbers, at most 400 lines or 40 KB at a time.
@@ -65,28 +72,18 @@ async def read_tool(
     """
     if snapshot.key is not None:
         return await asyncio.to_thread(read_file, await local_root(snapshot), file_path, offset, limit)
-    if file_path.startswith("/") or ".." in PurePosixPath(file_path).parts:
+    if is_outside_repository(file_path):
         return f"Error: path {file_path!r} is outside the repository."
     with github_errors():
         data = await _contents(snapshot, file_path)
     return f"Error: file {file_path!r} not found." if data is None else render_file(file_path, data, offset, limit)
 
 
-async def _tree_paths(snapshot: SnapshotRef) -> list[str]:
-    with github_errors():
-        tree = await get(snapshot, f"{repo_path(snapshot)}/git/trees/{snapshot.sha}", {"recursive": "1"})
-    return [entry["path"] for entry in tree["tree"] if entry["type"] == "blob"]
-
-
 async def _contents(snapshot: SnapshotRef, file_path: str) -> bytes | None:
     """The file's raw bytes at the snapshot's SHA, or None when it does not exist."""
+    pr = snapshot.pr
     try:
-        return await get(
-            snapshot,
-            f"{repo_path(snapshot)}/contents/{quote(file_path.strip('/'))}",
-            {"ref": snapshot.sha},
-            accept="application/vnd.github.raw+json",
-        )
+        return await get_raw(pr, f"{repo_path(pr)}/contents/{quote(file_path.rstrip('/'))}", {"ref": snapshot.sha})
     except GitHubError as error:
         if error.status == 404:
             return None
