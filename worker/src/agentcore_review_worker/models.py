@@ -21,9 +21,10 @@ class ChangedFile(BaseModel):
 
 class ChangeSet(BaseModel):
     head_sha: str
-    diff_base: str | None = None  # None: the whole pull request; otherwise the last reviewed SHA
+    diff_base: str  # the last reviewed SHA for a delta, the base branch's SHA for the whole pull request
     files: list[ChangedFile] = Field(default_factory=list)  # reviewable files only
     excluded: list[str] = Field(default_factory=list)
+    unlisted: int = 0  # changed files beyond the ones a GitHub comparison lists
     # A worker setting carried to workflow code, which cannot read the environment.
     max_parallel_agents: int
 
@@ -49,7 +50,7 @@ class SnapshotRef(BaseModel):
 
 class BatchInput(BaseModel):
     pr: PrRef
-    diff_base: str | None
+    diff_base: str
     head_sha: str
     paths: list[str]
 
@@ -154,6 +155,7 @@ class ReviewContent(BaseModel):
     resolved_ids: list[str] = Field(default_factory=list)
     still_open: list[Finding] = Field(default_factory=list)
     excluded: list[str] = Field(default_factory=list)
+    unlisted: int = 0
     unavailable: list[str] = Field(default_factory=list)
 
 

@@ -314,6 +314,7 @@ class PullRequestWorkflow:
             resolved_ids=resolved,
             still_open=still_open,
             excluded=change.excluded,
+            unlisted=change.unlisted,
             unavailable=unavailable,
         )
         comment_ids = await self._publish(

@@ -108,8 +108,13 @@ def build_review(content: ReviewContent, commentable: dict[str, set[int]], marke
     if content.still_open:
         still_open = "\n".join(_line(f) for f in sorted(content.still_open, key=sort_key))
         sections.append("### Still open from earlier rounds\n\n" + still_open)
-    if content.excluded:
-        sections.append("### Not reviewed\n\n" + _file_list(content.excluded))
+    if content.excluded or content.unlisted:
+        not_reviewed = [_file_list(content.excluded)] if content.excluded else []
+        if content.unlisted:
+            not_reviewed.append(
+                f"- {_count(content.unlisted, 'more file')} that GitHub does not list: too many changes"
+            )
+        sections.append("### Not reviewed\n\n" + "\n".join(not_reviewed))
     if content.unavailable:
         sections.append(
             "### Reviewers unavailable\n\n" + ", ".join(content.unavailable) + ": this round is published without them."

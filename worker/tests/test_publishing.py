@@ -79,15 +79,16 @@ def test_without_inline_comments_every_finding_is_in_the_body():
     assert "### Findings" in payload.body and "### Other findings" not in payload.body
 
 
-def test_body_reports_resolved_open_excluded_and_unavailable():
+def test_body_reports_resolved_open_excluded_unlisted_and_unavailable():
     extra = {
         "resolved_ids": ["F-001"],
         "still_open": [finding("F-002")],
         "excluded": ["uv.lock"],
+        "unlisted": 12,
         "unavailable": ["security"],
     }
     body = build_review(content([], **extra), {}, MARKER, inline=True).body
-    for expected in ("F-001", "F-002", "uv.lock", "security"):
+    for expected in ("F-001", "F-002", "uv.lock", "12 more files", "security"):
         assert expected in body
 
 
