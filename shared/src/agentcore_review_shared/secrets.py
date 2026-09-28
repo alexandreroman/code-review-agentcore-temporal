@@ -11,7 +11,7 @@ NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 
 
 class GitHubAppSecret(BaseModel):
-    """Written by `make github-app` from the manifest conversion."""
+    """Written by `make github-app` from the manifest conversion; `make github` refreshes the slug after a rename."""
 
     app_id: int
     slug: NonEmpty

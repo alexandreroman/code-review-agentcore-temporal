@@ -24,7 +24,7 @@ ANTHROPIC_MODEL ?= claude-opus-5
 ANTHROPIC_EFFORT ?= high
 MAX_PARALLEL_AGENTS ?= 3
 DEMO_REPO ?= agentcore-review-demo-app
-GITHUB_APP_NAME ?= Code Review w/AgentCore x Temporal
+GITHUB_APP_NAME ?= Code Review AgentCore x Temporal
 AGENTCORE_IDLE_TIMEOUT ?= 120
 GITHUB_APP_CALLBACK_PORT ?= 8765
 DOMAIN_NAME ?=
@@ -162,7 +162,7 @@ github-app: infra-init ## Register the GitHub App through the manifest flow (int
 		$(if $(FORCE),--force)
 
 .PHONY: github
-github: infra-init ## Apply the github stack (demo repository, ruleset, Actions secrets), sync the app webhook
+github: infra-init ## Sync the app (slug, webhook), apply the github stack (demo repository, ruleset, Actions secrets)
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
 	@GITHUB_OWNER=$(GITHUB_OWNER) scripts/github.sh
 

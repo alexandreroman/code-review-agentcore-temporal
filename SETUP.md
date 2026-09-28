@@ -175,8 +175,9 @@ make github-app
 ```
 
 A browser page opens: click **Create GitHub App**. The app is named
-*Code Review w/AgentCore x Temporal* by default (you may rename the app,
-or set `GITHUB_APP_NAME` in `.env`; GitHub caps the name at 34 characters).
+*Code Review AgentCore x Temporal* by default, with the slug
+`code-review-agentcore-x-temporal` (you may rename the app, or set
+`GITHUB_APP_NAME` in `.env`; GitHub caps the name at 34 characters).
 The terminal then prints `Registered GitHub App <slug> ...`. The app has
 the permissions `pull_requests: write`, `checks: write`, `contents: write`,
 `issues: read` and `metadata: read`, listens to `pull_request`,
@@ -335,6 +336,13 @@ While `DOMAIN_NAME` is set, the deployment targets stop at once if
   the same hostname; without one, the recreated Function URL gets a new
   address. Either way, `make up` repoints the app's webhook if its URL
   differs.
+- Renaming the GitHub App in its settings changes its slug, which the
+  router and the worker use to recognize the bot's own comments. The next
+  `make github` (or `make up`) stores the new slug and prints
+  `GitHub App slug: <old> -> <new>`. Then run `make kill-sessions`: the
+  running worker sessions keep the old slug until they stop. The router
+  picks up the new slug on its next cold start; until then, replies in a
+  finding's thread go unanswered.
 - To delete the GitHub App for good, delete it in the GitHub settings
   (`https://github.com/settings/apps/<slug>`, **Advanced**), then its
   credentials; `make github-app` registers a new app afterwards:

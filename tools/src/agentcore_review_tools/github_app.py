@@ -1,7 +1,8 @@
 """GitHub App tooling behind the Makefile.
 
 - register: creates the app through the manifest flow (make github-app)
-- sync-webhook: points the app's webhook at the router (make github, make up)
+- sync: refreshes the stored slug after a rename in the app settings, and points the app's webhook at the
+  router (make github, make up)
 - installation-id: prints the app's installation ID on a repository, or its install link
   (make github, make up, make review-pr)
 """
@@ -217,20 +218,41 @@ def register(args: argparse.Namespace) -> None:
             )
 
 
-def sync_webhook(args: argparse.Namespace) -> None:
+def sync_slug(http: httpx.Client, app: GitHubAppSecret) -> GitHubAppSecret:
+    """Store the app's current slug: renaming the app in its settings changes the slug, and GitHub offers no rename API.
+
+    The router and the worker build the bot login "<slug>[bot]" from the stored secret.
+    """
+    response = http.get(f"{API_URL}/app", headers=app_headers(app))
+    response.raise_for_status()
+    slug = response.json()["slug"]
+    if slug == app.slug:
+        return app
+    renamed = app.model_copy(update={"slug": slug})
+    _store_app(boto3.client("secretsmanager"), renamed)
+    print(f"GitHub App slug: {app.slug} -> {slug}")
+    return renamed
+
+
+def sync_webhook(http: httpx.Client, app: GitHubAppSecret, url: str) -> None:
     """Point the app's webhook at the router's current URL (Function URL or custom domain)."""
-    app = _require_registered_app()
     headers = app_headers(app)
+    response = http.get(f"{API_URL}/app/hook/config", headers=headers)
+    response.raise_for_status()
+    current = response.json().get("url")
+    if current == url:
+        print(f"GitHub App {app.slug} webhook is up to date: {current}")
+        return
+    response = http.patch(f"{API_URL}/app/hook/config", headers=headers, json={"url": url})
+    response.raise_for_status()
+    print(f"GitHub App {app.slug} webhook: {current} -> {url}")
+
+
+def sync(args: argparse.Namespace) -> None:
+    app = _require_registered_app()
     with httpx.Client(timeout=20) as http:
-        response = http.get(f"{API_URL}/app/hook/config", headers=headers)
-        response.raise_for_status()
-        current = response.json().get("url")
-        if current == args.url:
-            print(f"GitHub App {app.slug} webhook is up to date: {current}")
-            return
-        response = http.patch(f"{API_URL}/app/hook/config", headers=headers, json={"url": args.url})
-        response.raise_for_status()
-    print(f"GitHub App {app.slug} webhook: {current} -> {args.url}")
+        app = sync_slug(http, app)
+        sync_webhook(http, app, args.url)
 
 
 def print_installation_id(args: argparse.Namespace) -> None:
@@ -252,9 +274,11 @@ def main() -> None:
     reg.add_argument("--webhook-url", required=True)
     reg.add_argument("--force", action="store_true")
     reg.set_defaults(handler=register)
-    sync = commands.add_parser("sync-webhook", help="point the app's webhook at the given URL if it differs")
-    sync.add_argument("--url", required=True)
-    sync.set_defaults(handler=sync_webhook)
+    synchronize = commands.add_parser(
+        "sync", help="store the app's current slug, and point its webhook at the given URL, when either differs"
+    )
+    synchronize.add_argument("--url", required=True)
+    synchronize.set_defaults(handler=sync)
     installation = commands.add_parser("installation-id", help="print the app's installation ID on a repository")
     installation.add_argument("--owner", required=True)
     installation.add_argument("--repo", required=True)

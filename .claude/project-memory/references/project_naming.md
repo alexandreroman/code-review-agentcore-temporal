@@ -22,10 +22,11 @@ Deployable components follow a shorter convention, the
 `infra/aws/main.tf`). The AgentCore runtime name uses underscores instead
 of hyphens, since AgentCore allows no hyphen in it.
 
-The GitHub App name (the `GITHUB_APP_NAME` default in the Makefile) is the
-one identifier that departs from the code name, because GitHub shows it to
-people on pull requests. GitHub caps app names at 34 characters, and the
-default name uses all 34.
+The GitHub App name (the `GITHUB_APP_NAME` default in the Makefile,
+**Code Review AgentCore x Temporal**, slug
+`code-review-agentcore-x-temporal`) is the one identifier that departs from
+the code name, because GitHub shows it to people on pull requests. GitHub
+caps app names at 34 characters.
 
 **Why:** the title reads well for an audience; the code name is the stable
 technical identifier; component names stay short because AWS and AgentCore
