@@ -132,7 +132,7 @@ def test_fix_as_a_top_level_review_comment_fixes_everything():
 
 
 @pytest.mark.parametrize("event", COMMENT_EVENTS)
-@pytest.mark.parametrize(("body", "arguments"), [("/fix", ()), ("/fix  F-001\nF-003 ", ("F-001", "F-003"))])
+@pytest.mark.parametrize(("body", "arguments"), [("/fix", ()), ("/fix  S-01\nP-02 ", ("S-01", "P-02"))])
 def test_a_command_carries_the_words_after_it(event, body, arguments):
     payload = load(event)
     payload["comment"]["body"] = body

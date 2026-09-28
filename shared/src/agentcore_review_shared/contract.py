@@ -1,5 +1,6 @@
 """Identifiers, signals and models exchanged between the router and the worker."""
 
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
@@ -53,6 +54,33 @@ class Category(_LenientEnum):
     SECURITY = "security"
     PERFORMANCE = "performance"
     MAINTAINABILITY = "maintainability"
+
+    @property
+    def prefix(self) -> str:
+        """The letter that starts the IDs of this category's findings: S-01, P-01, M-01."""
+        return self.value[0].upper()
+
+
+_CATEGORY_BY_PREFIX = {category.prefix: category for category in Category}
+if len(_CATEGORY_BY_PREFIX) != len(Category):
+    raise RuntimeError("every category needs its own first letter: finding IDs tell categories apart by it")
+
+# ASCII digits only: \d would also accept other scripts' digits, which no finding ID contains.
+FINDING_ID_PATTERN = "[" + "".join(_CATEGORY_BY_PREFIX) + "]-[0-9]+"
+_FINDING_ID = re.compile(FINDING_ID_PATTERN)
+
+
+def format_finding_id(category: Category, number: int) -> str:
+    """S-01 for the first security finding; at least two digits, so the hundredth is S-100."""
+    return f"{category.prefix}-{number:02d}"
+
+
+def parse_finding_id(text: str) -> tuple[Category, int] | None:
+    """The category and number of a finding ID (S-01 gives security and 1); None when the text is not one."""
+    if not _FINDING_ID.fullmatch(text):
+        return None
+    prefix, _, number = text.partition("-")
+    return _CATEGORY_BY_PREFIX[prefix], int(number)
 
 
 class Severity(_LenientEnum):
@@ -152,7 +180,8 @@ class PullRequestState(BaseModel):
     round: int = 0
     fix_count: int = 0
     discussion_count: int = 0
-    next_finding_number: int = 1
+    # The last finding number used in each category, absent until its first finding: S-03 leaves 3 for security.
+    last_finding_numbers: dict[Category, int] = Field(default_factory=dict)
     # Start of the current idle period (the end of the last action, or the last signal) and whether its warning
     # was posted: kept in the state, so a continue-as-new does not restart the countdown.
     idle_since: datetime | None = None

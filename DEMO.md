@@ -98,8 +98,10 @@ Talking points:
   The running activity times out on its heartbeat and resumes on a new
   session (attempt 2) about 10 to 25 seconds later; finished model calls
   are not repeated and not billed again.
-- **5:30, human in the loop.** One review, inline comments tagged `F-001`
-  and up, a summary, and a red `AI Review` check that blocks the merge.
+- **5:30, human in the loop.** One review, inline comments tagged by
+  category (`S-01` for security, `P-01` for performance, `M-01` for
+  maintainability), a summary, and a red `AI Review` check that blocks the
+  merge.
   The workflow waits for a signal; its memo shows its state without any
   worker, and a minute later no worker listens on the queue. Its pending
   `idle warning` timer is durable: in 10 minutes, Temporal starts a worker
@@ -110,12 +112,12 @@ Talking points:
   reply. A worker starts on demand; in Temporal UI, a `…-discussion-1`
   child workflow checks the claim against the code with the same tools.
   The bot answers in the thread with evidence, starting with
-  "**F-00x stays open.**" An agent may also dismiss a finding when the
+  "**S-0x stays open.**" An agent may also dismiss a finding when the
   code proves the human right; on stage, a question on a real defect keeps
   the answer predictable.
 - **7:30, `/fix`.** Post it as a PR comment: the fixer handles every open
   finding (in a finding's thread, `/fix` fixes that finding only;
-  `/fix F-001 F-003` fixes the findings it names, and nothing at all if
+  `/fix S-01 P-02` fixes the findings it names, and nothing at all if
   one of them is not open). 👀 on the comment. The fixer child workflow
   plans the change and the bot pushes one commit.
 - **8:30, long-lived workflow.** The commit triggers round 2 on the delta

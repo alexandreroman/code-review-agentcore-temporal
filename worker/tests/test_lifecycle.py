@@ -32,6 +32,7 @@ from agentcore_review_worker.lifecycle import (
     record_reply,
     record_resolved,
     resolved_ids,
+    sort_key,
     start_idle,
     triage_fixes,
 )
@@ -137,7 +138,7 @@ def test_fix_requests_queue_apart_once_per_delivery():
     state = PullRequestState()
     assert record_fix_request(state, fix_request("d1", thread_root_id=100)) is True
     assert record_fix_request(state, fix_request("d1")) is False
-    assert record_fix_request(state, fix_request("d2", finding_ids=["F-003"])) is True
+    assert record_fix_request(state, fix_request("d2", finding_ids=["S-03"])) is True
     assert [r.delivery_id for r in state.pending_fixes] == ["d1", "d2"]
     state.pending_fixes = []  # the fix ran
     assert record_fix_request(state, fix_request("d2")) is False
@@ -166,9 +167,9 @@ def test_a_reply_is_queued_once_per_delivery_and_the_oldest_are_dropped():
 def three_open_findings() -> PullRequestState:
     return PullRequestState(
         open_findings=[
-            finding("F-001", comment_id=100),
-            finding("F-002", comment_id=200),
-            finding("F-003", comment_id=300),
+            finding("S-01", comment_id=100),
+            finding("S-02", comment_id=200),
+            finding("S-03", comment_id=300),
         ]
     )
 
@@ -179,86 +180,86 @@ def triaged_ids(triage) -> list[str]:
 
 def test_a_bare_fix_in_the_conversation_fixes_every_open_finding():
     triage = triage_fixes(three_open_findings(), [fix_request("d1")])
-    assert triaged_ids(triage) == ["F-001", "F-002", "F-003"]
+    assert triaged_ids(triage) == ["S-01", "S-02", "S-03"]
     assert triage.refusals == [] and triage.closed_threads == []
 
 
 def test_a_fix_naming_open_findings_fixes_only_those():
-    triage = triage_fixes(three_open_findings(), [fix_request("d1", finding_ids=["F-003", "F-001"])])
-    assert triaged_ids(triage) == ["F-001", "F-003"]
+    triage = triage_fixes(three_open_findings(), [fix_request("d1", finding_ids=["S-03", "S-01"])])
+    assert triaged_ids(triage) == ["S-01", "S-03"]
 
 
 def test_a_fix_naming_a_finding_that_is_not_open_fixes_nothing():
-    request = fix_request("d1", finding_ids=["F-001", "F-099"])
+    request = fix_request("d1", finding_ids=["S-01", "S-99"])
     triage = triage_fixes(three_open_findings(), [request])
     assert triage.findings == [] and triage.accepted == []
-    assert triage.refusals == [FixRefusal(request, not_open_ids=["F-099"])]
+    assert triage.refusals == [FixRefusal(request, not_open_ids=["S-99"])]
 
 
 def test_a_bare_fix_in_a_thread_fixes_its_finding():
     triage = triage_fixes(three_open_findings(), [fix_request("d1", thread_root_id=200)])
-    assert triaged_ids(triage) == ["F-002"]
+    assert triaged_ids(triage) == ["S-02"]
 
 
 def test_a_fix_in_a_thread_may_name_its_own_finding():
-    triage = triage_fixes(three_open_findings(), [fix_request("d1", thread_root_id=200, finding_ids=["F-002"])])
-    assert triaged_ids(triage) == ["F-002"]
+    triage = triage_fixes(three_open_findings(), [fix_request("d1", thread_root_id=200, finding_ids=["S-02"])])
+    assert triaged_ids(triage) == ["S-02"]
 
 
-@pytest.mark.parametrize("finding_ids", [["F-003"], ["F-002", "F-003"], ["F-099"]])
+@pytest.mark.parametrize("finding_ids", [["S-03"], ["S-02", "S-03"], ["S-99"]])
 def test_a_fix_in_a_thread_naming_another_finding_fixes_nothing(finding_ids):
     request = fix_request("d1", thread_root_id=200, finding_ids=finding_ids)
     triage = triage_fixes(three_open_findings(), [request])
     assert triage.findings == []
-    assert triage.refusals == [FixRefusal(request, thread_finding_id="F-002")]
+    assert triage.refusals == [FixRefusal(request, thread_finding_id="S-02")]
 
 
 def test_a_refused_request_does_not_widen_the_accepted_ones():
-    refused = fix_request("d2", finding_ids=["F-003", "F-099"])
-    requests = [fix_request("d1", thread_root_id=100), refused, fix_request("d3", finding_ids=["F-002"])]
+    refused = fix_request("d2", finding_ids=["S-03", "S-99"])
+    requests = [fix_request("d1", thread_root_id=100), refused, fix_request("d3", finding_ids=["S-02"])]
     triage = triage_fixes(three_open_findings(), requests)
-    assert triaged_ids(triage) == ["F-001", "F-002"]
+    assert triaged_ids(triage) == ["S-01", "S-02"]
     assert [r.delivery_id for r in triage.accepted] == ["d1", "d3"]
     assert [refusal.request for refusal in triage.refusals] == [refused]
 
 
 def test_threads_without_an_open_finding_are_listed_once():
-    requests = [fix_request("d1", thread_root_id=900), fix_request("d2", thread_root_id=900, finding_ids=["F-001"])]
+    requests = [fix_request("d1", thread_root_id=900), fix_request("d2", thread_root_id=900, finding_ids=["S-01"])]
     triage = triage_fixes(three_open_findings(), requests)
     assert triage.findings == [] and triage.refusals == []
     assert triage.closed_threads == [900]
 
 
 def test_a_reply_targets_only_an_open_finding():
-    first = finding("F-001", comment_id=100)
+    first = finding("S-01", comment_id=100)
     state = PullRequestState(open_findings=[first])
     assert open_finding_in_thread(state, 100) == first
     assert open_finding_in_thread(state, 999) is None
 
 
 def test_the_thread_of_a_dismissed_finding_is_still_known():
-    state = PullRequestState(open_findings=[finding("F-003", comment_id=300)])
-    dismiss(state, "F-003", "validated upstream", "alice")
+    state = PullRequestState(open_findings=[finding("S-03", comment_id=300)])
+    dismiss(state, "S-03", "validated upstream", "alice")
     assert open_finding_in_thread(state, 300) is None
-    assert closed_finding_id(state, 300) == "F-003"
+    assert closed_finding_id(state, 300) == "S-03"
     assert closed_finding_id(state, 999) is None
 
 
 def test_the_thread_of_a_finding_resolved_by_a_round_is_still_known():
-    state = PullRequestState(open_findings=[finding("F-001", comment_id=100), finding("F-002", comment_id=200)])
-    record_resolved(state, ["F-001"])
-    assert closed_finding_id(state, 100) == "F-001"
+    state = PullRequestState(open_findings=[finding("S-01", comment_id=100), finding("S-02", comment_id=200)])
+    record_resolved(state, ["S-01"])
+    assert closed_finding_id(state, 100) == "S-01"
     assert closed_finding_id(state, 200) is None
 
 
 def test_resolved_threads_keep_only_the_most_recent():
     state = PullRequestState()
     for number in range(MAX_RESOLVED_THREADS + 3):
-        state.open_findings = [finding(f"F-{number}", comment_id=number)]
-        record_resolved(state, [f"F-{number}"])
+        state.open_findings = [finding(f"S-{number:02d}", comment_id=number)]
+        record_resolved(state, [f"S-{number:02d}"])
     assert len(state.resolved_threads) == MAX_RESOLVED_THREADS
     assert closed_finding_id(state, 0) is None
-    assert closed_finding_id(state, MAX_RESOLVED_THREADS + 2) == f"F-{MAX_RESOLVED_THREADS + 2}"
+    assert closed_finding_id(state, MAX_RESOLVED_THREADS + 2) == f"S-{MAX_RESOLVED_THREADS + 2:02d}"
 
 
 def test_the_discussion_agent_reads_only_the_bot_and_the_author_up_to_the_reply():
@@ -275,60 +276,89 @@ def test_the_discussion_agent_reads_only_the_bot_and_the_author_up_to_the_reply(
 
 
 def test_dismiss_moves_the_finding_and_keeps_only_the_most_recent():
-    state = PullRequestState(open_findings=[finding("F-001", comment_id=100), finding("F-002", comment_id=200)])
-    dismiss(state, "F-001", "not reachable", "alice")
-    assert [f.id for f in state.open_findings] == ["F-002"]
-    assert state.dismissed_findings[0].finding.id == "F-001"
+    state = PullRequestState(open_findings=[finding("S-01", comment_id=100), finding("S-02", comment_id=200)])
+    dismiss(state, "S-01", "not reachable", "alice")
+    assert [f.id for f in state.open_findings] == ["S-02"]
+    assert state.dismissed_findings[0].finding.id == "S-01"
     assert state.dismissed_findings[0].reason == "not reachable"
     assert state.dismissed_findings[0].dismissed_by == "alice"
     for number in range(MAX_DISMISSED + 3):
-        state.open_findings.append(finding(f"F-{100 + number}", comment_id=1000 + number))
-        dismiss(state, f"F-{100 + number}", "reason", "alice")
+        state.open_findings.append(finding(f"S-{100 + number}", comment_id=1000 + number))
+        dismiss(state, f"S-{100 + number}", "reason", "alice")
     assert len(state.dismissed_findings) == MAX_DISMISSED
 
 
 def test_clean_report_pins_the_category_and_keeps_known_open_ids():
-    report = ReviewerReport(findings=[draft(category="performance")], resolved_ids=["f-001", "F-009", " F-002 "])
-    cleaned = clean_report(report, Category.SECURITY, ["F-001", "F-002"])
+    report = ReviewerReport(findings=[draft(category="performance")], resolved_ids=["s-10", "S-09", " S-02 ", "S-03"])
+    cleaned = clean_report(report, Category.SECURITY, ["S-02", "S-10", "S-09"])
     assert [f.category for f in cleaned.findings] == [Category.SECURITY]
-    assert cleaned.resolved_ids == ["F-001", "F-002"]
+    assert cleaned.resolved_ids == ["S-02", "S-09", "S-10"]
 
 
-def test_number_findings_follows_the_report_order():
+def test_number_findings_counts_each_category_in_report_order():
     reports = [
         ReviewerReport(findings=[draft(line=1), draft(line=2)]),
-        ReviewerReport(findings=[draft(category="performance", line=3)]),
+        ReviewerReport(findings=[draft(line=3)]),  # a second security batch
+        ReviewerReport(findings=[draft(category="performance", line=4)]),
     ]
-    findings, next_number = number_findings(reports, 4)
-    assert [f.id for f in findings] == ["F-004", "F-005", "F-006"]
-    assert [f.line for f in findings] == [1, 2, 3]
-    assert next_number == 7
+    findings, last_numbers = number_findings(reports, {})
+    assert [f.id for f in findings] == ["S-01", "S-02", "S-03", "P-01"]
+    assert [f.line for f in findings] == [1, 2, 3, 4]
+    assert last_numbers == {Category.SECURITY: 3, Category.PERFORMANCE: 1}
 
 
-def test_resolved_ids_are_merged_and_sorted():
-    reports = [ReviewerReport(resolved_ids=["F-003"]), ReviewerReport(resolved_ids=["F-001", "F-003"])]
-    assert resolved_ids(reports) == ["F-001", "F-003"]
+def test_number_findings_continues_each_category_from_the_last_round():
+    reports = [ReviewerReport(findings=[draft()]), ReviewerReport(findings=[draft(category="maintainability")])]
+    earlier = {Category.SECURITY: 99, Category.PERFORMANCE: 4}
+    findings, last_numbers = number_findings(reports, earlier)
+    assert [f.id for f in findings] == ["S-100", "M-01"]
+    assert last_numbers == {Category.SECURITY: 100, Category.PERFORMANCE: 4, Category.MAINTAINABILITY: 1}
+    assert earlier == {Category.SECURITY: 99, Category.PERFORMANCE: 4}
+
+
+def test_findings_sort_by_severity_then_category_then_number():
+    findings = [
+        finding("P-01", category="performance"),
+        finding("S-100"),
+        finding("S-10"),
+        finding("M-02", category="maintainability", severity="critical"),
+        finding("S-09"),
+    ]
+    assert [f.id for f in sorted(findings, key=sort_key)] == ["M-02", "S-09", "S-10", "S-100", "P-01"]
+
+
+def test_resolved_ids_are_merged_and_sorted_by_category_then_number():
+    reports = [
+        ReviewerReport(resolved_ids=["S-100", "M-01"]),
+        ReviewerReport(resolved_ids=["P-01", "S-99", "S-100"]),
+    ]
+    assert resolved_ids(reports) == ["S-99", "S-100", "P-01", "M-01"]
+
+
+def test_a_legacy_finding_id_sorts_last():
+    reports = [ReviewerReport(resolved_ids=["F-003", "M-02", "S-01"])]
+    assert resolved_ids(reports) == ["S-01", "M-02", "F-003"]
 
 
 def test_apply_summary_drops_duplicates_and_follows_the_order():
-    new = [finding("F-001", severity="low"), finding("F-002"), finding("F-003", severity="medium")]
-    summary = ReviewSummary(summary_markdown="s", ordered_ids=["F-002", "F-404", "F-002"], duplicates=["F-003"])
-    assert [f.id for f in apply_summary(new, summary)] == ["F-002", "F-001"]
+    new = [finding("S-01", severity="low"), finding("S-02"), finding("S-03", severity="medium")]
+    summary = ReviewSummary(summary_markdown="s", ordered_ids=["S-02", "S-404", "S-02"], duplicates=["S-03"])
+    assert [f.id for f in apply_summary(new, summary)] == ["S-02", "S-01"]
 
 
 def test_apply_summary_never_drops_every_finding():
-    new = [finding("F-001"), finding("F-002")]
-    summary = ReviewSummary(summary_markdown="s", ordered_ids=[], duplicates=["F-001", "F-002"])
-    assert [f.id for f in apply_summary(new, summary)] == ["F-001", "F-002"]
+    new = [finding("S-01"), finding("S-02")]
+    summary = ReviewSummary(summary_markdown="s", ordered_ids=[], duplicates=["S-01", "S-02"])
+    assert [f.id for f in apply_summary(new, summary)] == ["S-01", "S-02"]
 
 
 def test_fallback_summary_keeps_the_most_severe_finding_per_line():
-    new = [finding("F-001", severity="medium"), finding("F-002", severity="critical"), finding("F-003", line=9)]
-    summary = fallback_summary(SynthesisInput(new_findings=new, resolved_ids=["F-000"]))
-    assert summary.ordered_ids == ["F-002", "F-003"]
-    assert summary.duplicates == ["F-001"]
-    assert "F-002 (critical)" in summary.summary_markdown
-    assert "F-000" not in summary.summary_markdown  # the review body lists the resolved IDs
+    new = [finding("S-01", severity="medium"), finding("S-02", severity="critical"), finding("S-03", line=9)]
+    summary = fallback_summary(SynthesisInput(new_findings=new, resolved_ids=["P-03"]))
+    assert summary.ordered_ids == ["S-02", "S-03"]
+    assert summary.duplicates == ["S-01"]
+    assert "S-02 (critical)" in summary.summary_markdown
+    assert "P-03" not in summary.summary_markdown  # the review body lists the resolved IDs
 
 
 def test_fallback_summary_without_new_findings():
@@ -336,10 +366,10 @@ def test_fallback_summary_without_new_findings():
 
 
 def test_memo_lists_open_findings_most_severe_first():
-    open_findings = [finding("F-001", severity="low"), finding("F-002", severity="critical")]
+    open_findings = [finding("S-01", severity="low"), finding("S-02", severity="critical")]
     state = PullRequestState(round=2, open_findings=open_findings)
     assert memo("waiting for changes", state) == {
         "state": "waiting for changes",
         "round": 2,
-        "open_findings": ["F-002 critical app/search.py:5 SQL injection", "F-001 low app/search.py:5 SQL injection"],
+        "open_findings": ["S-02 critical app/search.py:5 SQL injection", "S-01 low app/search.py:5 SQL injection"],
     }

@@ -4,7 +4,9 @@ import re
 from collections.abc import Iterable
 from datetime import datetime
 
-_FINDING = re.compile(r"<!-- finding:(F-\d+) -->")
+from agentcore_review_shared.contract import FINDING_ID_PATTERN, Category, parse_finding_id
+
+_FINDING = re.compile(rf"<!-- finding:({FINDING_ID_PATTERN}) -->")
 
 
 def finding_marker(finding_id: str) -> str:
@@ -61,10 +63,20 @@ def last_round(workflow_id: str, review_bodies: Iterable[str | None]) -> int:
     return _highest(pattern, review_bodies)
 
 
-def last_finding_number(texts: Iterable[str | None]) -> int:
-    """The highest finding number among the finding markers (F-012 gives 12); 0 when there is none."""
-    numbers = [int(finding_id.removeprefix("F-")) for text in texts for finding_id in extract_finding_ids(text)]
-    return max(numbers, default=0)
+def last_finding_numbers(texts: Iterable[str | None]) -> dict[Category, int]:
+    """The highest finding number of each category among the finding markers (S-12 gives 12 for security).
+
+    A category without a marker is absent.
+    """
+    last: dict[Category, int] = {}
+    for text in texts:
+        for finding_id in extract_finding_ids(text):
+            parsed = parse_finding_id(finding_id)
+            if parsed is None:
+                continue
+            category, number = parsed
+            last[category] = max(last.get(category, 0), number)
+    return last
 
 
 def last_fix_number(workflow_id: str, commit_messages: Iterable[str | None]) -> int:

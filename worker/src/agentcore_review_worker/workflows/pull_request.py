@@ -37,6 +37,7 @@ with workflow.unsafe.imports_passed_through():
         PrClosed,
         PrUpdated,
         PullRequestInput,
+        format_finding_id,
     )
 
     from agentcore_review_worker import lifecycle, markers, publishing, summaries
@@ -187,12 +188,15 @@ class PullRequestWorkflow:
             return
         state = self._state
         state.round = recovered.last_round
-        state.next_finding_number = recovered.last_finding_number + 1
+        state.last_finding_numbers = recovered.last_finding_numbers
         state.fix_count = recovered.last_fix_number
+        last_findings = [
+            format_finding_id(category, number) for category, number in recovered.last_finding_numbers.items()
+        ]
         workflow.logger.info(
-            "numbering continues after round %d, finding %d, fix %d",
+            "numbering continues after round %d, findings %s, fix %d",
             recovered.last_round,
-            recovered.last_finding_number,
+            ", ".join(last_findings) or "none",
             recovered.last_fix_number,
         )
 
@@ -334,7 +338,7 @@ class PullRequestWorkflow:
             await self._complete_check(check, number, *output)
             return False
         # IDs are committed to the state only once the review is published.
-        new, next_finding_number = lifecycle.number_findings(reports, state.next_finding_number)
+        new, last_finding_numbers = lifecycle.number_findings(reports, state.last_finding_numbers)
         resolved = lifecycle.resolved_ids(reports)
         still_open = [f for f in state.open_findings if f.id not in resolved]
         summary = await self._summarize(
@@ -365,7 +369,7 @@ class PullRequestWorkflow:
                 content=content,
             )
         )
-        state.next_finding_number = next_finding_number
+        state.last_finding_numbers = last_finding_numbers
         lifecycle.record_resolved(state, resolved)
         state.open_findings = still_open + [f.model_copy(update={"comment_id": comment_ids.get(f.id)}) for f in kept]
         state.last_reviewed_sha = change.head_sha

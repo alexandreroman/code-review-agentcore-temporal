@@ -319,7 +319,7 @@ bash <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
 fail() { result E2E-04b FAIL "$1"; collect "$WF" "$WF-discussion-1"; exit 1; }
 root=$(gh api "repos/$REPO/pulls/$PR/comments?per_page=100" --jq '[.[] | select(.user.type == "Bot"
-  and .in_reply_to_id == null and (.body | contains("<!-- finding:F-")))][0].id // empty')
+  and .in_reply_to_id == null and (.body | test("<!-- finding:[SPM]-[0-9]+ -->")))][0].id // empty')
 [[ -n "$root" ]] || fail "no inline finding on PR #$PR"
 asked=$(now)
 cid=$(gh api "repos/$REPO/pulls/$PR/comments/$root/replies" --jq .id \
@@ -332,7 +332,7 @@ answered() { [[ -n "$(answer)" ]]; }
 wait_until 90 "bot answer in the thread" answered || fail "no bot answer 90 s after the reply"
 answer_s=$(($(now) - asked))
 eyes=$(gh api "repos/$REPO/pulls/comments/$cid/reactions" --jq 'map(.content) | index("eyes") != null')
-verdict=$(answer | head -n 1 | grep -oE '^\*\*F-[0-9]+ (stays open|dismissed)\.\*\*' || true)
+verdict=$(answer | head -n 1 | grep -oE '^\*\*[SPM]-[0-9]+ (stays open|dismissed)\.\*\*' || true)
 child=$(describe "$WF-discussion-1" 2>/dev/null | jq -r '.workflowExecutionInfo.type.name // empty')
 if [[ "$eyes" == true && -n "$verdict" && "$child" == DiscussionWorkflow ]]; then
   result E2E-04b ok "answered in ${answer_s}s: $verdict, child $WF-discussion-1"
@@ -344,10 +344,11 @@ STEP
 
 Success: 👀 (`eyes`) on the reply; within 90 s, a bot reply in the same
 thread carries a `<!-- reply:<workflow id>:<comment id> -->` marker (the
-comment ID of the reply) and starts with `**F-<n> stays open.**` or
-`**F-<n> dismissed.**`; the workflow has a `<workflow id>-discussion-1`
-child of type `DiscussionWorkflow`. A dismissal is valid: E2E-05 then
-fixes the findings left open.
+comment ID of the reply) and starts with `**<finding ID> stays open.**`
+or `**<finding ID> dismissed.**` (such as `**S-01 stays open.**`); the
+workflow has a `<workflow id>-discussion-1` child of type
+`DiscussionWorkflow`. A dismissal is valid: E2E-05 then fixes the findings
+left open.
 
 ## E2E-05 — `/fix` (timeout 600000)
 

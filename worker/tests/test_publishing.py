@@ -43,36 +43,36 @@ def content(findings, **extra) -> ReviewContent:
 
 
 def test_comment_body_carries_the_marker_and_the_suggestion():
-    body = comment_body(finding("F-007", suggestion="Bind parameters."))
-    assert body.startswith("<!-- finding:F-007 -->")
+    body = comment_body(finding("S-07", suggestion="Bind parameters."))
+    assert body.startswith("<!-- finding:S-07 -->")
     assert "high" in body and "Bind parameters." in body
 
 
 def test_findings_on_diff_lines_go_inline_and_the_rest_into_the_body():
     commentable = {"app/search.py": {10, 11, 12}}
-    findings = [finding("F-001", line=11), finding("F-002", line=50), finding("F-003", line=11, end_line=13)]
+    findings = [finding("S-01", line=11), finding("S-02", line=50), finding("S-03", line=11, end_line=13)]
     payload = build_review(content(findings), commentable, MARKER, inline=True)
     assert [(c.path, c.line, c.side) for c in payload.comments] == [("app/search.py", 11, "RIGHT")]
-    assert "<!-- finding:F-002 -->" in payload.body and "<!-- finding:F-003 -->" in payload.body
+    assert "<!-- finding:S-02 -->" in payload.body and "<!-- finding:S-03 -->" in payload.body
     assert payload.body.startswith(MARKER) and "Summary." in payload.body
 
 
 def test_multi_line_findings_use_start_line():
     commentable = {"app/search.py": {10, 11, 12}}
-    payload = build_review(content([finding("F-001", line=10, end_line=12)]), commentable, MARKER, inline=True)
+    payload = build_review(content([finding("S-01", line=10, end_line=12)]), commentable, MARKER, inline=True)
     comment = payload.comments[0]
     assert (comment.start_line, comment.line, comment.start_side) == (10, 12, "RIGHT")
 
 
 def test_inline_comments_are_capped():
-    findings = [finding(f"F-{i:03d}") for i in range(1, 26)]
+    findings = [finding(f"S-{i:02d}") for i in range(1, 26)]
     payload = build_review(content(findings), {"app/search.py": {11}}, MARKER, inline=True)
     assert len(payload.comments) == MAX_INLINE_COMMENTS
     assert payload.body.count("<!-- finding:") == 25 - MAX_INLINE_COMMENTS
 
 
 def test_without_inline_comments_every_finding_is_in_the_body():
-    payload = build_review(content([finding("F-001"), finding("F-002")]), {"app/search.py": {11}}, MARKER, inline=False)
+    payload = build_review(content([finding("S-01"), finding("S-02")]), {"app/search.py": {11}}, MARKER, inline=False)
     assert payload.comments == []
     assert payload.body.count("<!-- finding:") == 2
     assert "### Findings" in payload.body and "### Other findings" not in payload.body
@@ -80,14 +80,14 @@ def test_without_inline_comments_every_finding_is_in_the_body():
 
 def test_body_reports_resolved_open_excluded_unlisted_and_unavailable():
     extra = {
-        "resolved_ids": ["F-001"],
-        "still_open": [finding("F-002")],
+        "resolved_ids": ["S-01"],
+        "still_open": [finding("S-02")],
         "excluded": ["uv.lock"],
         "unlisted": 12,
         "unavailable": ["security"],
     }
     body = build_review(content([], **extra), {}, MARKER, inline=True).body
-    for expected in ("F-001", "F-002", "uv.lock", "12 more files", "security"):
+    for expected in ("S-01", "S-02", "uv.lock", "12 more files", "security"):
         assert expected in body
 
 
@@ -105,21 +105,21 @@ def test_body_is_truncated_below_the_github_limit():
 
 
 def test_check_output_counts_blocking_findings():
-    _, title, summary = check_output([finding("F-002", severity="low"), finding("F-001", severity="critical")])
+    _, title, summary = check_output([finding("S-02", severity="low"), finding("S-01", severity="critical")])
     assert title == "2 open findings, 1 blocking"
-    assert summary.index("F-001") < summary.index("F-002")
+    assert summary.index("S-01") < summary.index("S-02")
     assert check_output([])[1] == "No open finding"
 
 
 def test_check_is_red_only_for_blocking_findings():
-    assert check_output([finding("F-1", severity="medium"), finding("F-2", severity="low")])[0] == "success"
-    assert check_output([finding("F-1", severity="low"), finding("F-2", severity="high")])[0] == "failure"
-    assert check_output([finding("F-1", severity="critical")])[0] == "failure"
+    assert check_output([finding("S-01", severity="medium"), finding("S-02", severity="low")])[0] == "success"
+    assert check_output([finding("S-01", severity="low"), finding("S-02", severity="high")])[0] == "failure"
+    assert check_output([finding("S-01", severity="critical")])[0] == "failure"
 
 
 def test_check_output_names_the_unavailable_reviewers():
     _, title, summary = check_output(
-        [finding("F-001", severity="low")], unavailable=["security", "performance (batch 2)"]
+        [finding("S-01", severity="low")], unavailable=["security", "performance (batch 2)"]
     )
     assert title == "1 open finding, 0 blocking, 2 reviewers unavailable"
     assert "Not reviewed in this round (reviewer unavailable): security, performance (batch 2)." in summary
@@ -144,16 +144,14 @@ def test_unavailable_check_output_lists_every_reviewer():
 
 
 def test_closing_comment_calls_out_a_bypass():
-    findings = [finding("F-004", severity="medium"), finding("F-001", severity="high")]
+    findings = [finding("S-04", severity="medium"), finding("S-01", severity="high")]
     text = closing_comment("admin", findings, "<!-- m -->")
-    assert (
-        text == "⚠️ Merged by @admin bypassing AI Review, 2 open findings: F-001 (high), F-004 (medium).\n\n<!-- m -->"
-    )
+    assert text == "⚠️ Merged by @admin bypassing AI Review, 2 open findings: S-01 (high), S-04 (medium).\n\n<!-- m -->"
 
 
 def test_closing_comment_without_blocking_findings():
-    text = closing_comment(None, [finding("F-002", severity="low")], "<!-- m -->")
-    assert text == "Merged with 1 open finding: F-002 (low).\n\n<!-- m -->"
+    text = closing_comment(None, [finding("S-02", severity="low")], "<!-- m -->")
+    assert text == "Merged with 1 open finding: S-02 (low).\n\n<!-- m -->"
 
 
 def test_the_idle_warning_announces_the_time_left_before_the_close():
@@ -176,43 +174,43 @@ def test_the_idle_close_comment_gives_the_idle_duration():
 
 
 def test_a_fix_refused_in_a_thread_points_to_both_ways_of_fixing():
-    text = off_thread_fix_reply("F-001", ["F-001", "F-003"], "<!-- m -->")
+    text = off_thread_fix_reply("S-01", ["S-01", "S-03"], "<!-- m -->")
     assert text == (
-        "This thread is about F-001: `/fix F-001 F-003` was not applied. Comment `/fix` here to fix F-001, "
-        "or `/fix F-001 F-003` in the conversation.\n\n<!-- m -->"
+        "This thread is about S-01: `/fix S-01 S-03` was not applied. Comment `/fix` here to fix S-01, "
+        "or `/fix S-01 S-03` in the conversation.\n\n<!-- m -->"
     )
 
 
 def test_a_fix_refused_in_the_conversation_lists_the_open_findings_most_severe_first():
-    open_findings = [finding("F-010", severity="low"), finding("F-009", severity="high")]
-    text = not_open_fix_comment(["F-099"], open_findings, "<!-- m -->")
-    assert text == "F-099 is not an open finding: nothing was fixed. Open findings: F-009, F-010.\n\n<!-- m -->"
+    open_findings = [finding("S-10", severity="low"), finding("S-09", severity="high")]
+    text = not_open_fix_comment(["S-99"], open_findings, "<!-- m -->")
+    assert text == "S-99 is not an open finding: nothing was fixed. Open findings: S-09, S-10.\n\n<!-- m -->"
 
 
 def test_a_fix_refused_with_no_open_finding():
-    text = not_open_fix_comment(["F-001", "F-002"], [], "<!-- m -->")
-    assert text == "F-001, F-002 are not open findings: nothing was fixed. No finding is open.\n\n<!-- m -->"
+    text = not_open_fix_comment(["S-01", "S-02"], [], "<!-- m -->")
+    assert text == "S-01, S-02 are not open findings: nothing was fixed. No finding is open.\n\n<!-- m -->"
 
 
 def test_a_thread_reply_starts_with_the_verdict_and_ends_with_its_marker():
     keep = reply_body(
-        "F-004", DiscussionReply(verdict="keep", answer=" The query is still built by hand. "), "<!-- m -->"
+        "S-04", DiscussionReply(verdict="keep", answer=" The query is still built by hand. "), "<!-- m -->"
     )
-    assert keep == "**F-004 stays open.** The query is still built by hand.\n\n<!-- m -->"
-    dismissed = reply_body("F-004", DiscussionReply(verdict="dismiss", answer="Right."), "<!-- m -->")
-    assert dismissed.startswith("**F-004 dismissed.** Right.")
+    assert keep == "**S-04 stays open.** The query is still built by hand.\n\n<!-- m -->"
+    dismissed = reply_body("S-04", DiscussionReply(verdict="dismiss", answer="Right."), "<!-- m -->")
+    assert dismissed.startswith("**S-04 dismissed.** Right.")
 
 
 def test_only_the_agents_answers_count_toward_the_budget():
     marker = reply_marker("pr-o-r-3", 777)
-    answer = reply_body("F-001", DiscussionReply(verdict="keep", answer="Still unsafe."), marker)
+    answer = reply_body("S-01", DiscussionReply(verdict="keep", answer="Still unsafe."), marker)
     thread = [
-        ThreadComment(id=1, author="bot[bot]", body=comment_body(finding("F-001"))),
+        ThreadComment(id=1, author="bot[bot]", body=comment_body(finding("S-01"))),
         ThreadComment(id=2, author="alice", body="why?"),
         ThreadComment(id=3, author="bot[bot]", body=answer),
         ThreadComment(id=4, author="bot[bot]", body=failed_reply(marker)),
         ThreadComment(id=5, author="bot[bot]", body=budget_reply(marker)),
-        ThreadComment(id=6, author="bot[bot]", body=no_longer_open_reply("F-001", marker)),
+        ThreadComment(id=6, author="bot[bot]", body=no_longer_open_reply("S-01", marker)),
         ThreadComment(id=7, author="alice", body=answer),
     ]
     assert bot_answers(thread, "bot[bot]") == 1

@@ -6,7 +6,7 @@ from agentcore_review_shared.contract import PrRef
 from temporalio import activity
 
 from ..hunks import commentable_lines
-from ..markers import extract_finding_ids, last_finding_number, last_fix_number, last_round, round_marker
+from ..markers import extract_finding_ids, last_finding_numbers, last_fix_number, last_round, round_marker
 from ..models import CheckInput, CommentInput, PublishInput, RecoveredCounters, RecoveryInput
 from ..publishing import build_review
 from .github_api import (
@@ -102,7 +102,7 @@ async def recover_counters(input: RecoveryInput) -> RecoveredCounters:
     return RecoveredCounters(
         last_round=last_round(workflow_id, review_bodies),
         # A finding without a commentable line sits in the review body rather than in an inline comment.
-        last_finding_number=last_finding_number(review_bodies + comment_bodies),
+        last_finding_numbers=last_finding_numbers(review_bodies + comment_bodies),
         last_fix_number=last_fix_number(workflow_id, [commit["commit"]["message"] for commit in commits]),
     )
 

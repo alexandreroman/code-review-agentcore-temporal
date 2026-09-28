@@ -189,7 +189,7 @@ open_pr() {
   echo "${url##*/}"
 }
 
-# review_threads PR: [{id: "F-001", resolved: true|false}] for every thread carrying a finding marker.
+# review_threads PR: [{id: "S-01", resolved: true|false}] for every thread carrying a finding marker.
 review_threads() {
   gh api graphql -F owner="$OWNER" -F name="$DEMO_REPO" -F number="$1" -f query='
     query($owner: String!, $name: String!, $number: Int!) {
@@ -199,7 +199,7 @@ review_threads() {
         }
       }
     }' --jq '[.data.repository.pullRequest.reviewThreads.nodes[]
-      | {id: ([.comments.nodes[0].body | match("<!-- finding:(F-[0-9]+) -->").captures[0].string] | first),
+      | {id: ([.comments.nodes[0].body | match("<!-- finding:([SPM]-[0-9]+) -->").captures[0].string] | first),
          resolved: .isResolved}
       | select(.id)]'
 }

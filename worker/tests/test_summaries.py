@@ -35,7 +35,7 @@ def test_a_summary_is_a_single_line():
 
 def test_a_finding_title_stays_on_its_bullet_line():
     finding = Finding(
-        id="F-001",
+        id="S-01",
         category="security",
         severity="critical",
         path="app/search.py",
@@ -47,9 +47,9 @@ def test_a_finding_title_stays_on_its_bullet_line():
 
 
 def test_finding_ids_are_listed_whole():
-    ids = [f"F-{number:03d}" for number in range(1, 60)]
+    ids = [f"S-{number:02d}" for number in range(1, 60)]
     summary = finding_ids(ids)
-    assert summary.startswith("F-001, F-002, ")
+    assert summary.startswith("S-01, S-02, ")
     assert summary.endswith(", …")
     assert len(summary) <= MAX_SUMMARY_CHARS
     listed = summary.removesuffix(", …").split(", ")

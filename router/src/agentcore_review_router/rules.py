@@ -1,13 +1,17 @@
 """Pure command rules: who may run /fix and /kill, which findings /fix names, which sessions /kill targets, and
 what the bot answers."""
 
-import re
 from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Literal
 
-from agentcore_review_shared.contract import AgentCoreSession, parse_agentcore_identity
+from agentcore_review_shared.contract import (
+    AgentCoreSession,
+    format_finding_id,
+    parse_agentcore_identity,
+    parse_finding_id,
+)
 
 # The permission endpoint reports the maintain role as write.
 WRITE_PERMISSIONS = frozenset({"admin", "write"})
@@ -20,12 +24,9 @@ NO_REVIEW_REPLY = "No review in progress."
 DEV_KILL_REPLY = "Dev worker: Ctrl-C is your friend."
 NO_WORKER_REPLY = "No active worker, nothing to kill."
 FIX_USAGE_REPLY = (
-    "Nothing was fixed: `/fix` accepts finding IDs only, such as `/fix F-001 F-003`. "
+    "Nothing was fixed: `/fix` accepts finding IDs only, such as `/fix S-01 P-02`. "
     "A bare `/fix` fixes every open finding, or the thread's finding in a review thread."
 )
-
-# ASCII digits only: \d would also accept other scripts' digits, which no finding ID contains.
-_FINDING_ID = re.compile(r"F-[0-9]+")
 
 StopOutcome = Literal["stopped", "gone", "retry", "failed"]
 # 409 while a session changes state, throttling, and connect or read timeouts ("timeout") are worth another try.
@@ -38,14 +39,18 @@ def can_run_commands(permission: str | None) -> bool:
 
 
 def fix_finding_ids(arguments: Iterable[str]) -> list[str] | None:
-    """The finding IDs named after /fix, uppercased and once each; None when an argument is not a finding ID.
+    """The finding IDs named after /fix, written as the worker writes them (s-1 gives S-01) and once each; None when
+    an argument is not a finding ID.
 
     Only the syntax is checked here: the worker alone knows which findings are open.
     """
-    finding_ids = [argument.upper() for argument in arguments]
-    for finding_id in finding_ids:
-        if not _FINDING_ID.fullmatch(finding_id):
+    finding_ids: list[str] = []
+    for argument in arguments:
+        parsed = parse_finding_id(argument.upper())
+        if parsed is None:
             return None
+        category, number = parsed
+        finding_ids.append(format_finding_id(category, number))
     return list(dict.fromkeys(finding_ids))
 
 

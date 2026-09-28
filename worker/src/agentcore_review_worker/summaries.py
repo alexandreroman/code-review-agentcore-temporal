@@ -48,7 +48,7 @@ def count(number: int, noun: str) -> str:
 
 
 def finding_ids(ids: list[str]) -> str:
-    """`F-001, F-002, …`: the first whole IDs that fit."""
+    """`S-01, S-02, …`: the first whole IDs that fit."""
     return _list_while_fits("", ids)
 
 
@@ -201,7 +201,7 @@ def file_list(paths: list[str]) -> str:
 
 
 def finding_line(finding: Finding) -> str:
-    """`**F-001** · critical · security — SQL injection in the search query`."""
+    """`**S-01** · critical · security — SQL injection in the search query`."""
     return f"**{finding.id}** · {finding.severity} · {finding.category} — {fit(finding.title)}"
 
 

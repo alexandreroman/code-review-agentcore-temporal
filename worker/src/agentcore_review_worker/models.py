@@ -178,10 +178,10 @@ class RecoveryInput(BaseModel):
 
 
 class RecoveredCounters(BaseModel):
-    """The numbers an earlier run of the same workflow ID left on the pull request; 0 when it left none."""
+    """The numbers an earlier run of the same workflow ID left on the pull request; 0 (or absent) when it left none."""
 
     last_round: int
-    last_finding_number: int
+    last_finding_numbers: dict[Category, int]
     last_fix_number: int
 
 

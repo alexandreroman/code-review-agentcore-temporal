@@ -1,8 +1,9 @@
+from agentcore_review_shared.contract import Category
 from agentcore_review_worker.markers import (
     extract_finding_ids,
     finding_marker,
     fix_trailer,
-    last_finding_number,
+    last_finding_numbers,
     last_fix_number,
     last_round,
     round_marker,
@@ -11,14 +12,14 @@ from agentcore_review_worker.markers import (
 
 def test_the_markers_persisted_on_github_keep_their_format():
     """RecoverCounters, idempotency and the e2e skill parse these strings on GitHub: they are a contract."""
-    assert finding_marker("F-007") == "<!-- finding:F-007 -->"
+    assert finding_marker("S-07") == "<!-- finding:S-07 -->"
     assert round_marker("pr-o-r-3", 2) == "<!-- round:pr-o-r-3:2 -->"
     assert fix_trailer("pr-o-r-3", 1) == "Review-Fix: pr-o-r-3/1"
 
 
 def test_extract_finding_ids():
-    body = f"{finding_marker('F-001')} SQL injection\n\n{finding_marker('F-012')} N+1"
-    assert extract_finding_ids(body) == ["F-001", "F-012"]
+    body = f"{finding_marker('S-01')} SQL injection\n\n{finding_marker('P-12')} N+1\n\n{finding_marker('M-100')} dup"
+    assert extract_finding_ids(body) == ["S-01", "P-12", "M-100"]
     assert extract_finding_ids(None) == [] and extract_finding_ids("no marker") == []
 
 
@@ -28,10 +29,15 @@ def test_the_last_round_counts_only_this_workflow_ids_markers():
     assert last_round("pr-o-r-3", [None, "no marker"]) == 0
 
 
-def test_the_last_finding_number_reads_every_marker():
-    texts = [f"{finding_marker('F-002')} a\n\n{finding_marker('F-011')} b", finding_marker("F-007"), None]
-    assert last_finding_number(texts) == 11
-    assert last_finding_number(["**F-099 stays open.** no marker"]) == 0
+def test_the_last_finding_numbers_read_every_marker_per_category():
+    texts = [
+        f"{finding_marker('S-09')} a\n\n{finding_marker('S-10')} b",
+        finding_marker("P-07"),
+        finding_marker("F-040"),  # an earlier numbering scheme: ignored
+        None,
+    ]
+    assert last_finding_numbers(texts) == {Category.SECURITY: 10, Category.PERFORMANCE: 7}
+    assert last_finding_numbers(["**S-99 stays open.** no marker"]) == {}
 
 
 def test_the_last_fix_number_reads_whole_trailer_lines_of_this_workflow_id():

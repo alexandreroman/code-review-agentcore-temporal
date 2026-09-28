@@ -31,18 +31,20 @@ def test_only_write_access_runs_commands(permission, allowed):
     ("arguments", "finding_ids"),
     [
         ((), []),
-        (("F-001", "F-003"), ["F-001", "F-003"]),
-        (("f-001", "F-001"), ["F-001"]),
-        (("F-1000",), ["F-1000"]),
+        (("S-01", "P-02", "M-03"), ["S-01", "P-02", "M-03"]),
+        (("s-01", "S-01"), ["S-01"]),
+        (("p-100",), ["P-100"]),
+        (("s-1",), ["S-01"]),
+        (("S-1", "s-01", "S-001"), ["S-01"]),
     ],
 )
-def test_fix_arguments_name_findings_uppercased_once_each(arguments, finding_ids):
+def test_fix_arguments_name_findings_as_the_worker_writes_them_once_each(arguments, finding_ids):
     assert fix_finding_ids(arguments) == finding_ids
 
 
 @pytest.mark.parametrize(
     "arguments",
-    [("foo",), ("F-001", "please"), ("F-001,",), ("F-",), ("F001",), ("#F-001",), ("F-٣",)],
+    [("foo",), ("S-01", "please"), ("S-01,",), ("S-",), ("S01",), ("#S-01",), ("S-٣",), ("F-001",), ("X-01",)],
 )
 def test_fix_arguments_other_than_finding_ids_are_refused(arguments):
     assert fix_finding_ids(arguments) is None

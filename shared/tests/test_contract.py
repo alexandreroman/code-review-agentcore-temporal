@@ -5,7 +5,9 @@ from agentcore_review_shared.contract import (
     FindingDraft,
     Severity,
     agentcore_identity,
+    format_finding_id,
     parse_agentcore_identity,
+    parse_finding_id,
     pr_workflow_id,
 )
 from pydantic import ValidationError
@@ -47,6 +49,17 @@ def test_enums_tolerate_case_and_spaces(field, raw, expected):
 def test_unknown_enum_values_are_still_rejected():
     with pytest.raises(ValidationError):
         draft(category="style")
+
+
+def test_finding_id_round_trip():
+    assert format_finding_id(Category.SECURITY, 1) == "S-01"
+    assert format_finding_id(Category.MAINTAINABILITY, 100) == "M-100"
+    assert parse_finding_id("P-07") == (Category.PERFORMANCE, 7)
+
+
+@pytest.mark.parametrize("text", ["F-003", "X-01", "s-01", "S-", "S-٣", " S-01"])
+def test_parse_rejects_what_is_not_a_finding_id(text):
+    assert parse_finding_id(text) is None
 
 
 def test_pr_workflow_id_ignores_case_differences_between_events():

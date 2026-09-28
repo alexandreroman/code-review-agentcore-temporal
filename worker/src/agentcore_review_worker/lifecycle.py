@@ -14,6 +14,8 @@ from agentcore_review_shared.contract import (
     Finding,
     FixRequested,
     PullRequestState,
+    format_finding_id,
+    parse_finding_id,
 )
 
 from agentcore_review_worker.models import ReviewerReport, ReviewSummary, SynthesisInput, ThreadComment
@@ -37,8 +39,22 @@ MAX_BOT_REPLIES_PER_THREAD = 3
 """The bot's answers in one thread before it hands over to a human: keeps a discussion from looping."""
 
 
+def id_sort_key(finding_id: str) -> tuple[int, int, str]:
+    """By category (security first), then by number: S-09, S-10, S-100, P-01.
+
+    Any other ID, such as a legacy F-003, comes last. The ID itself breaks ties, so the order never depends on the
+    input order, which a set leaves random.
+    """
+    parsed = parse_finding_id(finding_id)
+    if parsed is None:
+        return (len(Category), 0, finding_id)
+    category, number = parsed
+    return (list(Category).index(category), number, finding_id)
+
+
 def sort_key(finding: Finding) -> tuple:
-    return (finding.severity.rank, finding.path, finding.line, finding.id)
+    """Most severe first, then in ID order."""
+    return (finding.severity.rank, id_sort_key(finding.id))
 
 
 def next_action(state: PullRequestState, closed: bool) -> Action | None:
@@ -240,19 +256,29 @@ def clean_report(report: ReviewerReport, category: Category, open_ids: list[str]
     resolved = {raw.strip().upper() for raw in report.resolved_ids} & set(open_ids)
     return ReviewerReport(
         findings=[draft.model_copy(update={"category": category}) for draft in report.findings],
-        resolved_ids=sorted(resolved),
+        resolved_ids=sorted(resolved, key=id_sort_key),
     )
 
 
-def number_findings(reports: list[ReviewerReport], next_number: int) -> tuple[list[Finding], int]:
-    """Stable IDs in report order; the reports come in a fixed order (category, then batch)."""
-    drafts = [draft for report in reports for draft in report.findings]
-    findings = [Finding(**draft.model_dump(), id=f"F-{next_number + i:03d}") for i, draft in enumerate(drafts)]
-    return findings, next_number + len(drafts)
+def number_findings(
+    reports: list[ReviewerReport], last_numbers: dict[Category, int]
+) -> tuple[list[Finding], dict[Category, int]]:
+    """Stable IDs, numbered per category in report order; the reports come in a fixed order (category, then batch).
+
+    Returns the findings and the last number of each category, which the state takes once the review is published.
+    """
+    numbers = dict(last_numbers)
+    findings: list[Finding] = []
+    for report in reports:
+        for draft in report.findings:
+            number = numbers.get(draft.category, 0) + 1
+            numbers[draft.category] = number
+            findings.append(Finding(**draft.model_dump(), id=format_finding_id(draft.category, number)))
+    return findings, numbers
 
 
 def resolved_ids(reports: list[ReviewerReport]) -> list[str]:
-    return sorted({finding_id for report in reports for finding_id in report.resolved_ids})
+    return sorted({finding_id for report in reports for finding_id in report.resolved_ids}, key=id_sort_key)
 
 
 def apply_summary(new: list[Finding], summary: ReviewSummary) -> list[Finding]:

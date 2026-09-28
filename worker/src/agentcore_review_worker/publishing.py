@@ -9,7 +9,7 @@ from collections.abc import Sequence
 from pathlib import PurePosixPath
 from typing import Literal
 
-from agentcore_review_shared.contract import Finding
+from agentcore_review_shared.contract import FINDING_ID_PATTERN, Finding
 from pydantic import BaseModel
 
 from agentcore_review_worker.hunks import is_commentable
@@ -23,7 +23,7 @@ MAX_INLINE_COMMENTS = 20
 MAX_BODY_CHARS = 60_000  # GitHub rejects review bodies over 65,536 characters
 PROTECTED_DIR = ".github"  # the app has no workflows permission, and the fixer must not touch CI
 
-_VERDICT_LINE = re.compile(r"\*\*F-\d+ (stays open|dismissed)\.\*\*")  # how reply_body starts
+_VERDICT_LINE = re.compile(rf"\*\*{FINDING_ID_PATTERN} (stays open|dismissed)\.\*\*")  # how reply_body starts
 
 
 class InlineComment(BaseModel):
