@@ -1,5 +1,5 @@
 """Review side effects on GitHub: the AI Review check, the round's review, thread resolution and replies, comments
-in the Conversation.
+in the Conversation, the close for inactivity.
 
 Each one is idempotent: a hidden marker or the check run's external ID identifies what an earlier
 attempt already wrote.
@@ -185,3 +185,10 @@ async def post_pr_comment(input: CommentInput) -> None:
         if any(input.marker in (c.get("body") or "") for c in comments):
             return
         await send(pr, "POST", f"{repo_path(pr)}/issues/{pr.number}/comments", {"body": input.body})
+
+
+@activity.defn(name="close_pull_request")
+async def close_pull_request(pr: PrRef) -> None:
+    """Close the pull request; closing a closed one changes nothing, so a retry is harmless."""
+    with github_errors():
+        await send(pr, "PATCH", f"{repo_path(pr)}/pulls/{pr.number}", {"state": "closed"})

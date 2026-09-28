@@ -85,6 +85,8 @@ resource "aws_lambda_function" "router" {
       TASK_QUEUE               = var.task_queue
       DEV_TASK_QUEUE           = var.dev_task_queue
       DEV_BRANCH_PREFIX        = var.dev_branch_prefix
+      PR_IDLE_WARNING_SECONDS  = tostring(var.pr_idle_warning_seconds)
+      PR_IDLE_CLOSE_SECONDS    = tostring(var.pr_idle_close_seconds)
       AGENTCORE_RUNTIME_ARN    = local.deployed ? aws_bedrockagentcore_agent_runtime.worker[0].agent_runtime_arn : ""
     }
   }

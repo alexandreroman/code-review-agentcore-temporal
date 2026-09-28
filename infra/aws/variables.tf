@@ -23,6 +23,27 @@ variable "dev_branch_prefix" {
   type = string
 }
 
+variable "pr_idle_warning_seconds" {
+  description = "Seconds without activity before the bot warns that it will close the pull request"
+  type        = number
+
+  validation {
+    condition     = var.pr_idle_warning_seconds >= 1
+    error_message = "pr_idle_warning_seconds must be at least 1."
+  }
+}
+
+variable "pr_idle_close_seconds" {
+  description = "Seconds without activity before the bot closes the pull request"
+  type        = number
+
+  validation {
+    # The warning announces the close: it must come first.
+    condition     = var.pr_idle_close_seconds > var.pr_idle_warning_seconds
+    error_message = "pr_idle_close_seconds must be greater than pr_idle_warning_seconds."
+  }
+}
+
 variable "deployment_name" {
   type = string
 }

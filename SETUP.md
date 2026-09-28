@@ -110,10 +110,11 @@ Set at least:
 Optional: `GITHUB_OWNER` when the demo repository belongs to an
 organization (the default is the account logged in to `gh`),
 `AWS_REGION` for another region, `TEMPORAL_TLS_CERT_PATH` and
-`TEMPORAL_TLS_KEY_PATH` for certificates outside `certs/`, and the
-settings of a [custom domain](#custom-domain-cloudflare-optional) for the
-webhook. Plain `KEY=value` lines, no quotes: the Makefile includes the
-file.
+`TEMPORAL_TLS_KEY_PATH` for certificates outside `certs/`,
+`PR_IDLE_WARNING_SECONDS` and `PR_IDLE_CLOSE_SECONDS` for when an idle pull
+request is warned, then closed (10 and 15 minutes), and the settings of a
+[custom domain](#custom-domain-cloudflare-optional) for the webhook.
+Plain `KEY=value` lines, no quotes: the Makefile includes the file.
 [`.env.example`](.env.example) documents every variable and its default.
 
 ## 5. AWS credentials

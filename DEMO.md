@@ -47,9 +47,15 @@ On a stable network, never on conference Wi-Fi:
    the browser, commit to a new branch `warmup/check`, open the PR, and wait
    for the `AI Review` check (a minute or two). Then close the PR and delete
    the branch.
-6. **Back to zero**: `make kill-sessions`, so no worker runs when the talk
+6. **Idle pull requests**: the bot warns on a PR idle for 10 minutes and
+   closes it at 15. Open the demo PR on stage, not before. For a PR
+   prepared in advance, raise `PR_IDLE_WARNING_SECONDS` and
+   `PR_IDLE_CLOSE_SECONDS` in `.env` and run `make up` the day before (a
+   router-only change, no new image); a PR keeps the durations its
+   workflow started with.
+7. **Back to zero**: `make kill-sessions`, so no worker runs when the talk
    starts.
-7. **Tabs**, in this order:
+8. **Tabs**, in this order:
    - GitHub: **Pull requests**, **New pull request**, compare
      `feature/customer-search` into `main` (the page the PR is opened from);
    - Temporal UI: the namespace's workflows, filtered with
@@ -58,7 +64,7 @@ On a stable network, never on conference Wi-Fi:
    - hidden, for plan B: the same compare page with `dev/customer-search`,
      and a terminal at the repository root (run `make dev` once, then stop
      it, so that its next start is fast).
-8. **Readability**: browser zoom at 150 to 175 %, terminal font at 20 pt
+9. **Readability**: browser zoom at 150 to 175 %, terminal font at 20 pt
    or more, bookmarks bar hidden, notifications off (Do Not Disturb), chat
    and mail closed.
 
@@ -94,7 +100,9 @@ Talking points:
 - **5:30, human in the loop.** One review, inline comments tagged `F-001`
   and up, a summary, and a red `AI Review` check that blocks the merge.
   The workflow waits for a signal; its memo shows its state without any
-  worker, and a minute later no worker listens on the queue.
+  worker, and a minute later no worker listens on the queue. Its pending
+  `idle warning` timer is durable: in 10 minutes, Temporal starts a worker
+  just to post the warning, and closes the PR 5 minutes later.
 - **6:30, discussion.** Reply in the thread of the SQL injection finding:
   "Why is this a problem? The input is validated upstream." 👀 on the
   reply. A worker starts on demand; in Temporal UI, a `…-discussion-1`

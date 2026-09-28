@@ -1,5 +1,5 @@
 """What the bot writes on GitHub: review comments and body, check output, thread replies, /fix refusals, closing
-comment, fixer changes.
+and inactivity comments, fixer changes.
 
 Pure functions: the activities call them with data they fetched, the workflow with its state.
 """
@@ -217,6 +217,23 @@ def closing_comment(closed_by: str | None, open_findings: list[Finding], marker:
     if any(f.severity.blocking for f in ordered):
         return f"⚠️ Merged{who} bypassing AI Review, {count}: {listed}.\n\n{marker}"
     return f"Merged{who} with {count}: {listed}.\n\n{marker}"
+
+
+def _duration(seconds: int) -> str:
+    if seconds % 60 == 0:
+        return _count(seconds // 60, "minute")
+    return _count(seconds, "second")
+
+
+def idle_warning_comment(warning_seconds: int, close_seconds: int, marker: str) -> str:
+    return (
+        f"No activity for {_duration(warning_seconds)}: this pull request will be closed in "
+        f"{_duration(close_seconds - warning_seconds)}. Push a commit to keep it open.\n\n{marker}"
+    )
+
+
+def idle_close_comment(close_seconds: int, marker: str) -> str:
+    return f"Closed after {_duration(close_seconds)} without activity.\n\n{marker}"
 
 
 def _repository_path(raw: str) -> str | None:

@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from agentcore_review_shared.contract import (
     Category,
@@ -13,11 +15,13 @@ from agentcore_review_worker.lifecycle import (
     MAX_PENDING_REPLIES,
     MAX_RESOLVED_THREADS,
     FixRefusal,
+    IdleTimer,
     apply_summary,
     clean_report,
     discussion_thread,
     dismiss,
     fallback_summary,
+    idle_timer,
     memo,
     next_action,
     number_findings,
@@ -29,6 +33,7 @@ from agentcore_review_worker.lifecycle import (
     reply_budget_left,
     reply_target,
     resolved_ids,
+    start_idle,
     was_finding_thread,
 )
 from agentcore_review_worker.models import ReviewerReport, ReviewSummary, SynthesisInput, ThreadComment
@@ -64,6 +69,55 @@ def test_a_reply_comes_after_a_review_and_a_fix():
     state.pending_head_sha = "abc"
     assert next_action(state, closed=False) == "review"
     assert next_action(state, closed=True) == "close"
+
+
+IDLE_START = datetime(2026, 9, 28, 14, 0, tzinfo=UTC)
+
+
+def idle_state(warned: bool = False) -> PullRequestState:
+    return PullRequestState(idle_since=IDLE_START, idle_warned=warned)
+
+
+def idle_after(state: PullRequestState, minutes: float) -> IdleTimer:
+    return idle_timer(state, IDLE_START + timedelta(minutes=minutes), warning_seconds=600, close_seconds=900)
+
+
+def test_an_idle_period_waits_for_the_warning_first():
+    assert idle_after(idle_state(), minutes=4) == IdleTimer("warning", timedelta(minutes=6))
+
+
+def test_the_warning_is_due_at_its_deadline():
+    assert idle_after(idle_state(), minutes=10) == IdleTimer("warning", timedelta(0))
+
+
+def test_once_warned_the_timer_counts_down_to_the_close():
+    assert idle_after(idle_state(warned=True), minutes=11) == IdleTimer("close", timedelta(minutes=4))
+    assert idle_after(idle_state(warned=True), minutes=16) == IdleTimer("close", timedelta(minutes=-1))
+
+
+def test_past_the_close_deadline_the_close_comes_without_a_warning():
+    assert idle_after(idle_state(), minutes=20).step == "close"
+
+
+def test_a_warning_not_before_the_close_is_never_posted():
+    state = idle_state()
+    timer = idle_timer(state, IDLE_START + timedelta(minutes=15), warning_seconds=900, close_seconds=900)
+    assert timer == IdleTimer("close", timedelta(0))
+
+
+def test_an_idle_timer_needs_an_idle_period():
+    with pytest.raises(ValueError):
+        idle_timer(PullRequestState(), IDLE_START, warning_seconds=600, close_seconds=900)
+
+
+def test_activity_starts_a_new_idle_period_with_a_new_warning():
+    state = idle_state(warned=True)
+    later = IDLE_START + timedelta(minutes=12)
+    start_idle(state, later)
+    assert state.idle_since == later and state.idle_warned is False
+    assert idle_timer(state, later, warning_seconds=600, close_seconds=900) == IdleTimer(
+        "warning", timedelta(minutes=10)
+    )
 
 
 def test_a_pending_head_equal_to_the_reviewed_one_is_no_review():

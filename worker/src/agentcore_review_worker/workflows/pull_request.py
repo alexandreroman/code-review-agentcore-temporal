@@ -3,9 +3,14 @@
 It handles metadata only (paths, SHAs, snapshot keys, findings); patches and file contents stay in the
 agents' child workflows. Continue-as-new happens between two rounds only, since it would terminate
 running children, and carries the pending push, fix requests and thread replies over.
+
+An idle pull request gets a warning comment, then is closed: a durable timer waits for the next deadline,
+counted from the start of the idle period kept in the state.
 """
 
 import asyncio
+import contextlib
+from datetime import timedelta
 
 from temporalio import workflow
 from temporalio.exceptions import ActivityError, ChildWorkflowError
@@ -83,6 +88,8 @@ class PullRequestWorkflow:
         # Signal-with-start delivers pr_updated before run() starts: the state must exist already.
         self._pr = input.pr
         self._state = input.state
+        self._idle_warning_seconds = input.idle_warning_seconds
+        self._idle_close_seconds = input.idle_close_seconds
         self._closed: PrClosed | None = None
         self._reviewing_sha: str | None = None
         self._phase = ""  # the memo's state, restored once a reply is answered
@@ -90,12 +97,18 @@ class PullRequestWorkflow:
     @workflow.run
     async def run(self, input: PullRequestInput) -> PullRequestOutcome:
         self._memo("waiting for changes")
+        if self._state.idle_since is None:  # a state carried over from a version without the idle timer
+            lifecycle.start_idle(self._state, workflow.now())
         while True:
-            # Right after a round: moves to a newly deployed version, freeing old endpoints for make prune.
+            # After an action or an idle timer: moves to a newly deployed version, freeing old endpoints for
+            # make prune.
             await self._continue_as_new_if_needed()
-            await workflow.wait_condition(lambda: self._next() is not None)
-            await self._continue_as_new_if_needed()  # a deploy may have happened while waiting
             action = self._next()
+            if action is None:
+                outcome = await self._idle()
+                if outcome is not None:
+                    return outcome
+                continue
             if action == "close":
                 return await self._finish()
             if action == "review":
@@ -104,19 +117,24 @@ class PullRequestWorkflow:
                 await self._fix()
             else:
                 await self._reply()
+            # Time spent in an action is never idle: the countdown starts when it ends.
+            lifecycle.start_idle(self._state, workflow.now())
 
     @workflow.signal(name=SIGNAL_PR_UPDATED)
     def pr_updated(self, update: PrUpdated) -> None:
+        lifecycle.start_idle(self._state, workflow.now())
         if not lifecycle.record_head(self._state, update.head_sha, self._reviewing_sha):
             workflow.logger.info("head %s ignored (delivery %s)", update.head_sha, update.delivery_id)
 
     @workflow.signal(name=SIGNAL_FIX_REQUESTED)
     def fix_requested(self, request: FixRequested) -> None:
+        lifecycle.start_idle(self._state, workflow.now())
         if not lifecycle.record_fix_request(self._state, request):
             workflow.logger.info("fix request ignored: delivery %s already seen", request.delivery_id)
 
     @workflow.signal(name=SIGNAL_COMMENT_POSTED)
     def comment_posted(self, reply: CommentPosted) -> None:
+        lifecycle.start_idle(self._state, workflow.now())
         queue_full = len(self._state.pending_replies) >= lifecycle.MAX_PENDING_REPLIES
         if lifecycle.record_reply(self._state, reply):
             if queue_full:
@@ -149,8 +167,71 @@ class PullRequestWorkflow:
             return
         await workflow.wait_condition(workflow.all_handlers_finished)
         workflow.continue_as_new(
-            PullRequestInput(pr=self._pr, state=self._state),
+            PullRequestInput(
+                pr=self._pr,
+                state=self._state,
+                idle_warning_seconds=self._idle_warning_seconds,
+                idle_close_seconds=self._idle_close_seconds,
+            ),
             initial_versioning_behavior=workflow.ContinueAsNewVersioningBehavior.AUTO_UPGRADE,
+        )
+
+    # --- idle pull request ---
+
+    async def _idle(self) -> PullRequestOutcome | None:
+        """Wait for the next action until the idle timer's next deadline; once due, warn, or close.
+
+        None when the loop goes on: an action is pending, a deadline has come, or the close failed.
+        """
+        timer = lifecycle.idle_timer(self._state, workflow.now(), self._idle_warning_seconds, self._idle_close_seconds)
+        if timer.left > timedelta(0):
+            # A timeout means the deadline has passed: the next turn of the loop acts on it.
+            with contextlib.suppress(TimeoutError):
+                await workflow.wait_condition(
+                    lambda: self._next() is not None, timeout=timer.left, timeout_summary=f"idle {timer.step}"
+                )
+            return None
+        if timer.step == "warning":
+            await self._warn_idle()
+            return None
+        return await self._close_idle()
+
+    async def _warn_idle(self) -> None:
+        state = self._state
+        assert state.idle_since is not None  # set by run() before the first wait
+        # Marked before the comment: a signal during the post starts a new period, which gets its own warning.
+        state.idle_warned = True
+        marker = markers.idle_warning_marker(self._id, state.idle_since)
+        body = publishing.idle_warning_comment(self._idle_warning_seconds, self._idle_close_seconds, marker)
+        try:
+            await self._post_comment(body, marker)
+        except ActivityError as error:
+            workflow.logger.warning("idle warning not posted: %s", error.cause or error)
+
+    async def _close_idle(self) -> PullRequestOutcome | None:
+        """Close the idle pull request and end; None when GitHub refused, which starts a new idle period."""
+        state = self._state
+        assert state.idle_since is not None  # set by run() before the first wait
+        marker = markers.idle_close_marker(self._id, state.idle_since)
+        try:
+            await workflow.execute_activity("close_pull_request", self._pr, **policies.CLOSE_PULL_REQUEST)
+        except ActivityError as error:
+            workflow.logger.error("pull request not closed for inactivity: %s", error.cause or error)
+            lifecycle.start_idle(state, workflow.now())
+            return None
+        # GitHub's closed webhook signals this run while it ends, or finds none: harmless either way.
+        self._memo("closed for inactivity")
+        try:
+            await self._post_comment(publishing.idle_close_comment(self._idle_close_seconds, marker), marker)
+        except ActivityError as error:
+            workflow.logger.warning("inactivity comment not posted: %s", error.cause or error)
+        await self._delete_snapshots()
+        return PullRequestOutcome(
+            merged=False,
+            closed_by=None,
+            open_findings=state.open_findings,
+            rounds=state.round,
+            closed_for_inactivity=True,
         )
 
     # --- review round ---
@@ -516,13 +597,16 @@ class PullRequestWorkflow:
                 await self._post_comment(body, marker)
             except ActivityError as error:
                 workflow.logger.warning("closing comment not posted: %s", error.cause or error)
-        try:
-            await workflow.execute_activity("delete_snapshots", self._pr, result_type=int, **policies.DELETE_SNAPSHOTS)
-        except ActivityError as error:
-            workflow.logger.warning("snapshots not deleted (the S3 lifecycle rule will): %s", error.cause or error)
+        await self._delete_snapshots()
         return PullRequestOutcome(
             merged=closed.merged,
             closed_by=closed.closed_by,
             open_findings=self._state.open_findings,
             rounds=self._state.round,
         )
+
+    async def _delete_snapshots(self) -> None:
+        try:
+            await workflow.execute_activity("delete_snapshots", self._pr, result_type=int, **policies.DELETE_SNAPSHOTS)
+        except ActivityError as error:
+            workflow.logger.warning("snapshots not deleted (the S3 lifecycle rule will): %s", error.cause or error)

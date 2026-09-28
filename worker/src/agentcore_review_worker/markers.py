@@ -1,6 +1,7 @@
 """Hidden markers that make GitHub side effects idempotent and findings traceable."""
 
 import re
+from datetime import datetime
 
 _FINDING = re.compile(r"<!-- finding:(F-\d+) -->")
 _REPLY = re.compile(r"<!-- reply:\S+:\d+ -->")
@@ -26,6 +27,16 @@ def reply_marker(workflow_id: str, comment_id: int) -> str:
 def fix_refusal_marker(workflow_id: str, delivery_id: str) -> str:
     """Marks the bot's refusal of one /fix request, keyed on its webhook delivery: posted once, whatever the retries."""
     return f"<!-- fix-refused:{workflow_id}:{delivery_id} -->"
+
+
+def idle_warning_marker(workflow_id: str, idle_since: datetime) -> str:
+    """Marks the warning of one idle period, keyed on its start: posted once, whatever the retries or replays."""
+    return f"<!-- idle-warning:{workflow_id}:{int(idle_since.timestamp())} -->"
+
+
+def idle_close_marker(workflow_id: str, idle_since: datetime) -> str:
+    """Marks the comment of a close for inactivity; a reopened pull request's next close gets its own."""
+    return f"<!-- idle-close:{workflow_id}:{int(idle_since.timestamp())} -->"
 
 
 def has_reply_marker(text: str) -> bool:

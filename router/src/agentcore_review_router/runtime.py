@@ -35,6 +35,8 @@ class Settings:
     task_queue: str
     dev_task_queue: str
     dev_branch_prefix: str
+    pr_idle_warning_seconds: int
+    pr_idle_close_seconds: int
     runtime_arn: str  # empty until the first make deploy
     github_app_secret_arn: str
     temporal_cert_secret_arn: str
@@ -58,6 +60,8 @@ def settings() -> Settings:
         task_queue=env["TASK_QUEUE"],
         dev_task_queue=env["DEV_TASK_QUEUE"],
         dev_branch_prefix=env["DEV_BRANCH_PREFIX"],
+        pr_idle_warning_seconds=int(env["PR_IDLE_WARNING_SECONDS"]),
+        pr_idle_close_seconds=int(env["PR_IDLE_CLOSE_SECONDS"]),
         runtime_arn=env.get("AGENTCORE_RUNTIME_ARN", ""),
         github_app_secret_arn=env["GITHUB_APP_SECRET_ARN"],
         temporal_cert_secret_arn=env["TEMPORAL_CERT_SECRET_ARN"],

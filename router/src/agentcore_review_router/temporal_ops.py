@@ -18,12 +18,20 @@ from .routing import StartOrSignal
 RPC_TIMEOUT = timedelta(seconds=5)
 
 
-async def start_or_signal(client: Client, action: StartOrSignal) -> bool:
-    """SignalWithStart(pr_updated). False when the reuse policy refuses a new run (a late event on a finished PR)."""
+async def start_or_signal(
+    client: Client, action: StartOrSignal, idle_warning_seconds: int, idle_close_seconds: int
+) -> bool:
+    """SignalWithStart(pr_updated). False when the reuse policy refuses a new run (a late event on a finished PR).
+
+    The idle durations only reach a new run: a running workflow keeps those it started with.
+    """
+    workflow_input = PullRequestInput(
+        pr=action.pr, idle_warning_seconds=idle_warning_seconds, idle_close_seconds=idle_close_seconds
+    )
     try:
         await client.start_workflow(
             PULL_REQUEST_WORKFLOW,
-            PullRequestInput(pr=action.pr),
+            workflow_input,
             id=action.workflow_id,
             task_queue=action.task_queue,
             id_reuse_policy=action.reuse_policy,
@@ -43,7 +51,7 @@ async def start_or_signal(client: Client, action: StartOrSignal) -> bool:
 
 
 async def signal(client: Client, workflow_id: str, name: str, payload: BaseModel) -> bool:
-    """Plain signal to the latest run. False when no workflow runs under this ID."""
+    """Plain signal to the latest run. False when no workflow runs under this ID, or its latest run has ended."""
     try:
         await client.get_workflow_handle(workflow_id).signal(name, payload, rpc_timeout=RPC_TIMEOUT)
     except RPCError as error:

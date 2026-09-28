@@ -1,6 +1,7 @@
 """Identifiers, signals and models exchanged between the router and the worker."""
 
 from dataclasses import dataclass
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, Field
@@ -152,8 +153,16 @@ class PullRequestState(BaseModel):
     fix_count: int = 0
     discussion_count: int = 0
     next_finding_number: int = 1
+    # Start of the current idle period (the end of the last action, or the last signal) and whether its warning
+    # was posted: kept in the state, so a continue-as-new does not restart the countdown.
+    idle_since: datetime | None = None
+    idle_warned: bool = False
 
 
 class PullRequestInput(BaseModel):
     pr: PrRef
     state: PullRequestState = Field(default_factory=PullRequestState)
+    # Seconds without activity before the warning comment, then before the pull request is closed. The router
+    # sets them from its settings; the defaults apply to inputs written before they existed.
+    idle_warning_seconds: int = 600
+    idle_close_seconds: int = 900

@@ -22,6 +22,10 @@ conference demo that makes durable execution visible on stage.
   it names. The bot fixes nothing and explains why when an argument is
   not a finding ID, a named finding is not open, or a thread's `/fix`
   names another finding.
+- **Durable timers**: a pull request idle for 10 minutes gets a warning
+  comment, then the bot closes it 5 minutes later; the countdown survives
+  worker restarts and deploys (`PR_IDLE_WARNING_SECONDS`,
+  `PR_IDLE_CLOSE_SECONDS`).
 
 [DEMO.md](DEMO.md) is the timed run-through of the talk, with its
 checklist and plan B.
@@ -47,7 +51,8 @@ graph LR
    sessions.
 2. One long-lived **`PullRequestWorkflow`** per pull request runs on
    **Temporal Cloud** (mTLS). Each new head commit starts a review round;
-   the workflow ends when the pull request is merged or closed.
+   the workflow ends when the pull request is merged or closed, or when it
+   closes an idle pull request itself.
 3. A round snapshots the repository into **S3**, then runs three
    **reviewer agents** (Strands Agents with Claude, through the Anthropic
    API) as child workflows. They read the diff and navigate the snapshot

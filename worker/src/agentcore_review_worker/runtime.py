@@ -47,6 +47,7 @@ def activities(settings: AppSettings, identity: str) -> list[Callable]:
         reviews.read_thread,
         reviews.post_thread_reply,
         reviews.post_pr_comment,
+        reviews.close_pull_request,
         commits.commit_changes,
         tools.glob_tool,
         tools.grep_tool,

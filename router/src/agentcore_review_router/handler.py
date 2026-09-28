@@ -93,7 +93,10 @@ async def _act(
     client = await runtime.temporal_client()
     if isinstance(action, StartOrSignal):
         fields["task_queue"] = action.task_queue
-        if await temporal_ops.start_or_signal(client, action):
+        settings = runtime.settings()
+        if await temporal_ops.start_or_signal(
+            client, action, settings.pr_idle_warning_seconds, settings.pr_idle_close_seconds
+        ):
             return 202, f"signal-with-start {action.workflow_id} on {action.task_queue}"
         return 204, "pull request workflow already finished"
     if isinstance(action, SendSignal):

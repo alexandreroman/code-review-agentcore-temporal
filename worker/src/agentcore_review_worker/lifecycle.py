@@ -4,6 +4,7 @@ PullRequestWorkflow calls these from workflow code, so they stay deterministic a
 """
 
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta
 from typing import Literal
 
 from agentcore_review_shared.contract import (
@@ -54,6 +55,38 @@ def next_action(state: PullRequestState, closed: bool) -> Action | None:
     if state.pending_replies:
         return "reply"
     return None
+
+
+IdleStep = Literal["warning", "close"]
+
+
+@dataclass(frozen=True)
+class IdleTimer:
+    """The idle timer's next step, and the time left until it is due (zero or less: due now)."""
+
+    step: IdleStep
+    left: timedelta
+
+
+def start_idle(state: PullRequestState, now: datetime) -> None:
+    """Any activity starts a new idle period: a new countdown, and a new warning to come."""
+    state.idle_since = now
+    state.idle_warned = False
+
+
+def idle_timer(state: PullRequestState, now: datetime, warning_seconds: int, close_seconds: int) -> IdleTimer:
+    """Where the idle period stands: the warning comes first, once, then the close.
+
+    Both deadlines count from idle_since, so a continue-as-new or a late worker never pushes them back.
+    Past the close deadline, the pull request closes without a warning that would announce minutes left.
+    """
+    if state.idle_since is None:
+        raise ValueError("no idle period started: call start_idle first")
+    idle = now - state.idle_since
+    close_left = timedelta(seconds=close_seconds) - idle
+    if state.idle_warned or close_left <= timedelta(0):
+        return IdleTimer("close", close_left)
+    return IdleTimer("warning", timedelta(seconds=warning_seconds) - idle)
 
 
 def record_head(state: PullRequestState, head_sha: str, reviewing_sha: str | None = None) -> bool:

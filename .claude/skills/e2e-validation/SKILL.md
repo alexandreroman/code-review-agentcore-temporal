@@ -50,6 +50,12 @@ defects found (E2E-04), a question in a finding's thread (E2E-04b), `/fix`
   `make kill-sessions`.
 - When a precondition needs the human (expired AWS SSO session, `gh`
   login, nothing deployed), stop and tell them the command to run.
+- Idle pull requests: the bot warns on a PR idle for
+  `PR_IDLE_WARNING_SECONDS` (10 minutes by default) and closes it at
+  `PR_IDLE_CLOSE_SECONDS`. The steps keep every PR busy, a minute of idle
+  time at most, and E2E-06 and E2E-06b check that no idle comment was
+  posted. A PR left open after an interrupted run is closed by the bot,
+  but its timers wake AgentCore workers: the Setup reset closes it first.
 
 ## P-0 — Preconditions (timeout 180000)
 
@@ -81,6 +87,7 @@ save RUNTIME_ID "$(jq -r '.runtime_id.value // ""' <<<"$outputs")"
 save BUCKET "$(jq -r '.snapshots_bucket.value // ""' <<<"$outputs")"
 save ROUTER_LOG_GROUP "$(jq -r '.router_log_group.value // ""' <<<"$outputs")"
 check "a deployed build (make up)" test -n "$BUILD"
+check "PR_IDLE_WARNING_SECONDS of at least 300 (the steps' idle margin)" test "$PR_IDLE_WARNING" -ge 300
 version=$(tcli worker deployment describe-version --deployment-name "$DEPLOYMENT" --build-id "$BUILD" -o json \
   2>/dev/null || echo '{}')
 check "$BUILD is the current version and serves $TASK_QUEUE (make deploy)" jq -e --arg q "$TASK_QUEUE" \
@@ -412,18 +419,20 @@ threads=$(review_threads "$PR")
 keys=$(aws s3api list-objects-v2 --bucket "$BUCKET" --prefix "$(lower "$OWNER")/$(lower "$DEMO_REPO")/pr-$PR/" \
   --query 'length(Contents || `[]`)' --output text)
 login=$(gh api user --jq .login)
+idle=$(bot_comments "$PR" "<!-- idle-")
 echo "outcome: $outcome"
 echo "threads: $threads"
 echo "snapshot objects left: $keys"
+echo "idle comments: $idle"
 if jq -e --arg login "$login" --argjson threads "$threads" '
     (.open_findings | map(.id)) as $open
     | .merged and ((.closed_by // "") | ascii_downcase) == ($login | ascii_downcase) and .rounds >= 2
       and ([.open_findings[] | select(.severity == "critical" or .severity == "high")] | length) == 0
       and all($threads[]; .resolved == (.id as $i | $open | index($i) | not))' <<<"$outcome" >/dev/null \
-  && [[ "$keys" == 0 ]]; then
+  && [[ "$keys" == 0 && "$idle" == 0 ]]; then
   result E2E-06 ok "merged by $login after $(jq -r .rounds <<<"$outcome") rounds, snapshots deleted"
 else
-  result E2E-06 FAIL "outcome $outcome, $keys snapshot object(s) left"
+  result E2E-06 FAIL "outcome $outcome, $keys snapshot object(s) left, $idle idle comment(s)"
   collect "$WF"
 fi
 STEP
@@ -433,7 +442,8 @@ Success: `gh pr merge` (no `--admin`) succeeds; the workflow completes; its
 `PullRequestOutcome` says merged, by the `gh` user, at least 2 rounds, no
 open `critical`/`high` finding; every thread of a finding still open is
 unresolved and every other thread resolved; the PR's snapshot prefix
-`<owner>/<repo>/pr-<n>/` in the snapshots bucket is empty.
+`<owner>/<repo>/pr-<n>/` in the snapshots bucket is empty; no bot comment
+carries an `<!-- idle-warning:` or `<!-- idle-close:` marker.
 
 **End of the smoke mode**: go to the report.
 
@@ -493,24 +503,27 @@ file=$(fetch_history "$WF")
 save LAST_PROD_AT "$(jqe 'include "e2e"; .events[-1].eventTime | ts | floor' "$file")"
 outcome=$(jqe -c 'include "e2e"; result_with(["merged", "rounds"])' "$file")
 closing=$(bot_comments "$PR" "<!-- closing:$WF -->")
+idle=$(bot_comments "$PR" "<!-- idle-")
 login=$(gh api user --jq .login)
 echo "outcome: $outcome"
 echo "closing comments: $closing"
+echo "idle comments: $idle"
 if jq -e --arg login "$login" '.merged and ((.closed_by // "") | ascii_downcase) == ($login | ascii_downcase)
     and ([.open_findings[] | select(.severity == "critical" or .severity == "high")] | length) >= 1' \
-    <<<"$outcome" >/dev/null && [[ "$closing" == 1 ]]; then
+    <<<"$outcome" >/dev/null && [[ "$closing" == 1 && "$idle" == 0 ]]; then
   open=$(jq '.open_findings | length' <<<"$outcome")
   result E2E-06b ok "bypass by $login traced with $open open finding(s), one closing comment"
 else
-  fail "outcome $outcome, $closing closing comment(s)"
+  fail "outcome $outcome, $closing closing comment(s), $idle idle comment(s)"
 fi
 STEP
 ```
 
 Success: the admin merge succeeds; the outcome records the merge by the
 `gh` user with at least one open blocking finding; exactly one bot comment
-carries `<!-- closing:<workflow id> -->`. The completion time is the start
-of the E2E-09 clock: no production workflow runs after it.
+carries `<!-- closing:<workflow id> -->`, and none an idle marker. The
+completion time is the start of the E2E-09 clock: no production workflow
+runs after it, so no idle timer is left to wake a worker.
 
 ### E2E-07 — Dev mode (timeout 600000)
 
@@ -675,6 +688,7 @@ drain by themselves, and the next run's Setup resets the demo repository
 | E2E-04 misses a defect     | Printed findings: line drift or a real miss  |
 | No fix commit              | Fixer history; "branch changed" comment      |
 | No answer in the thread    | `router.log` for the reply; discussion child |
+| Idle comment on a PR       | A step stalled: the history's `idle` timers  |
 
 A delivery that never reached the router appears in the app's settings
 (Advanced, Recent Deliveries); ask the human to redeliver it there.

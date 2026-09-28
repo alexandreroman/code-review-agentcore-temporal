@@ -12,6 +12,8 @@ from agentcore_review_worker.publishing import (
     closing_comment,
     comment_body,
     failed_reply,
+    idle_close_comment,
+    idle_warning_comment,
     no_longer_open_reply,
     not_open_fix_comment,
     off_thread_fix_reply,
@@ -148,6 +150,23 @@ def test_closing_comment_calls_out_a_bypass():
 def test_closing_comment_without_blocking_findings():
     text = closing_comment(None, [finding("F-002", severity="low")], "<!-- m -->")
     assert text == "Merged with 1 open finding: F-002 (low).\n\n<!-- m -->"
+
+
+def test_the_idle_warning_announces_the_time_left_before_the_close():
+    text = idle_warning_comment(600, 900, "<!-- m -->")
+    assert text == (
+        "No activity for 10 minutes: this pull request will be closed in 5 minutes. "
+        "Push a commit to keep it open.\n\n<!-- m -->"
+    )
+
+
+def test_idle_durations_that_are_not_whole_minutes_read_in_seconds():
+    text = idle_warning_comment(90, 150, "<!-- m -->")
+    assert text.startswith("No activity for 90 seconds: this pull request will be closed in 1 minute.")
+
+
+def test_the_idle_close_comment_gives_the_idle_duration():
+    assert idle_close_comment(900, "<!-- m -->") == "Closed after 15 minutes without activity.\n\n<!-- m -->"
 
 
 def test_a_fix_refused_in_a_thread_points_to_both_ways_of_fixing():

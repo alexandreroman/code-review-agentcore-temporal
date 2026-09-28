@@ -213,3 +213,4 @@ class PullRequestOutcome(BaseModel):
     closed_by: str | None
     open_findings: list[Finding]
     rounds: int
+    closed_for_inactivity: bool = False  # closed by the workflow itself: closed_by is then None
