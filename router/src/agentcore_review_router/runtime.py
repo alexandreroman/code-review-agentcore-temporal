@@ -38,7 +38,7 @@ class Settings:
     pr_idle_warning_seconds: int
     pr_idle_close_seconds: int
     runtime_arn: str  # empty until the first make deploy
-    github_app_secret_arn: str
+    github_app_secret_id: str
     temporal_cert_secret_arn: str
     function_name: str
 
@@ -63,7 +63,7 @@ def settings() -> Settings:
         pr_idle_warning_seconds=int(env["PR_IDLE_WARNING_SECONDS"]),
         pr_idle_close_seconds=int(env["PR_IDLE_CLOSE_SECONDS"]),
         runtime_arn=env.get("AGENTCORE_RUNTIME_ARN", ""),
-        github_app_secret_arn=env["GITHUB_APP_SECRET_ARN"],
+        github_app_secret_id=env["GITHUB_APP_SECRET_ID"],
         temporal_cert_secret_arn=env["TEMPORAL_CERT_SECRET_ARN"],
         function_name=env["AWS_LAMBDA_FUNCTION_NAME"],
     )
@@ -74,13 +74,13 @@ def _secretsmanager() -> Any:
     return boto3.client("secretsmanager")
 
 
-def _secret(arn: str) -> str:
-    return _secretsmanager().get_secret_value(SecretId=arn)["SecretString"]
+def _secret(secret_id: str) -> str:
+    return _secretsmanager().get_secret_value(SecretId=secret_id)["SecretString"]
 
 
 @cache
 def github_app_secret() -> GitHubAppSecret:
-    return GitHubAppSecret.model_validate_json(_secret(settings().github_app_secret_arn))
+    return GitHubAppSecret.model_validate_json(_secret(settings().github_app_secret_id))
 
 
 def clear_github_app_secret() -> None:

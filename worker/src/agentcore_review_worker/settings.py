@@ -1,6 +1,6 @@
 """Worker settings, read from the environment: AgentCore runtime variables, or the local .env via make.
 
-Settings hold where secrets live (ARNs on AgentCore, names in dev), never their values.
+Settings hold where secrets live (Secrets Manager ARNs or names), never their values.
 """
 
 from collections.abc import Mapping
@@ -41,7 +41,7 @@ def agentcore_settings(env: Mapping[str, str]) -> WorkerSettings:
         ),
         app=_app_settings(
             env,
-            github_app_secret=env["GITHUB_APP_SECRET_ARN"],
+            github_app_secret=env["GITHUB_APP_SECRET_ID"],
             anthropic_secret=env["ANTHROPIC_SECRET_ARN"],
         ),
     )

@@ -39,22 +39,6 @@ resource "aws_iam_role_policy" "agentcore" {
         ]
         Resource = "*"
       },
-      { Effect = "Allow", Action = ["xray:PutTraceSegments", "xray:PutTelemetryRecords"], Resource = "*" },
-      {
-        Effect    = "Allow"
-        Action    = ["cloudwatch:PutMetricData"]
-        Resource  = "*"
-        Condition = { StringEquals = { "cloudwatch:namespace" = "bedrock-agentcore" } }
-      },
-      {
-        Effect = "Allow"
-        Action = [
-          "bedrock-agentcore:GetWorkloadAccessToken",
-          "bedrock-agentcore:GetWorkloadAccessTokenForJWT",
-          "bedrock-agentcore:GetWorkloadAccessTokenForUserId",
-        ]
-        Resource = "*"
-      },
       {
         Effect = "Allow"
         Action = ["secretsmanager:GetSecretValue"]
@@ -101,11 +85,16 @@ resource "aws_bedrockagentcore_agent_runtime" "worker" {
     TEMPORAL_BUILD_ID        = var.build_id
     TEMPORAL_CERT_SECRET_ARN = aws_secretsmanager_secret.worker_cert.arn
     ANTHROPIC_SECRET_ARN     = aws_secretsmanager_secret.anthropic.arn
-    GITHUB_APP_SECRET_ARN    = local.github_app_secret_name
+    GITHUB_APP_SECRET_ID     = local.github_app_secret_name
     SNAPSHOTS_BUCKET         = aws_s3_bucket.snapshots.bucket
     ANTHROPIC_MODEL          = var.anthropic_model
     ANTHROPIC_EFFORT         = var.anthropic_effort
     MAX_PARALLEL_AGENTS      = tostring(var.max_parallel_agents)
+
+    # Transitional: worker images older than GITHUB_APP_SECRET_ID read this name, and make up applies the stack with
+    # the deployed build (moving its endpoint to the new runtime version) before make deploy replaces it. Remove it
+    # once a build that reads GITHUB_APP_SECRET_ID is current: retained endpoints keep their own runtime version.
+    GITHUB_APP_SECRET_ARN = local.github_app_secret_name
   }
 
   depends_on = [aws_iam_role_policy.agentcore]

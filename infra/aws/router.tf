@@ -78,7 +78,7 @@ resource "aws_lambda_function" "router" {
 
   environment {
     variables = {
-      GITHUB_APP_SECRET_ARN    = local.github_app_secret_name
+      GITHUB_APP_SECRET_ID     = local.github_app_secret_name
       TEMPORAL_CERT_SECRET_ARN = aws_secretsmanager_secret.router_cert.arn
       TEMPORAL_ADDRESS         = var.temporal_address
       TEMPORAL_NAMESPACE       = var.temporal_namespace

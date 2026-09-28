@@ -17,13 +17,6 @@ BUILDS=$(jq -r '.endpoints.value // {} | keys[]' <<<"$(aws_outputs)")
 
 scripts/kill-sessions.sh || true
 
-# `tofu destroy` ignores the removed block of secrets.tf: a stack last applied
-# while it still managed the GitHub App secret would delete it. Forget the
-# secret first, as the next apply would.
-if tofu -chdir=infra/aws state list aws_secretsmanager_secret.github_app >/dev/null 2>&1; then
-  tofu -chdir=infra/aws state rm aws_secretsmanager_secret.github_app >/dev/null
-fi
-
 echo "Destroying the AWS resources. The GitHub App credentials stay in Secrets Manager: the next make up reuses the" \
   "same app (and, with a custom domain, the same webhook URL). The demo repository and the state bucket stay."
 
