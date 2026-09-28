@@ -90,11 +90,6 @@ resource "aws_bedrockagentcore_agent_runtime" "worker" {
     ANTHROPIC_MODEL          = var.anthropic_model
     ANTHROPIC_EFFORT         = var.anthropic_effort
     MAX_PARALLEL_AGENTS      = tostring(var.max_parallel_agents)
-
-    # Transitional: worker images older than GITHUB_APP_SECRET_ID read this name, and make up applies the stack with
-    # the deployed build (moving its endpoint to the new runtime version) before make deploy replaces it. Remove it
-    # once a build that reads GITHUB_APP_SECRET_ID is current: retained endpoints keep their own runtime version.
-    GITHUB_APP_SECRET_ARN = local.github_app_secret_name
   }
 
   depends_on = [aws_iam_role_policy.agentcore]
