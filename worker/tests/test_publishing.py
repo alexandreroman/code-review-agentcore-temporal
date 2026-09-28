@@ -178,7 +178,9 @@ def test_idle_durations_that_are_not_whole_minutes_read_in_seconds():
 
 
 def test_the_idle_close_comment_gives_the_idle_duration():
-    assert idle_close_comment(900, "<!-- m -->") == "Closed after 15 minutes without activity.\n\n<!-- m -->"
+    assert idle_close_comment(900, "<!-- m -->") == (
+        "Closed after 15 minutes without activity. Reopen it for a new review.\n\n<!-- m -->"
+    )
 
 
 def test_a_fix_refused_in_a_thread_points_to_both_ways_of_fixing():

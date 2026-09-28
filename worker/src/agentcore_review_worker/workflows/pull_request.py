@@ -6,6 +6,9 @@ running children, and carries the pending push, fix requests and thread replies 
 
 An idle pull request gets a warning comment, then is closed: a durable timer waits for the next deadline,
 counted from the start of the idle period kept in the state.
+
+A new run under the same workflow ID (a reopened pull request, or one whose earlier run failed) continues the
+numbering the earlier run left on GitHub, then closes that run's open finding threads.
 """
 
 import asyncio
@@ -50,6 +53,8 @@ with workflow.unsafe.imports_passed_through():
         ListFilesInput,
         PublishInput,
         PullRequestOutcome,
+        RecoveredCounters,
+        RecoveryInput,
         ResolveInput,
         ReviewContent,
         ReviewerInput,
@@ -96,6 +101,9 @@ class PullRequestWorkflow:
 
     @workflow.run
     async def run(self, input: PullRequestInput) -> PullRequestOutcome:
+        # A started run has an empty state; a continued one carries its counters over, and must not recover them.
+        if workflow.info().continued_run_id is None:
+            await self._take_over_earlier_run()
         self._memo("waiting for changes")
         if self._state.idle_since is None:  # a state carried over from a version without the idle timer
             lifecycle.start_idle(self._state, workflow.now())
@@ -175,6 +183,62 @@ class PullRequestWorkflow:
             ),
             initial_versioning_behavior=workflow.ContinueAsNewVersioningBehavior.AUTO_UPGRADE,
         )
+
+    async def _take_over_earlier_run(self) -> None:
+        """Continue the numbering an earlier run of this workflow ID left on GitHub, then close its open threads.
+
+        A reopened pull request, or one whose earlier run failed or was terminated, starts a new run with an empty
+        state: numbering from 1 again would collide with the earlier run's round markers, finding IDs and Review-Fix
+        trailers. A check external ID may still repeat, that of a round which published no review: UpdateCheck,
+        which looks it up on the round's head, then updates that round's check instead of creating one, which is
+        harmless. Child workflow IDs follow the counters; a discussion's may repeat a completed one, which Temporal
+        allows (ALLOW_DUPLICATE, the children's default reuse policy).
+        """
+        recovered = await self._recover_counters()
+        # Without an earlier round there is no earlier finding thread: a new pull request skips the closing.
+        if recovered is not None and recovered.last_round > 0:
+            await self._close_earlier_threads()
+
+    async def _recover_counters(self) -> RecoveredCounters | None:
+        """Apply the counters an earlier run left; None when they could not be read."""
+        try:
+            recovered: RecoveredCounters = await workflow.execute_activity(
+                "RecoverCounters",
+                RecoveryInput(pr=self._pr, workflow_id=self._id),
+                result_type=RecoveredCounters,
+                summary=summaries.pull_request(self._pr.number),
+                **policies.RECOVER_COUNTERS,
+            )
+        except ActivityError as error:
+            # Never blocks the pull request: its review goes on, numbered from 1 as on a new pull request.
+            workflow.logger.warning("earlier numbering not recovered: %s", error.cause or error)
+            return None
+        state = self._state
+        state.round = recovered.last_round
+        state.next_finding_number = recovered.last_finding_number + 1
+        state.fix_count = recovered.last_fix_number
+        workflow.logger.info(
+            "numbering continues after round %d, finding %d, fix %d",
+            recovered.last_round,
+            recovered.last_finding_number,
+            recovered.last_fix_number,
+        )
+        return recovered
+
+    async def _close_earlier_threads(self) -> None:
+        """Best effort: an earlier finding thread left open only misleads a reader, the new review goes on."""
+        try:
+            closed: int = await workflow.execute_activity(
+                "CloseEarlierThreads",
+                RecoveryInput(pr=self._pr, workflow_id=self._id),
+                result_type=int,
+                summary=summaries.pull_request(self._pr.number),
+                **policies.CLOSE_EARLIER_THREADS,
+            )
+        except ActivityError as error:
+            workflow.logger.warning("earlier finding threads not closed: %s", error.cause or error)
+            return
+        workflow.logger.info("%d earlier finding threads closed", closed)
 
     # --- idle pull request ---
 
@@ -655,7 +719,7 @@ class PullRequestWorkflow:
                 "DeleteSnapshots",
                 self._pr,
                 result_type=int,
-                summary=f"pr-{self._pr.number}",
+                summary=summaries.pull_request(self._pr.number),
                 **policies.DELETE_SNAPSHOTS,
             )
         except ActivityError as error:

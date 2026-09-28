@@ -103,7 +103,8 @@ Talking points:
   The workflow waits for a signal; its memo shows its state without any
   worker, and a minute later no worker listens on the queue. Its pending
   `idle warning` timer is durable: in 10 minutes, Temporal starts a worker
-  just to post the warning, and closes the PR 5 minutes later.
+  just to post the warning, and closes the PR 5 minutes later. Reopening
+  it starts a new review, numbered after the previous one.
 - **6:30, discussion.** Reply in the thread of the SQL injection finding:
   "Why is this a problem? The input is validated upstream." 👀 on the
   reply. A worker starts on demand; in Temporal UI, a `…-discussion-1`

@@ -25,7 +25,9 @@ conference demo that makes durable execution visible on stage.
 - **Durable timers**: a pull request idle for 10 minutes gets a warning
   comment, then the bot closes it 5 minutes later; the countdown survives
   worker restarts and deploys (`PR_IDLE_WARNING_SECONDS`,
-  `PR_IDLE_CLOSE_SECONDS`).
+  `PR_IDLE_CLOSE_SECONDS`). A reopened pull request gets a new review that
+  continues the numbering of rounds, findings and fixes; the previous
+  run's open threads are resolved with a note.
 
 [DEMO.md](DEMO.md) is the timed run-through of the talk, with its
 checklist and plan B.

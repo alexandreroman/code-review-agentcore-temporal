@@ -38,6 +38,11 @@ FETCH_DIFF = _options(30, FIVE_ATTEMPTS)
 UPDATE_CHECK = _options(15, FIVE_ATTEMPTS)
 PUBLISH_REVIEW = _options(30, FIVE_ATTEMPTS)
 RESOLVE_THREADS = _options(30, THREE_ATTEMPTS)
+# Reads only: short attempts, retried more, since a failure makes the numbering restart from 1.
+RECOVER_COUNTERS = _options(30, FIVE_ATTEMPTS)
+# A reply and a resolution per thread, a second apart: 10 minutes fit about 200 threads. A heartbeat per thread
+# (a GitHub call gives up after 20 s) ends a stuck attempt before the next one starts, which skips closed threads.
+CLOSE_EARLIER_THREADS = _options(600, THREE_ATTEMPTS, heartbeat=60)
 READ_THREAD = _options(15, FIVE_ATTEMPTS)
 REPLY_IN_THREAD = _options(15, FIVE_ATTEMPTS)
 POST_COMMENT = _options(15, FIVE_ATTEMPTS)

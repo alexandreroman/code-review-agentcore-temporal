@@ -67,6 +67,10 @@ def _list_while_fits(prefix: str, items: list[str]) -> str:
 # --- activities of the pull request workflow and its children ---
 
 
+def pull_request(number: int) -> str:
+    return f"pr-{number}"
+
+
 def list_files(since_sha: str | None) -> str:
     return f"since {short_sha(since_sha)}" if since_sha is not None else "whole PR"
 

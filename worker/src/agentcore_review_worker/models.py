@@ -174,6 +174,19 @@ class ResolveInput(BaseModel):
     finding_ids: list[str]
 
 
+class RecoveryInput(BaseModel):
+    pr: PrRef
+    workflow_id: str
+
+
+class RecoveredCounters(BaseModel):
+    """The numbers an earlier run of the same workflow ID left on the pull request; 0 when it left none."""
+
+    last_round: int
+    last_finding_number: int
+    last_fix_number: int
+
+
 class CommentInput(BaseModel):
     """A comment in the pull request's Conversation."""
 

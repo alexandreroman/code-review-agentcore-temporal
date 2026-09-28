@@ -169,6 +169,11 @@ def no_longer_open_reply(finding_id: str, marker: str) -> str:
     return f"{finding_id} is no longer open: nothing left to discuss here.\n\n{marker}"
 
 
+def superseded_reply(marker: str) -> str:
+    """Closes a finding thread of an earlier run: the new run's review takes over."""
+    return f"A new review run takes over this pull request: its new review replaces this finding.\n\n{marker}"
+
+
 def budget_reply(marker: str) -> str:
     return (
         f"I have answered {MAX_BOT_REPLIES_PER_THREAD} times in this thread: let's leave the rest to a human "
@@ -243,7 +248,7 @@ def idle_warning_comment(warning_seconds: int, close_seconds: int, marker: str) 
 
 
 def idle_close_comment(close_seconds: int, marker: str) -> str:
-    return f"Closed after {_duration(close_seconds)} without activity.\n\n{marker}"
+    return f"Closed after {_duration(close_seconds)} without activity. Reopen it for a new review.\n\n{marker}"
 
 
 def _repository_path(raw: str) -> str | None:
