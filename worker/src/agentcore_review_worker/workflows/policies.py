@@ -10,10 +10,11 @@ FIVE_ATTEMPTS = RetryPolicy(maximum_attempts=5)
 THREE_ATTEMPTS = RetryPolicy(maximum_attempts=3)
 SINGLE_ATTEMPT = RetryPolicy(maximum_attempts=1)
 
+# A call cut off by a killed session is retried on a new one: a short backoff keeps the review from stalling.
 MODEL_RETRY = RetryPolicy(
-    initial_interval=timedelta(seconds=2),
+    initial_interval=timedelta(seconds=1),
     backoff_coefficient=2.0,
-    maximum_interval=timedelta(seconds=60),
+    maximum_interval=timedelta(seconds=5),
     maximum_attempts=5,
     # Bedrock error codes that fail the same way on every attempt (the model factory types errors by their code).
     non_retryable_error_types=[
@@ -32,8 +33,9 @@ def _options(seconds: int, retry: RetryPolicy, heartbeat: int | None = None) -> 
     return options
 
 
-# Model calls: a 15 s heartbeat detects a killed session fast; history replays completed calls, never re-billed.
-MODEL_ACTIVITY = {**_options(180, MODEL_RETRY, heartbeat=15), "schedule_to_close_timeout": timedelta(minutes=6)}
+# Model calls: a 10 s heartbeat detects a killed session fast; history replays completed calls, never re-billed.
+# The plugin heartbeats every 5 s (half the timeout) and the SDK sends one per 8 s at most: a 2 s margin.
+MODEL_ACTIVITY = {**_options(180, MODEL_RETRY, heartbeat=10), "schedule_to_close_timeout": timedelta(minutes=6)}
 # A session's first tool call downloads and extracts the snapshot.
 TOOL_ACTIVITY = _options(60, FIVE_ATTEMPTS)
 

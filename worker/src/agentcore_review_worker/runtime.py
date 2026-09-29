@@ -10,7 +10,7 @@ from temporalio.contrib.opentelemetry import OpenTelemetryPlugin
 from temporalio.plugin import SimplePlugin
 from temporalio.runtime import Runtime, TelemetryConfig
 from temporalio.service import TLSConfig
-from temporalio.worker import Interceptor, Worker, WorkerDeploymentConfig
+from temporalio.worker import Interceptor, PollerBehaviorSimpleMaximum, Worker, WorkerDeploymentConfig
 
 from . import tracing
 from .activities import commits, github_api, reviews, threads, tools
@@ -28,6 +28,9 @@ from .workflows.synthesis import SynthesisWorkflow
 
 # Temporal UI's Workers page shows each worker's heartbeat: every 10 s instead of the SDK's 60 s keeps it current.
 WORKER_HEARTBEAT_INTERVAL = timedelta(seconds=10)
+# An activity poll still open when /kill stops a session can receive a task nobody runs, lost for a heartbeat
+# timeout: two polls (the SDK's default is 5) keep that loss small and still dispatch parallel tool calls.
+ACTIVITY_TASK_POLLERS = PollerBehaviorSimpleMaximum(maximum=2)
 
 WORKFLOWS: list[type] = [
     PingWorkflow,
@@ -121,4 +124,5 @@ def build_worker(
         identity=identity,
         deployment_config=deployment,
         graceful_shutdown_timeout=graceful_shutdown_timeout,
+        activity_task_poller_behavior=ACTIVITY_TASK_POLLERS,
     )
