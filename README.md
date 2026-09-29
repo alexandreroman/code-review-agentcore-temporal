@@ -81,6 +81,13 @@ session from the workflow history.
   round reviews the fix alone, reporting only a critical or high problem
   it introduces, and turns the `AI Review` check green.
 
+<p align="center">
+  <img src="assets/github-pr.png" width="600"
+    alt="The demo pull request on GitHub: the AI Review round 1 summary
+    blocks the merge on two findings, and the S-01 SQL injection finding
+    sits as a comment on the lines it concerns.">
+</p>
+
 [DEMO.md](DEMO.md) is the timed run-through of a live demo, with its
 checklist and recovery actions.
 
@@ -114,6 +121,12 @@ checklist and recovery actions.
 4. Temporal Cloud starts **workers on AgentCore** only when a task waits:
    nothing runs between two events.
 
+![The timeline of a PullRequestWorkflow in Temporal UI: round 1 with its
+three reviewers and a PublishReview of 6 findings, a reply in the S-01
+thread, a /fix, then round 2 that resolves the findings and turns the check
+green, while the idle warning timer keeps
+running.](assets/github-pr-workflow.png)
+
 ## How the project uses the integration
 
 1. **One worker per session.** The AgentCore entry point
@@ -138,6 +151,10 @@ checklist and recovery actions.
    Claude call on Bedrock as an activity, and the `Glob`, `Grep` and
    `Read` tools are activities too. Temporal owns the retries: the Bedrock
    client makes a single attempt per activity.
+
+   ![A ReviewerWorkflow in Temporal UI, pinned to its build: FetchDiff,
+   then invoke_model calls of the performance reviewer around the Glob
+   and Read tool activities they asked for.](assets/strands-workflow.png)
 5. **No state tied to a session.** The pre-release binds no worker to a
    session, so nothing relies on one: the workflow history holds the
    progress and S3 the repository snapshots, which a new session copies
