@@ -7,12 +7,7 @@ from agentcore_review_worker.models import (
     SynthesisInput,
     ThreadComment,
 )
-from agentcore_review_worker.prompts import (
-    discussion_prompt,
-    fixer_prompt,
-    reviewer_prompt,
-    synthesis_prompt,
-)
+from agentcore_review_worker.prompts import discussion_prompt, reviewer_prompt, synthesis_prompt
 
 PATH = "src/main/java/com/example/orders/OrderRepository.java"
 PATCHES = BatchPatches(
@@ -41,11 +36,15 @@ def test_reviewers_share_everything_before_their_focus():
     assert len({p[2]["text"] for p in prompts.values()}) == 3
 
 
-def test_the_diff_comes_before_the_focus():
-    shared, _, focus = reviewer_prompt(Category.PERFORMANCE, PATCHES, [], [])
-    assert "+ name +" in shared["text"] and "pom.xml" in shared["text"]
+def test_the_focus_stays_out_of_the_shared_prefix():
+    shared, _, _ = reviewer_prompt(Category.PERFORMANCE, PATCHES, [], [])
     assert "performance" not in shared["text"].lower()
-    assert "performance" in focus["text"]
+
+
+def test_a_patch_holding_a_code_fence_stays_inside_a_longer_one():
+    patch = FilePatch(path="README.md", status="modified", patch="@@ -1 +1,3 @@\n+```java\n+run();\n+```")
+    shared = reviewer_prompt(Category.SECURITY, BatchPatches(patches=[patch], tree=[]), [], [])[0]["text"]
+    assert "\n````diff\n@@ -1 +1,3 @@\n+```java\n+run();\n+```\n````" in shared
 
 
 def test_open_findings_appear_only_in_incremental_rounds():
@@ -91,7 +90,3 @@ def test_synthesis_prompt_lists_findings_without_comment_ids():
     text = synthesis_prompt(SynthesisInput(new_findings=new, resolved_ids=["P-03"], unavailable=["performance"]))
     assert '"S-01"' in text and "comment_id" not in text
     assert "P-03" in text and "performance" in text
-
-
-def test_fixer_prompt_carries_suggestions():
-    assert "Use parameters" in fixer_prompt([finding("S-01", suggestion="Use parameters")])

@@ -1,4 +1,4 @@
-"""SynthesisWorkflow: deduplicates and orders a round's findings and writes its summary (no tools)."""
+"""SynthesisWorkflow: deduplicates a round's findings and writes its summary (no tools)."""
 
 from temporalio import workflow
 

@@ -22,22 +22,26 @@ def closing_marker(workflow_id: str) -> str:
 
 
 def reply_marker(workflow_id: str, comment_id: int) -> str:
-    """Marks the bot's answer keyed on a comment (a reply, or a thread root): posted once, whatever the retries."""
+    """Marks the bot's answer to a comment (a reply, or a thread root), keyed on that comment."""
     return f"<!-- reply:{workflow_id}:{comment_id} -->"
 
 
 def fix_refusal_marker(workflow_id: str, delivery_id: str) -> str:
-    """Marks the bot's refusal of one /fix request, keyed on its webhook delivery: posted once, whatever the retries."""
+    """Marks the bot's refusal of one /fix request, keyed on its webhook delivery."""
     return f"<!-- fix-refused:{workflow_id}:{delivery_id} -->"
 
 
-def fix_failure_marker(workflow_id: str, fix_number: int) -> str:
-    """Marks the bot's note on a failed fix, keyed on its number: posted once, whatever the retries."""
-    return f"<!-- fix-failed:{workflow_id}:{fix_number} -->"
+def fix_failure_marker(workflow_id: str, first_run_id: str, fix_number: int) -> str:
+    """Marks the bot's note on a failed fix, keyed on the run and the fix number.
+
+    A new run may reuse a failed fix's number (only pushed fixes are recovered): the first run ID, stable across
+    continue-as-new, keeps its note apart from the earlier run's.
+    """
+    return f"<!-- fix-failed:{workflow_id}:{first_run_id}:{fix_number} -->"
 
 
 def idle_warning_marker(workflow_id: str, idle_since: datetime) -> str:
-    """Marks the warning of one idle period, keyed on its start: posted once, whatever the retries or replays."""
+    """Marks the warning of one idle period, keyed on its start."""
     return f"<!-- idle-warning:{workflow_id}:{int(idle_since.timestamp())} -->"
 
 
@@ -47,12 +51,12 @@ def idle_close_marker(workflow_id: str, idle_since: datetime) -> str:
 
 
 def reopen_marker(workflow_id: str, run_id: str) -> str:
-    """Marks the comment announcing the new review of a reopened pull request: once per run, whatever the retries."""
+    """Marks the comment announcing the new review of a reopened pull request, keyed on the run."""
     return f"<!-- reopen:{workflow_id}:{run_id} -->"
 
 
 def superseded_marker(workflow_id: str, thread_root_id: int) -> str:
-    """Marks the note that closes an earlier run's finding thread once a new run takes over: posted once."""
+    """Marks the note that closes an earlier run's finding thread once a new run takes over, keyed on the thread."""
     return f"<!-- superseded:{workflow_id}:{thread_root_id} -->"
 
 
@@ -82,8 +86,7 @@ def last_finding_numbers(texts: Iterable[str | None]) -> dict[Category, int]:
     for text in texts:
         for finding_id in extract_finding_ids(text):
             parsed = parse_finding_id(finding_id)
-            if parsed is None:
-                continue
+            assert parsed is not None  # _FINDING only matches finding IDs
             category, number = parsed
             last[category] = max(last.get(category, 0), number)
     return last

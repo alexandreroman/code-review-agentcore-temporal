@@ -4,7 +4,7 @@ description: >-
   End-to-end validation of Code Review with AgentCore x Temporal
   against the real AWS, Temporal Cloud and GitHub resources. Mode smoke
   (default, 8 to 10 min) after a change to the worker, the router or the
-  infrastructure; mode full (about 30 min) before a conference. It opens,
+  infrastructure; mode full (about 30 min) before a live demo. It opens,
   comments on and merges pull requests in the demo repository and spends
   Bedrock tokens.
 argument-hint: "[smoke|full]"
@@ -13,8 +13,8 @@ disable-model-invocation: true
 
 # E2E validation
 
-Mode requested: `$ARGUMENTS`. `full` selects the full mode (before a talk);
-anything else, or nothing, selects `smoke` (after a change).
+Mode requested: `$ARGUMENTS`. `full` selects the full mode (before a live
+demo); anything else, or nothing, selects `smoke` (after a change).
 
 | Mode    | Target       | Steps, in run order                                 |
 | ------- | ------------ | --------------------------------------------------- |
@@ -79,6 +79,7 @@ check "gh logged in (gh auth login)" gh auth status
 check "push access on $REPO" test "$(gh api "repos/$REPO" --jq .permissions.push)" = true
 check "Temporal Cloud reachable over mTLS" tcli workflow list --limit 1
 check "Reset demo workflow active" test "$(gh api "repos/$REPO/actions/workflows/reset-demo.yml" --jq .state)" = active
+make -s infra-init >/dev/null 2>&1
 outputs=$(tofu -chdir=infra/aws output -json 2>/dev/null || echo '{}')
 save BUILD "$(jq -r '.current_build.value // ""' <<<"$outputs")"
 save RUNTIME_ID "$(jq -r '.runtime_id.value // ""' <<<"$outputs")"
@@ -100,9 +101,8 @@ STEP
 ```
 
 Success: exit 0, no `MISSING` line. **Stop** on failure: report the missing
-items to the human (AWS: `aws sso login`, or for a Temporalite the two
-`access account` commands of the README's Getting started; `gh auth login`;
-nothing deployed: `make up`).
+items to the human (AWS: `aws sso login`; `gh auth login`; nothing
+deployed: `make up`).
 
 ## Setup — Reset and return to zero (timeout 600000)
 
@@ -283,8 +283,7 @@ as skipped): go to the report.
 
 ## E2E-04 — Planted defects found (timeout 120000)
 
-Requires E2E-03. In the full mode, the label becomes `E2E-04 run 2` and
-`E2E-04 run 3` (see below).
+Requires E2E-03.
 
 ```bash
 bash <<'STEP'
@@ -632,10 +631,10 @@ STEP
 ```
 
 Success: no runtime log event later than the last production activity +
-60 s (drain) + `AGENTCORE_IDLE_TIMEOUT` + 30 s, and no AgentCore poll later
-than the last activity + 60 s (drain) + 75 s (one long poll). The poller
-list of `DescribeTaskQueue` keeps sessions for about 5 minutes, so only the
-poll timestamps count.
+60 s (drain) + 120 s (AgentCore idle timeout) + 30 s, and no AgentCore poll
+later than the last activity + 60 s (drain) + 75 s (one long poll). The
+poller list of `DescribeTaskQueue` keeps sessions for about 5 minutes, so
+only the poll timestamps count.
 
 ## Report (timeout 60000)
 

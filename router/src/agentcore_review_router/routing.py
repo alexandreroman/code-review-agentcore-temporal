@@ -11,13 +11,12 @@ from agentcore_review_shared.contract import (
     PullRequestInput,
     pr_workflow_id,
 )
+from agentcore_review_shared.summaries import fit
 from pydantic import BaseModel
-from temporalio.common import WorkflowIDReusePolicy
+from temporalio.common import WorkflowIDConflictPolicy, WorkflowIDReusePolicy
 
 Command = Literal["fix", "kill"]
 COMMANDS: dict[str, Command] = {"/fix": "fix", "/kill": "kill"}
-
-MAX_SUMMARY_BYTES = 200  # Temporal's cap on a workflow's static summary
 
 # Where a command was posted: "issue" for the PR's Conversation tab (issue_comment), "review" for a review
 # thread, such as a reply to a finding (pull_request_review_comment). GitHub reacts on each through its own endpoint.
@@ -40,7 +39,8 @@ class StartOrSignal:
     task_queue: str
     input: PullRequestInput  # only a new run takes it: a running workflow keeps its own
     signal: PrUpdated
-    reuse_policy: WorkflowIDReusePolicy
+    reuse_policy: WorkflowIDReusePolicy  # against a closed run
+    conflict_policy: WorkflowIDConflictPolicy  # against a running one
     summary: str  # the workflow's static summary in Temporal UI: only a new run takes it
 
 
@@ -98,14 +98,8 @@ def route(event: str, payload: dict, delivery_id: str, config: RouterConfig) -> 
 
 
 def workflow_summary(number: int, title: str) -> str:
-    """`#3 · Add customer search`, on a single line of at most 200 bytes, cut with an ellipsis."""
-    summary = " ".join(f"#{number} · {title}".split())
-    if len(summary.encode()) <= MAX_SUMMARY_BYTES:
-        return summary
-    ellipsis = "…"
-    kept_bytes = summary.encode()[: MAX_SUMMARY_BYTES - len(ellipsis.encode())]
-    # The cut may split a multibyte character: its leftover bytes are dropped.
-    return kept_bytes.decode(errors="ignore") + ellipsis
+    """`#3 · Add customer search`, made to fit Temporal UI like the worker's summaries."""
+    return fit(f"#{number} · {title}")
 
 
 def _pr_ref(payload: dict, number: int) -> PrRef:
@@ -128,11 +122,15 @@ def _route_pull_request(payload: dict, delivery_id: str, config: RouterConfig) -
             task_queue = config.dev_queue
         else:
             task_queue = config.prod_queue
-        # Reopening a closed PR asks for a fresh review, even though its previous run completed.
+        # Reopening a PR asks for a fresh review. A run still running under this ID belongs to the closed PR (it may be
+        # finishing an action or its close) and signalling it would lose the reopen, so the new run terminates it and
+        # takes over its state.
         if action == "reopened":
-            policy = WorkflowIDReusePolicy.ALLOW_DUPLICATE
+            reuse_policy = WorkflowIDReusePolicy.ALLOW_DUPLICATE
+            conflict_policy = WorkflowIDConflictPolicy.TERMINATE_EXISTING
         else:
-            policy = WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
+            reuse_policy = WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY
+            conflict_policy = WorkflowIDConflictPolicy.USE_EXISTING
         return StartOrSignal(
             workflow_id=workflow_id,
             task_queue=task_queue,
@@ -143,7 +141,8 @@ def _route_pull_request(payload: dict, delivery_id: str, config: RouterConfig) -
                 reopened=(action == "reopened"),
             ),
             signal=PrUpdated(head_sha=pull_request["head"]["sha"], delivery_id=delivery_id),
-            reuse_policy=policy,
+            reuse_policy=reuse_policy,
+            conflict_policy=conflict_policy,
             summary=workflow_summary(ref.number, pull_request["title"]),
         )
     if action == "closed":

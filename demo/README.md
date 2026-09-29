@@ -22,9 +22,6 @@ from this folder: a commit of the content of `baseline/`, tagged
 The **Reset demo** workflow then creates the `feature/customer-search` and
 `dev/customer-search` branches from the scenario tag.
 
-Only the content of `baseline/` and the patch are pushed: this README
-stays in this repository.
-
 ## Changing the demo
 
 - `make up` pushes the demo only into an empty demo repository; it never

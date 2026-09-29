@@ -1,12 +1,11 @@
 """What the bot writes on GitHub: review comments and body, check output, thread replies, /fix refusals and
-failures, closing and inactivity comments, fixer changes.
+failures, closing and inactivity comments.
 
 Pure functions: the activities call them with data they fetched, the workflow with its state.
 """
 
 import re
 from collections.abc import Sequence
-from pathlib import PurePosixPath
 
 from agentcore_review_shared.contract import FINDING_ID_PATTERN
 from pydantic import BaseModel
@@ -17,17 +16,16 @@ from agentcore_review_worker.markers import finding_marker
 from agentcore_review_worker.models import (
     CheckOutput,
     DiscussionReply,
-    FileChange,
     Finding,
     ReviewContent,
     ThreadComment,
 )
-from agentcore_review_worker.navigation import is_outside_repository
 from agentcore_review_worker.summaries import count, file_list
 
 MAX_INLINE_COMMENTS = 20
 MAX_BODY_CHARS = 60_000  # GitHub rejects review bodies over 65,536 characters
-PROTECTED_DIR = ".github"  # the app has no workflows permission, and the fixer must not touch CI
+SECTION_SEPARATOR = "\n\n"
+NOT_SHOWN_ROOM = 100  # kept for the line counting the findings left out of the body
 
 _VERDICT_LINE = re.compile(rf"\*\*{FINDING_ID_PATTERN} (stays open|dismissed)\.\*\*")  # how reply_body starts
 
@@ -89,22 +87,52 @@ def _split_inline(
 
 
 def build_review(content: ReviewContent, commentable: dict[str, set[int]], marker: str, inline: bool) -> ReviewPayload:
-    """One COMMENT review: findings on diff lines inline (at most 20), all others in the body.
+    """One COMMENT review: findings on diff lines inline, all others in the body, as many as it holds.
 
     With inline=False (after GitHub refused the inline comments with a 422), every finding goes
     into the body.
     """
     cap = MAX_INLINE_COMMENTS if inline else 0
     attached, in_body = _split_inline(content.findings, commentable, cap)
-    sections = [
+    opening = [
         marker,
         f"## AI Review — round {content.round}",
         merge_status(content.findings + content.still_open),
         content.summary_markdown.strip() or "No summary.",
     ]
+    closing = _closing_sections(content)
+    findings: list[str] = []
     if in_body:
-        sections.append("### Other findings" if attached else "### Findings")
-        sections += [comment_body(f) for f in in_body]
+        heading = "### Other findings" if attached else "### Findings"
+        room = MAX_BODY_CHARS - len(SECTION_SEPARATOR.join([*opening, heading, *closing])) - NOT_SHOWN_ROOM
+        findings = [heading, *_findings_that_fit(in_body, room)]
+    body = SECTION_SEPARATOR.join([*opening, *findings, *closing])
+    if len(body) > MAX_BODY_CHARS:
+        # Only a huge summary or list gets here, and then no finding section fits: no finding marker is cut.
+        body = body[:MAX_BODY_CHARS] + "\n\n… (truncated)"
+    return ReviewPayload(body=body, comments=[_inline(f) for f in attached])
+
+
+def _findings_that_fit(findings: list[Finding], room: int) -> list[str]:
+    """The body sections of the first findings that fit in `room` characters, then how many are left out.
+
+    Whole sections only: a cut one would lose its finding marker, which RecoverCounters reads back.
+    """
+    sections: list[str] = []
+    used = 0
+    for index, finding in enumerate(findings):
+        section = comment_body(finding)
+        used += len(SECTION_SEPARATOR) + len(section)
+        if used > room:
+            sections.append(f"{count(len(findings) - index, 'more finding')} not shown.")
+            break
+        sections.append(section)
+    return sections
+
+
+def _closing_sections(content: ReviewContent) -> list[str]:
+    """The sections after the findings: resolved, still open, not reviewed, unavailable reviewers."""
+    sections: list[str] = []
     if content.resolved_ids:
         sections.append("### Resolved in this round\n\n" + ", ".join(content.resolved_ids))
     if content.still_open:
@@ -121,17 +149,11 @@ def build_review(content: ReviewContent, commentable: dict[str, set[int]], marke
         sections.append(
             "### Reviewers unavailable\n\n" + ", ".join(content.unavailable) + ": this round is published without them."
         )
-    body = "\n\n".join(sections)
-    if len(body) > MAX_BODY_CHARS:
-        body = body[:MAX_BODY_CHARS] + "\n\n… (truncated)"
-    return ReviewPayload(body=body, comments=[_inline(f) for f in attached])
+    return sections
 
 
 def check_output(open_findings: list[Finding], *, unavailable: Sequence[str] = (), unlisted: int = 0) -> CheckOutput:
-    """The output of a completed round's check: red while a critical or high finding is open.
-
-    `unavailable` names the reviewers that failed, `unlisted` counts the changed files GitHub did not list.
-    """
+    """The output of a completed round's check: red while a critical or high finding is open."""
     ordered = sorted(open_findings, key=sort_key)
     blocking = [f for f in ordered if f.severity.blocking]
     if blocking:
@@ -157,13 +179,11 @@ def check_output(open_findings: list[Finding], *, unavailable: Sequence[str] = (
 
 def _merge_blocked(blocking: list[Finding]) -> str:
     """Why the check fails, and the ways to turn it green: a fix, or a dismissal in the finding's thread."""
-    findings = count(len(blocking), "critical or high finding")
-    found = f"**Merge blocked** by {findings}: {with_severity(blocking)}."
     if len(blocking) == 1:
         way_out = "Fix it (push a commit or comment `/fix`) or have it dismissed in its thread."
     else:
         way_out = "Fix them (push a commit or comment `/fix`) or have them dismissed in their thread."
-    return f"{found} {way_out} The check turns green once none is left."
+    return f"{merge_status(blocking)} {way_out} The check turns green once none is left."
 
 
 def unavailable_check_output(round_number: int, unavailable: list[str]) -> CheckOutput:
@@ -201,13 +221,9 @@ def failed_reply(marker: str) -> str:
     return f"I could not answer this time. Reply again to retry.\n\n{marker}"
 
 
-def _fix_command(finding_ids: list[str]) -> str:
-    return " ".join(["/fix", *finding_ids])
-
-
 def off_thread_fix_reply(thread_finding_id: str, requested_ids: list[str], marker: str) -> str:
     """A /fix in a finding's thread that named other findings."""
-    command = _fix_command(requested_ids)
+    command = " ".join(["/fix", *requested_ids])
     return (
         f"This thread is about {thread_finding_id}: `{command}` was not applied. Comment `/fix` here to fix "
         f"{thread_finding_id}, or `{command}` in the conversation.\n\n{marker}"
@@ -285,28 +301,3 @@ def reopen_comment(earlier_round: int, marker: str) -> str:
         f"Reopened: a new review starts. The earlier finding threads still open are resolved first, then round "
         f"{earlier_round + 1} reviews the whole pull request; this takes a few minutes.\n\n{marker}"
     )
-
-
-def _repository_path(raw: str) -> str | None:
-    """The path in its plain form ("./src//A.java" gives "src/A.java"), or None when it is not a repository file."""
-    text = raw.strip()
-    if not text or is_outside_repository(text):
-        return None
-    parts = PurePosixPath(text).parts
-    return "/".join(parts) if parts else None
-
-
-def split_changes(changes: list[FileChange]) -> tuple[list[FileChange], list[str]]:
-    """The changes the fixer may push, and the rejected paths (outside the repository or under .github/).
-
-    A path changed twice keeps its last content.
-    """
-    accepted: dict[str, FileChange] = {}
-    rejected: list[str] = []
-    for change in changes:
-        path = _repository_path(change.path)
-        if path is None or path.split("/", 1)[0].lower() == PROTECTED_DIR:
-            rejected.append(change.path)
-        else:
-            accepted[path] = change.model_copy(update={"path": path})
-    return list(accepted.values()), rejected

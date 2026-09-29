@@ -2,38 +2,18 @@
 
 The activity type or workflow type is the label (Read, PublishReview, ReviewerWorkflow); the summary only
 holds the detail of the call, on a single line: paths, patterns, short SHAs, finding IDs, counts and round
-numbers, never file contents or comment bodies. The Timeline truncates beyond 120 characters and Temporal
-caps a summary at 200 bytes. Pure formatting: workflow code calls these functions.
+numbers, never file contents or comment bodies, made to fit by fit(). Pure formatting: workflow code calls these
+functions.
 """
 
 from typing import Any
 
+from agentcore_review_shared.summaries import MAX_SUMMARY_CHARS, fit
+
 from agentcore_review_worker.models import Finding, SynthesisInput
 
-MAX_SUMMARY_CHARS = 120
-MAX_SUMMARY_BYTES = 200
 MAX_LIST_ITEMS = 20
 SHORT_SHA = 7
-
-
-def fit(text: str) -> str:
-    """Make text a single line of at most 120 characters and 200 bytes, cutting its middle to keep a file name."""
-    single_line = " ".join(text.split())
-    limit = MAX_SUMMARY_CHARS
-    shortened = _cut_middle(single_line, limit)
-    # Non-ASCII characters take up to 4 bytes: shrink until the UTF-8 form fits too.
-    while len(shortened.encode()) > MAX_SUMMARY_BYTES:
-        limit -= 10
-        shortened = _cut_middle(single_line, limit)
-    return shortened
-
-
-def _cut_middle(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    head = (limit - 1) // 2
-    tail = limit - 1 - head
-    return f"{text[:head]}…{text[len(text) - tail :]}"
 
 
 def short_sha(sha: str) -> str:
@@ -186,7 +166,7 @@ def _positive_int(value: Any) -> int | None:
 
 
 def _bullet_list(items: list[str]) -> str:
-    """A Markdown list of at most 20 items, then how many were left out."""
+    """A Markdown list of the first MAX_LIST_ITEMS items, then how many were left out."""
     lines = [f"- {item}" for item in items[:MAX_LIST_ITEMS]]
     left_out = len(items) - MAX_LIST_ITEMS
     if left_out > 0:

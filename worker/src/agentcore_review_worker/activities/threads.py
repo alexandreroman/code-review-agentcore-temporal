@@ -100,6 +100,7 @@ async def close_earlier_threads(input: RecoveryInput) -> int:
 
 
 @activity.defn(name="ReadThread")
+@heartbeat_while_running
 async def read_thread(input: ThreadInput) -> ThreadRead:
     """A finding's review thread, oldest first: GitHub points every reply's in_reply_to_id at the thread's root."""
     pr = input.pr
@@ -115,6 +116,7 @@ async def read_thread(input: ThreadInput) -> ThreadRead:
 
 
 @activity.defn(name="ReplyInThread")
+@heartbeat_while_running
 async def reply_in_thread(input: ThreadReplyInput) -> None:
     """Reply in a finding's thread once: a retry finds the earlier attempt's marker among the bot's comments."""
     pr = input.pr

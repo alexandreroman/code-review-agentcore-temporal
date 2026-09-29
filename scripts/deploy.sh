@@ -34,9 +34,8 @@ ATTACH_TIMEOUT=180
 INVOKE_AFTER=30
 POLL_EVERY=5
 
-# image_inputs_hash prints the sha256 of the committed object IDs (blob or
-# tree SHAs) of the image inputs, in a fixed order, so it changes only when
-# their committed content changes.
+# image_inputs_hash prints the sha256 of the image inputs' committed object
+# IDs (blob or tree SHAs), in IMAGE_INPUTS order.
 image_inputs_hash() {
   local path object_ids=()
   for path in "${IMAGE_INPUTS[@]}"; do

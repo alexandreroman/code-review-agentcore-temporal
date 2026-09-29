@@ -9,7 +9,6 @@ from temporalio.api.enums.v1 import TaskQueueKind, TaskQueueType
 from temporalio.api.taskqueue.v1 import TaskQueue
 from temporalio.api.workflowservice.v1 import DescribeTaskQueueRequest
 from temporalio.client import Client
-from temporalio.common import WorkflowIDConflictPolicy
 from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError, RPCStatusCode
 
@@ -27,7 +26,7 @@ async def start_or_signal(client: Client, action: StartOrSignal) -> bool:
             id=action.workflow_id,
             task_queue=action.task_queue,
             id_reuse_policy=action.reuse_policy,
-            id_conflict_policy=WorkflowIDConflictPolicy.USE_EXISTING,
+            id_conflict_policy=action.conflict_policy,
             start_signal=SIGNAL_PR_UPDATED,
             start_signal_args=[action.signal],
             static_summary=action.summary,

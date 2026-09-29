@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+from concurrent.futures import ThreadPoolExecutor
 
 from agentcore_review_shared.contract import agentcore_identity
 from agentcore_review_shared.secrets import TemporalCertSecret
@@ -12,7 +13,7 @@ from opentelemetry import context as otel_context
 from . import tracing
 from .aws import read_secret
 from .drain import ActivityTracker
-from .runtime import build_worker, connect
+from .runtime import EXECUTOR_THREADS, build_worker, connect
 from .settings import agentcore_settings
 
 DRAIN_IDLE_SECONDS = 60
@@ -57,6 +58,8 @@ async def invoke(payload: dict, context) -> dict:  # the SDK passes the context 
     global _worker_task
     if _worker_task is not None and not _worker_task.done():
         return {"message": "worker already polling"}
+    if _worker_task is None:  # the process's first worker: the default executor is sized for the model calls
+        asyncio.get_running_loop().set_default_executor(ThreadPoolExecutor(max_workers=EXECUTOR_THREADS))
     session_id = getattr(context, "session_id", None) or "unknown"
     task_id = app.add_async_task("temporal-worker")
     _worker_task = asyncio.create_task(_run_until_idle(task_id, session_id))

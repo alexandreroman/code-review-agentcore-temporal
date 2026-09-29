@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Sets up the GitHub side of the demo (make github):
 #   1. registers the GitHub App on the first run (a browser page to confirm),
-#      then syncs it (current slug, webhook URL);
+#      or over the stored one with FORCE=1, then syncs it (current slug,
+#      webhook URL);
 #   2. applies the github stack: demo repository, Actions secrets, and the
 #      rulesets once the app is installed on the demo repository;
 #   3. pushes the demo application from demo/ into the demo repository
@@ -26,7 +27,7 @@ apply_github_stack() {
 # A plain assignment, so that set -e stops here if the output is missing.
 WEBHOOK_URL=$(tofu -chdir=infra/aws output -raw webhook_url)
 github_app register --owner "$GITHUB_OWNER" --name "$GITHUB_APP_NAME" --port "$GITHUB_APP_CALLBACK_PORT" \
-  --webhook-url "$WEBHOOK_URL"
+  --webhook-url "$WEBHOOK_URL" ${FORCE:+--force}
 github_app sync --url "$WEBHOOK_URL"
 
 # installation-id exits with status 2 when the app is not installed, the

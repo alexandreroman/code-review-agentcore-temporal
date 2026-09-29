@@ -83,11 +83,6 @@ variable "tracing" {
   }
 }
 
-variable "idle_timeout" {
-  description = "AgentCore session idle timeout, in seconds"
-  type        = number
-}
-
 variable "build_id" {
   description = "Deployed worker build (image tag, endpoint name, Temporal Build ID); empty before the first deploy"
   type        = string

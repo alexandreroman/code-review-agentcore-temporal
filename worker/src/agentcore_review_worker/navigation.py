@@ -1,8 +1,9 @@
-"""Glob, Grep and Read over a local repository snapshot, bounded and confined to the snapshot.
+"""Glob, Grep and Read over a local repository snapshot, bounded and confined to the snapshot, and the paths the
+fixer may change.
 
 These functions return text meant for the agent: invalid input produces an "Error: ..." message
-instead of an exception, so a bad tool call never fails the activity. Every read is bounded in
-size and every search in time, so a tool call always answers well within its activity timeout.
+instead of an exception, so a bad tool call never fails the activity. Every answer is bounded in
+size and a content search in time, so a tool call always answers well within its activity timeout.
 """
 
 import time
@@ -11,6 +12,7 @@ from pathlib import Path, PurePosixPath
 import regex
 
 from agentcore_review_worker.hunks import git_lines
+from agentcore_review_worker.models import FileChange
 
 MAX_GLOB_RESULTS = 500
 MAX_GREP_RESULTS = 50
@@ -21,6 +23,7 @@ MAX_READ_LINE_CHARS = 2_000
 MAX_FILE_BYTES = 2_000_000
 GREP_TIME_BUDGET = 10.0
 _BINARY_SNIFF_BYTES = 8_192
+PROTECTED_DIR = ".github"  # the app has no workflows permission, and the fixer must not touch CI
 
 
 class _ToolError(ValueError):
@@ -32,6 +35,31 @@ def is_outside_repository(path: str) -> bool:
     return path.startswith("/") or ".." in PurePosixPath(path).parts
 
 
+def repository_path(raw: str) -> str | None:
+    """The path in its plain form ("./src//A.java" gives "src/A.java"), or None when it is not a repository file."""
+    text = raw.strip()
+    if not text or is_outside_repository(text):
+        return None
+    parts = PurePosixPath(text).parts
+    return "/".join(parts) if parts else None
+
+
+def split_changes(changes: list[FileChange]) -> tuple[list[FileChange], list[str]]:
+    """The changes the fixer may push, and the rejected paths (outside the repository or under .github/).
+
+    A path changed twice keeps its last content.
+    """
+    accepted: dict[str, FileChange] = {}
+    rejected: list[str] = []
+    for change in changes:
+        path = repository_path(change.path)
+        if path is None or path.split("/", 1)[0].lower() == PROTECTED_DIR:
+            rejected.append(change.path)
+        else:
+            accepted[path] = change.model_copy(update={"path": path})
+    return list(accepted.values()), rejected
+
+
 def _coerce_int(value: int | str | None, name: str) -> int | None:
     """Coerce an offset/limit argument to an int, or None if it was not given.
 
@@ -41,7 +69,7 @@ def _coerce_int(value: int | str | None, name: str) -> int | None:
         return None
     try:
         return int(value)
-    except TypeError, ValueError:
+    except TypeError, ValueError, OverflowError:
         raise _ToolError(f"{name} must be an integer, got {value!r}.") from None
 
 
@@ -61,7 +89,6 @@ def _inside(root: Path, candidate: Path) -> bool:
 
 
 def _is_binary(head: bytes) -> bool:
-    """Whether a file is binary, judged by a NUL byte in its first bytes."""
     return b"\x00" in head[:_BINARY_SNIFF_BYTES]
 
 
@@ -98,6 +125,8 @@ def glob_files(root: Path, pattern: str, path: str | None = None) -> str:
         return f"Error: path {path!r} not found."
     if not base.is_dir():
         return f"Error: path {path!r} is not a directory."
+    if is_outside_repository(pattern):
+        return _outside_pattern_error(pattern)
     try:
         candidates = list(base.glob(pattern))
     except (ValueError, NotImplementedError) as exc:
@@ -110,19 +139,25 @@ def glob_paths(paths: list[str], pattern: str, path: str | None = None) -> str:
     raw = path or ""
     if is_outside_repository(raw):
         return f"Error: path {path!r} is outside the repository."
-    if raw and raw in paths:
+    base = PurePosixPath(raw)  # "./app/a.py" and "app/a.py/" read as "app/a.py", as for glob_files
+    if raw and str(base) in paths:
         return f"Error: path {path!r} is not a directory."
-    base = PurePosixPath(raw)
     at_root = base == PurePosixPath(".")
     inside = [p for p in map(PurePosixPath, paths) if at_root or base in p.parents]
     if not inside and not at_root:
         return f"Error: path {path!r} not found."
+    if is_outside_repository(pattern):
+        return _outside_pattern_error(pattern)
     try:
-        Path(".").glob(pattern)  # validates the pattern (e.g. empty or absolute) without reading a directory
+        Path(".").glob(pattern)  # validates the pattern (e.g. an empty one) without reading a directory
     except (ValueError, NotImplementedError) as exc:
         return f"Error: invalid glob pattern {pattern!r}: {exc}"
     matches = sorted(str(p) for p in inside if (p if at_root else p.relative_to(base)).full_match(pattern))
     return _glob_output(matches)
+
+
+def _outside_pattern_error(pattern: str) -> str:
+    return f"Error: glob pattern {pattern!r} reaches outside the repository."
 
 
 def _matches_glob(relative: PurePosixPath, glob: str) -> bool:
@@ -132,10 +167,14 @@ def _matches_glob(relative: PurePosixPath, glob: str) -> bool:
     return relative.full_match(glob)
 
 
-def _grep_text(compiled: regex.Pattern, text: str, relative: str, deadline: float) -> tuple[list[str], bool]:
-    """The matching lines of one file, and whether the time budget ran out while scanning it."""
+def _grep_text(
+    compiled: regex.Pattern, text: str, relative: str, deadline: float, limit: int
+) -> tuple[list[str], bool]:
+    """The first `limit` matching lines of one file, and whether the time budget ran out while scanning it."""
     hits: list[str] = []
     for number, line in enumerate(git_lines(text), start=1):
+        if len(hits) >= limit:
+            break
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return hits, True
@@ -165,7 +204,7 @@ def grep_files(root: Path, pattern: str, path: str | None = None, glob: str | No
     candidates = [base] if base.is_file() else sorted(base.rglob("*"))
     deadline = time.monotonic() + GREP_TIME_BUDGET
     hits: list[str] = []
-    total = too_large = 0
+    too_large = 0
     stopped = False
     for candidate in candidates:
         if not candidate.is_file() or not _inside(root, candidate):
@@ -179,14 +218,15 @@ def grep_files(root: Path, pattern: str, path: str | None = None, glob: str | No
         text = _read_text(candidate)
         if text is None:
             continue
-        file_hits, stopped = _grep_text(compiled, text, str(relative), deadline)
-        total += len(file_hits)
-        hits.extend(file_hits[: MAX_GREP_RESULTS - len(hits)])
-        if stopped:
+        # One hit beyond the cap tells that there are more, without scanning the rest of the repository.
+        file_hits, stopped = _grep_text(compiled, text, str(relative), deadline, MAX_GREP_RESULTS + 1 - len(hits))
+        hits.extend(file_hits)
+        if stopped or len(hits) > MAX_GREP_RESULTS:
             break
     notes = []
-    if total > len(hits):
-        notes.append(f"... truncated: {total - len(hits)} more matches")
+    if len(hits) > MAX_GREP_RESULTS:
+        hits = hits[:MAX_GREP_RESULTS]
+        notes.append("... truncated: more matches not shown")
     if too_large:
         notes.append(f"... skipped {too_large} files larger than {MAX_FILE_BYTES} bytes")
     if stopped:

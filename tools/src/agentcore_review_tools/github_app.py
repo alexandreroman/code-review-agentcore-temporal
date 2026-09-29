@@ -1,12 +1,12 @@
-"""GitHub App tooling behind the Makefile.
+"""GitHub App tooling called by scripts/github.sh (make up, make github).
 
-- register: creates the app through the manifest flow, unless one is already registered (make up; make github-app
+- register: creates the app through the manifest flow, unless one is already registered (make up; make github
   FORCE=1 registers a new one)
 - sync: refreshes the stored slug after a rename in the app settings, and points the app's webhook at the
   router (make up)
 - installation-id: prints the app's installation ID on a repository; when the app is not installed there, prints
-  its install link and exits with status 2 (make up, make review-pr). With --wait, it opens the install link in
-  the browser and waits for the installation instead (make up)
+  its install link and exits with status 2 (make up). With --wait, it opens the install link in the browser and
+  waits for the installation instead (make up)
 """
 
 import argparse
@@ -190,7 +190,7 @@ def require_registered_app() -> GitHubAppSecret:
     app = registered_app()
     if app is None:
         sys.exit(
-            "The GitHub App is not registered yet: make up registers it (make github-app FORCE=1 registers a new one)."
+            "The GitHub App is not registered yet: make up registers it (make github FORCE=1 registers a new one)."
         )
     return app
 

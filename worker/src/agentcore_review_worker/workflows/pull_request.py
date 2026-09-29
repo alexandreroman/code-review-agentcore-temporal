@@ -21,7 +21,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta
 
 from temporalio import workflow
-from temporalio.exceptions import ActivityError, ChildWorkflowError
+from temporalio.exceptions import ActivityError, ApplicationError, ChildWorkflowError
 
 from agentcore_review_worker.workflows import policies
 from agentcore_review_worker.workflows.discussion import DiscussionWorkflow
@@ -81,6 +81,14 @@ with workflow.unsafe.imports_passed_through():
 
 # A no-op tracer unless OpenTelemetryPlugin's replay-safe provider is installed. Spans add no command to the history.
 tracer = trace.get_tracer(__name__)
+
+
+def _error_type(error: BaseException) -> str | None:
+    """The type of the first ApplicationError behind a failure: GitHubUnprocessable, or BranchMoved behind a child's."""
+    cause = error.__cause__
+    while cause is not None and not isinstance(cause, ApplicationError):
+        cause = cause.__cause__
+    return cause.type if cause is not None else None
 
 
 @workflow.defn(name=PULL_REQUEST_WORKFLOW)
@@ -208,8 +216,7 @@ class PullRequestWorkflow:
         info = workflow.info()
         if not (info.is_continue_as_new_suggested() or info.is_target_worker_deployment_version_changed()):
             return
-        # A signal handler still running would lose its work to the continue-as-new. The handlers here are
-        # synchronous, so this wait is a safeguard for an asynchronous one.
+        # A safeguard: the handlers are synchronous, but a running one would lose its work to the continue-as-new.
         await workflow.wait_condition(workflow.all_handlers_finished)
         workflow.continue_as_new(
             self._input.model_copy(update={"state": self._state}),
@@ -239,7 +246,7 @@ class PullRequestWorkflow:
                 RecoveryInput(pr=self._pr, workflow_id=self._id),
                 result_type=RecoveredCounters,
                 summary=summaries.pull_request(self._pr.number),
-                **policies.RECOVER_COUNTERS,
+                **policies.MULTI_CALL,
             )
         except ActivityError as error:
             # The review goes on, numbered from 1. On a reopened pull request, round 1 then finds the earlier run's
@@ -269,7 +276,7 @@ class PullRequestWorkflow:
                 RecoveryInput(pr=self._pr, workflow_id=self._id),
                 result_type=int,
                 summary=summaries.pull_request(self._pr.number),
-                **policies.CLOSE_EARLIER_THREADS,
+                **policies.GITHUB_THREADS,
             )
         except ActivityError as error:
             workflow.logger.warning("earlier finding threads not closed: %s", error.cause or error)
@@ -314,7 +321,7 @@ class PullRequestWorkflow:
         """Close the idle pull request and end; None when GitHub refused, which starts a new idle period."""
         state = self._state
         try:
-            await workflow.execute_activity("ClosePR", self._pr, summary="inactivity", **policies.CLOSE_PR)
+            await workflow.execute_activity("ClosePR", self._pr, summary="inactivity", **policies.GITHUB_CALL)
         except ActivityError as error:
             workflow.logger.error("pull request not closed for inactivity: %s", error.cause or error)
             lifecycle.start_idle(state, workflow.now())
@@ -348,7 +355,7 @@ class PullRequestWorkflow:
                 ListFilesInput(pr=self._pr, since_sha=state.last_reviewed_sha),
                 result_type=ChangeSet,
                 summary=summaries.list_files(state.last_reviewed_sha),
-                **policies.LIST_FILES,
+                **policies.MULTI_CALL,
             )
             if change.head_sha == state.last_reviewed_sha:
                 return  # a late signal for a head already reviewed
@@ -527,13 +534,13 @@ class PullRequestWorkflow:
                 attempt,
                 result_type=dict[str, int],
                 summary=summaries.publish(content.round, len(content.findings), inline=attempt.inline),
-                **policies.PUBLISH_REVIEW,
+                **policies.SLOW_TRANSFER,
             )
 
         try:
             return await publish(input)
         except ActivityError as error:
-            if policies.error_type(error) != "GitHubUnprocessable":
+            if _error_type(error) != "GitHubUnprocessable":
                 raise
             workflow.logger.warning("GitHub refused the inline comments: every finding goes into the review body")
             return await publish(input.model_copy(update={"inline": False}))
@@ -544,7 +551,7 @@ class PullRequestWorkflow:
                 "ResolveThreads",
                 ResolveInput(pr=self._pr, finding_ids=finding_ids),
                 summary=summaries.finding_ids(finding_ids),
-                **policies.RESOLVE_THREADS,
+                **policies.GITHUB_THREADS,
             )
         except ActivityError as error:
             workflow.logger.warning("threads of %s not resolved: %s", finding_ids, error.cause or error)
@@ -556,10 +563,10 @@ class PullRequestWorkflow:
                 SnapshotInput(pr=self._pr, sha=sha),
                 result_type=SnapshotRef,
                 summary=summaries.short_sha(sha),
-                **policies.SNAPSHOT,
+                **policies.SLOW_TRANSFER,
             )
         except ActivityError as error:
-            if policies.error_type(error) != "SnapshotTooLarge":
+            if _error_type(error) != "SnapshotTooLarge":
                 raise
             # No snapshot: the tools read through the GitHub API instead.
             return SnapshotRef(pr=self._pr, sha=sha)
@@ -570,7 +577,7 @@ class PullRequestWorkflow:
 
     async def _update_check(self, check: CheckInput, round_number: int) -> None:
         summary = summaries.check(round_number, check.status, check.conclusion)
-        await workflow.execute_activity("UpdateCheck", check, summary=summary, **policies.UPDATE_CHECK)
+        await workflow.execute_activity("UpdateCheck", check, summary=summary, **policies.GITHUB_CALL)
 
     async def _complete_check(self, head_sha: str, round_number: int, output: CheckOutput) -> None:
         check = CheckInput(
@@ -637,12 +644,12 @@ class PullRequestWorkflow:
             self._set_phase("fix pushed, waiting for its review")
         except (ActivityError, ChildWorkflowError) as error:
             workflow.logger.error("fix %d failed: %s", state.fix_count, error.cause or error)
-            await self._explain_failed_fix(state.fix_count, policies.error_type(error))
+            await self._explain_failed_fix(state.fix_count, _error_type(error))
             self._set_phase("fix failed, waiting for changes")
 
     async def _explain_failed_fix(self, fix_number: int, error_type: str | None) -> None:
         """Tell in the Conversation that the fix pushed nothing, and how to retry when a retry can help."""
-        marker = markers.fix_failure_marker(self._id, fix_number)
+        marker = markers.fix_failure_marker(self._id, workflow.info().first_execution_run_id, fix_number)
         body = publishing.failed_fix_comment(fix_number, error_type, marker)
         try:
             await self._post_comment(body, marker, f"fix {fix_number} failed")
@@ -684,7 +691,7 @@ class PullRequestWorkflow:
                 ThreadInput(pr=self._pr, thread_root_id=reply.thread_root_id),
                 result_type=ThreadRead,
                 summary=finding.id,
-                **policies.READ_THREAD,
+                **policies.GITHUB_CALL,
             )
             if publishing.bot_answers(thread.comments, thread.bot_login) >= lifecycle.MAX_BOT_REPLIES_PER_THREAD:
                 await self._post_reply(reply.thread_root_id, publishing.budget_reply(marker), marker, finding.id)
@@ -739,7 +746,7 @@ class PullRequestWorkflow:
             "ReplyInThread",
             ThreadReplyInput(pr=self._pr, thread_root_id=thread_root_id, body=body, marker=marker),
             summary=finding_id,
-            **policies.REPLY_IN_THREAD,
+            **policies.GITHUB_CALL,
         )
 
     async def _post_comment(self, body: str, marker: str, label: str) -> None:
@@ -748,7 +755,7 @@ class PullRequestWorkflow:
             "PostComment",
             CommentInput(pr=self._pr, body=body, marker=marker),
             summary=label,
-            **policies.POST_COMMENT,
+            **policies.GITHUB_CALL,
         )
 
     async def _refresh_check(self) -> None:

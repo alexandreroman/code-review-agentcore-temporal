@@ -19,7 +19,7 @@ from ..aws import s3
 from ..models import SnapshotInput, SnapshotRef
 from ..settings import AppSettings
 from .github_api import github, github_errors, repo_path
-from .heartbeats import heartbeating
+from .heartbeats import heartbeat_while_running
 
 MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
@@ -38,6 +38,7 @@ class SnapshotActivities:
         self._bucket = settings.snapshots_bucket
 
     @activity.defn(name="Snapshot")
+    @heartbeat_while_running
     async def snapshot(self, input: SnapshotInput) -> SnapshotRef:
         """Archive the repository at `sha` into S3; a no-op when the key already exists."""
         pr = input.pr
@@ -46,16 +47,14 @@ class SnapshotActivities:
         if await asyncio.to_thread(_exists, self._bucket, key):
             return ref
         with tempfile.TemporaryDirectory() as work:
-            # A download or an upload over a slow link outlasts the heartbeat timeout.
-            await heartbeating(self._copy_to_s3(pr, input.sha, Path(work) / "archive.tar.gz", key))
+            archive = Path(work) / "archive.tar.gz"
+            with github_errors():
+                await _download_tarball(pr, input.sha, archive)
+            await asyncio.to_thread(s3().upload_file, str(archive), self._bucket, key)
         return ref
 
-    async def _copy_to_s3(self, pr: PrRef, sha: str, archive: Path, key: str) -> None:
-        with github_errors():
-            await _download_tarball(pr, sha, archive)
-        await asyncio.to_thread(s3().upload_file, str(archive), self._bucket, key)
-
     @activity.defn(name="DeleteSnapshots")
+    @heartbeat_while_running
     async def delete_snapshots(self, pr: PrRef) -> int:
         """Delete every snapshot of the pull request; deleting nothing is not an error."""
         return await asyncio.to_thread(_delete_prefix, self._bucket, _snapshot_prefix(pr))

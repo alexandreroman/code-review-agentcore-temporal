@@ -57,8 +57,8 @@ render() {
   echo
   echo "## Links"
   echo
-  echo "- [Temporal workflows](https://cloud.temporal.io/namespaces/${TEMPORAL_NAMESPACE}/workflows)"
-  echo "- [Worker Deployments](https://cloud.temporal.io/namespaces/${TEMPORAL_NAMESPACE}/worker-deployments)"
+  echo "- [Temporal workflows](https://cloud.temporal.io/namespaces/${TEMPORAL_NAMESPACE:-}/workflows)"
+  echo "- [Worker Deployments](https://cloud.temporal.io/namespaces/${TEMPORAL_NAMESPACE:-}/worker-deployments)"
   if [[ -n "${GITHUB_OWNER:-}" && -n "${DEMO_REPO:-}" ]]; then
     local base="https://github.com/${GITHUB_OWNER}/${DEMO_REPO}"
     echo "- [Demo repository](${base}) · [pull requests](${base}/pulls)"

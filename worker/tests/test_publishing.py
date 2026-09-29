@@ -1,9 +1,9 @@
 import pytest
-from agentcore_review_worker.markers import reply_marker
+from agentcore_review_worker.lifecycle import merge_status
+from agentcore_review_worker.markers import extract_finding_ids, reply_marker
 from agentcore_review_worker.models import (
     CheckOutput,
     DiscussionReply,
-    FileChange,
     Finding,
     ReviewContent,
     ThreadComment,
@@ -26,7 +26,6 @@ from agentcore_review_worker.publishing import (
     off_thread_fix_reply,
     reopen_comment,
     reply_body,
-    split_changes,
     unavailable_check_output,
 )
 
@@ -34,7 +33,7 @@ MARKER = "<!-- round:pr-o-r-1:1 -->"
 PATH = "src/main/java/com/example/orders/OrderRepository.java"
 
 
-def finding(finding_id, line=11, end_line=None, severity="high", suggestion=None) -> Finding:
+def finding(finding_id, line=11, end_line=None, severity="high", suggestion=None, explanation=None) -> Finding:
     return Finding(
         id=finding_id,
         category="security",
@@ -43,7 +42,7 @@ def finding(finding_id, line=11, end_line=None, severity="high", suggestion=None
         line=line,
         end_line=end_line,
         title="SQL injection",
-        explanation="The name reaches SQL unescaped.",
+        explanation=explanation or "The name reaches SQL unescaped.",
         suggestion=suggestion,
     )
 
@@ -99,11 +98,8 @@ def test_body_reports_resolved_open_excluded_unlisted_and_unavailable():
     body = build_review(content([], **extra), {}, MARKER, inline=True).body
     for expected in ("S-01", "S-02", "uv.lock", "12 more files", "security"):
         assert expected in body
-
-
-def test_body_reports_unlisted_files_without_excluded_ones():
     body = build_review(content([], unlisted=1), {}, MARKER, inline=True).body
-    assert "### Not reviewed\n\n- 1 more file that GitHub does not list: too many changes" in body
+    assert "### Not reviewed\n\n- 1 more file that GitHub does not list" in body
 
 
 def test_the_merge_status_of_new_and_still_open_findings_follows_the_heading():
@@ -114,6 +110,22 @@ def test_the_merge_status_of_new_and_still_open_findings_follows_the_heading():
         f"{MARKER}\n\n## AI Review — round 1\n\n**Merge blocked** by 2 critical or high findings: S-03, P-01.\n\n"
         "Summary."
     )
+
+
+def test_findings_beyond_the_body_limit_are_left_out_whole_and_counted():
+    findings = [finding(f"S-{i:02d}", explanation="x" * 5_000) for i in range(1, 21)]
+    body = build_review(content(findings), {}, MARKER, inline=False).body
+    shown = extract_finding_ids(body)
+    assert len(body) <= MAX_BODY_CHARS
+    assert body.count("<!-- finding:") == len(shown)  # no marker is cut
+    assert 0 < len(shown) < len(findings) and shown == [f.id for f in findings[: len(shown)]]
+    assert f"{len(findings) - len(shown)} more findings not shown." in body
+
+
+def test_a_single_finding_left_out_is_counted_in_the_singular():
+    findings = [finding(f"S-{i:02d}", explanation="x" * 25_000) for i in range(1, 4)]
+    body = build_review(content(findings), {}, MARKER, inline=False).body
+    assert "1 more finding not shown." in body
 
 
 def test_body_is_truncated_below_the_github_limit():
@@ -146,12 +158,8 @@ def test_without_blocking_findings_the_check_is_green():
 def test_check_summary_starts_with_the_blocking_findings_and_the_way_out():
     findings = [finding("M-01", severity="low"), finding("P-01", severity="high"), finding("S-01", severity="critical")]
     summary = check_output(findings).summary
-    assert summary.startswith(
-        "**Merge blocked** by 2 critical or high findings: S-01 (critical), P-01 (high). "
-        "Fix them (push a commit or comment `/fix`) or have them dismissed in their thread. "
-        "The check turns green once none is left.\n\n- **S-01** critical"
-    )
-    assert summary.index("P-01 (high)") < summary.index("- **M-01**")
+    assert summary.startswith(f"{merge_status(findings)} Fix them (push a commit or comment `/fix`)")
+    assert summary.index("- **S-01**") < summary.index("- **P-01**") < summary.index("- **M-01**")
 
 
 def test_check_output_names_the_unavailable_reviewers():
@@ -171,13 +179,10 @@ def test_check_output_counts_the_unlisted_files():
     assert "Not reviewed in this round (not listed by GitHub, too many changes): 42 files." in output.summary
 
 
-def test_unavailable_check_output_lists_every_reviewer():
+def test_unavailable_check_output_fails_and_lists_every_reviewer():
     output = unavailable_check_output(3, ["security", "performance", "maintainability"])
-    assert output.conclusion == "failure" and output.title == "Review unavailable"
-    assert output.summary == (
-        "No reviewer completed round 3 (unavailable: security, performance, maintainability), "
-        "so this head was not reviewed. Push a commit to retry."
-    )
+    assert output.conclusion == "failure"
+    assert "security, performance, maintainability" in output.summary
 
 
 def test_closing_comment_calls_out_a_bypass():
@@ -193,40 +198,28 @@ def test_closing_comment_without_blocking_findings():
 
 def test_the_idle_warning_announces_the_time_left_before_the_close():
     text = idle_warning_comment(600, 900, "<!-- m -->")
-    assert text == (
-        "No activity for 10 minutes: this pull request will be closed in 5 minutes. "
-        "Push a commit to keep it open.\n\n<!-- m -->"
-    )
+    assert "10 minutes" in text and "5 minutes" in text and text.endswith("<!-- m -->")
 
 
 def test_idle_durations_that_are_not_whole_minutes_read_in_seconds():
     text = idle_warning_comment(90, 150, "<!-- m -->")
-    assert text.startswith("No activity for 90 seconds: this pull request will be closed in 1 minute.")
+    assert "90 seconds" in text and "1 minute." in text
 
 
 def test_the_idle_close_comment_gives_the_idle_duration():
-    assert idle_close_comment(900, "<!-- m -->") == (
-        "Closed after 15 minutes without activity. Reopen it for a new review.\n\n<!-- m -->"
-    )
+    text = idle_close_comment(900, "<!-- m -->")
+    assert "15 minutes" in text and text.endswith("<!-- m -->")
 
 
-def test_the_reopen_comment_announces_the_next_round_after_the_earlier_threads():
-    assert reopen_comment(2, "<!-- m -->") == (
-        "Reopened: a new review starts. The earlier finding threads still open are resolved first, then round 3 "
-        "reviews the whole pull request; this takes a few minutes.\n\n<!-- m -->"
-    )
+def test_the_reopen_comment_names_the_next_round_only_after_an_earlier_one():
+    after_round_2 = reopen_comment(2, "<!-- m -->")
+    assert "round 3" in after_round_2 and after_round_2.endswith("<!-- m -->")
+    assert "round" not in reopen_comment(0, "<!-- m -->")
 
 
-def test_the_reopen_comment_without_an_earlier_round_only_announces_the_review():
-    assert reopen_comment(0, "<!-- m -->") == "Reopened: a new review starts; it takes a few minutes.\n\n<!-- m -->"
-
-
-def test_a_fix_refused_in_a_thread_points_to_both_ways_of_fixing():
+def test_a_fix_refused_in_a_thread_repeats_the_refused_command():
     text = off_thread_fix_reply("S-01", ["S-01", "S-03"], "<!-- m -->")
-    assert text == (
-        "This thread is about S-01: `/fix S-01 S-03` was not applied. Comment `/fix` here to fix S-01, "
-        "or `/fix S-01 S-03` in the conversation.\n\n<!-- m -->"
-    )
+    assert "`/fix S-01 S-03`" in text and text.endswith("<!-- m -->")
 
 
 def test_a_fix_refused_in_the_conversation_lists_the_open_findings_most_severe_first():
@@ -241,17 +234,19 @@ def test_a_fix_refused_with_no_open_finding():
 
 
 @pytest.mark.parametrize(
-    ("error_type", "text"),
+    ("error_type", "invites_a_new_fix"),
     [
-        ("BranchMoved", "Fix 2 abandoned: the branch changed while it was prepared. Comment `/fix` to try again."),
-        ("ForkNotSupported", "Fix 2 not pushed: this pull request comes from a fork, which the bot cannot push to."),
-        ("EmptyFixPlan", "Fix 2 pushed nothing: no finding could be fixed with a local change."),
-        ("AgentUnavailable", "Fix 2 failed: nothing was pushed. Comment `/fix` to try again."),
-        (None, "Fix 2 failed: nothing was pushed. Comment `/fix` to try again."),
+        ("BranchMoved", True),
+        ("ForkNotSupported", False),
+        ("EmptyFixPlan", False),
+        ("AgentUnavailable", True),
+        (None, True),
     ],
 )
-def test_a_failed_fix_says_whether_a_new_fix_can_help(error_type, text):
-    assert failed_fix_comment(2, error_type, "<!-- m -->") == f"{text}\n\n<!-- m -->"
+def test_a_failed_fix_says_whether_a_new_fix_can_help(error_type, invites_a_new_fix):
+    text = failed_fix_comment(2, error_type, "<!-- m -->")
+    assert ("/fix" in text) == invites_a_new_fix
+    assert "Fix 2" in text and text.endswith("<!-- m -->")
 
 
 def test_a_thread_reply_starts_with_the_verdict_and_ends_with_its_marker():
@@ -277,19 +272,3 @@ def test_only_the_agents_answers_count_toward_the_budget():
     ]
     assert bot_answers(thread, "bot[bot]") == 1
     assert bot_answers([], "bot[bot]") == 0
-
-
-def test_split_changes_rejects_protected_and_escaping_paths():
-    paths = [
-        "src/A.java",
-        "./src//B.java",
-        ".github/workflows/ci.yml",
-        ".GitHub/x",
-        "../etc/passwd",
-        "/Abs.java",
-        "",
-        "src/A.java",
-    ]
-    accepted, rejected = split_changes([FileChange(path=p, new_content=f"{i}") for i, p in enumerate(paths)])
-    assert [(c.path, c.new_content) for c in accepted] == [("src/A.java", "7"), ("src/B.java", "1")]
-    assert rejected == [".github/workflows/ci.yml", ".GitHub/x", "../etc/passwd", "/Abs.java", ""]

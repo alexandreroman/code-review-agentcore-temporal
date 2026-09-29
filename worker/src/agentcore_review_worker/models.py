@@ -201,7 +201,6 @@ class ReviewerReport(BaseModel):
 
 class ReviewSummary(BaseModel):
     summary_markdown: str = Field(description="Short Markdown summary of the round for the pull request author")
-    ordered_ids: list[str] = Field(description="IDs of the findings to keep, most important first")
     duplicates: list[str] = Field(default_factory=list, description="IDs of findings that repeat another finding")
 
 

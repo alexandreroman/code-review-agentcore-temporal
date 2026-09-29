@@ -43,3 +43,13 @@ def test_parse_rejects_non_agentcore_identities(identity):
 
 def test_session_id_may_contain_colons():
     assert parse_agentcore_identity("agentcore:ep:a:b") == AgentCoreSession("ep", "a:b")
+
+
+@pytest.mark.parametrize("raw", ["Security", " Security ", " SECURITY "])
+def test_enums_tolerate_case_and_spaces(raw):
+    assert Category(raw) is Category.SECURITY
+
+
+def test_unknown_enum_values_are_still_rejected():
+    with pytest.raises(ValueError):
+        Category("style")

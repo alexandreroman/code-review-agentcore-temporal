@@ -1,4 +1,4 @@
-# The URL the GitHub App sends its webhooks to (read by make github, make up's GitHub step, and make github-app).
+# The URL the GitHub App sends its webhooks to (read by make github, the GitHub step of make up).
 output "webhook_url" {
   value = local.use_custom_domain ? "https://${local.webhook_fqdn}/" : aws_lambda_function_url.router.function_url
 }

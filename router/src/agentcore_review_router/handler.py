@@ -6,6 +6,7 @@ not exist yet). The same function receives its own asynchronous invocations, whi
 fit in the webhook's 10 s. Logs are JSON (the function's log format); every line carries the delivery ID.
 """
 
+import asyncio
 import json
 import logging
 import time
@@ -18,6 +19,9 @@ from .signature import decode_body, verify_signature
 logger = logging.getLogger(__name__)
 
 Reply = tuple[int, str]
+
+# Seconds kept before the Lambda timeout to log a late action and reply 500 instead of being cut off.
+REPLY_MARGIN = 1.0
 
 
 def handler(event: dict, context: Any) -> dict:
@@ -69,8 +73,10 @@ async def _process(event: dict, headers: dict[str, str], fields: dict[str, Any],
         return 204, action.reason
     fields["workflow_id"] = action.workflow_id
     try:
-        return await _act(action, fields, deadline)
-    except Exception:
+        # Each call has its own timeout; this bounds their sum. The loop's clock is time.monotonic(), like `deadline`.
+        async with asyncio.timeout_at(deadline - REPLY_MARGIN):
+            return await _act(action, fields, deadline)
+    except Exception:  # TimeoutError included
         logger.exception("action failed", extra=fields)
         return 500, "action failed (see the router logs)"
 
@@ -80,8 +86,12 @@ def _is_signed(body: bytes, signature: str | None) -> bool:
     if verify_signature(runtime.github_app_secret().webhook_secret, body, signature):
         return True
     # A re-registered GitHub App rotates the webhook secret: a warm container's cache is stale exactly once, so
-    # check against a fresh secret (one Secrets Manager call per unsigned request) before refusing the signature.
-    runtime.refresh_github_app_secret()
+    # check a well-formed signature against a fresh secret before refusing it. The public URL lets anyone send bad
+    # signatures: the refresh is throttled so that they cannot drive Secrets Manager calls.
+    if not (signature or "").startswith("sha256="):
+        return False
+    if not runtime.refresh_github_app_secret():
+        return False  # refreshed less than a minute ago
     return verify_signature(runtime.github_app_secret().webhook_secret, body, signature)
 
 

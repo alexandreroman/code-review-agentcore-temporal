@@ -31,6 +31,10 @@ WORKER_HEARTBEAT_INTERVAL = timedelta(seconds=10)
 # An activity poll still open when /kill stops a session can receive a task nobody runs, lost for a heartbeat
 # timeout: two polls (the SDK's default is 5) keep that loss small and still dispatch parallel tool calls.
 ACTIVITY_TASK_POLLERS = PollerBehaviorSimpleMaximum(maximum=2)
+# The event loop's default executor: a Bedrock stream holds one of its threads for the whole call (Strands uses
+# asyncio.to_thread), next to Glob, Grep, Read, S3 and the snapshot extraction. Python's default, min(32, CPUs + 4),
+# is about 6 threads on 2 vCPUs.
+EXECUTOR_THREADS = 32
 
 WORKFLOWS: list[type] = [
     PingWorkflow,

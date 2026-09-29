@@ -15,7 +15,7 @@ class AppSettings:
     """What the activities and the model factory need."""
 
     snapshots_bucket: str
-    github_app_secret: str  # Secrets Manager ARN or name
+    github_app_secret: str  # Secrets Manager name
     bedrock_model_id: str  # a global cross-region inference profile ID
     model_effort: str
     max_parallel_agents: int
@@ -40,7 +40,7 @@ def agentcore_settings(env: Mapping[str, str]) -> WorkerSettings:
             deployment_name=env["TEMPORAL_DEPLOYMENT_NAME"], build_id=env["TEMPORAL_BUILD_ID"]
         ),
         tracing=_tracing(env),
-        app=_app_settings(env, github_app_secret=env["GITHUB_APP_SECRET_ID"]),
+        app=_app_settings(env),
     )
 
 
@@ -51,8 +51,8 @@ def dev_settings(env: Mapping[str, str]) -> WorkerSettings:
         task_queue=env["DEV_TASK_QUEUE"],
         deployment=None,
         tracing=_tracing(env),
-        # The dev worker reads the same secret by name, with the developer's AWS credentials.
-        app=_app_settings(env, github_app_secret=GITHUB_APP_SECRET),
+        # The dev worker reads the same secret, with the developer's AWS credentials.
+        app=_app_settings(env),
     )
 
 
@@ -63,10 +63,10 @@ def _tracing(env: Mapping[str, str]) -> bool:
     return value == "on"
 
 
-def _app_settings(env: Mapping[str, str], *, github_app_secret: str) -> AppSettings:
+def _app_settings(env: Mapping[str, str]) -> AppSettings:
     return AppSettings(
         snapshots_bucket=env["SNAPSHOTS_BUCKET"],
-        github_app_secret=github_app_secret,
+        github_app_secret=GITHUB_APP_SECRET,
         bedrock_model_id=env["BEDROCK_MODEL_ID"],
         model_effort=env["MODEL_EFFORT"],
         max_parallel_agents=int(env["MAX_PARALLEL_AGENTS"]),

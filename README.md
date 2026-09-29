@@ -11,13 +11,7 @@ Install the GitHub App on a repository and every pull request gets three
 AI reviewers. Security, performance and maintainability agents read the
 diff and search the repository; a fourth one merges their findings into a
 single GitHub review, with comments on the affected lines and an
-`AI Review` check. From then on, you work with the agents in the pull
-request itself. Reply to a finding and an agent answers, or dismisses the
-finding when you are right. Comment `/fix` and an agent commits the fix,
-for one finding in its thread or for all of them in the conversation; the
-next round reviews it. Comment `/kill` to stop the workers mid-review: the
-review resumes on a fresh AgentCore session without redoing a finished
-model call.
+`AI Review` check.
 
 [Temporal Cloud](https://temporal.io/cloud) runs this agent loop as a
 durable workflow, and the integration with
@@ -57,10 +51,6 @@ built for it:
   AgentCore Runtime endpoint as its compute provider, and Temporal Cloud
   invokes it as tasks wait on the queue: starting a worker is its job, not
   yours.
-
-Together, an AgentCore session becomes disposable: whether it idles out,
-gets killed or gets replaced by a deploy, the review picks up on a new
-session from the workflow history.
 
 ## What the demo shows
 
@@ -114,12 +104,10 @@ checklist and recovery actions.
 3. A round snapshots the repository into **S3**, then runs three
    **reviewer agents** (Strands Agents with Claude on **Amazon Bedrock**)
    as child workflows. They read the diff and navigate the snapshot with
-   `Glob`, `Grep` and `Read` tools. A **synthesis** agent deduplicates and
-   orders their findings into a summary, skipped when a round finds
-   nothing new; the workflow publishes the review and sets the
-   `AI Review` check.
-4. Temporal Cloud starts **workers on AgentCore** only when a task waits:
-   nothing runs between two events.
+   `Glob`, `Grep` and `Read` tools. A **synthesis** agent deduplicates
+   their findings and writes a summary, skipped when a round finds nothing
+   new; the workflow publishes the review, findings ordered by severity,
+   and sets the `AI Review` check.
 
 ![The timeline of a PullRequestWorkflow in Temporal UI: round 1 with its
 three reviewers and a PublishReview of 6 findings, a reply in the S-01
@@ -164,153 +152,49 @@ running.](assets/github-pr-workflow.png)
 
 ## Prerequisites
 
-Accounts:
-
-- **Temporal Cloud**: a namespace with Serverless Workers enabled
-  (pre-release: ask your Temporal contact to enable it), and access to its
-  CA certificates.
-- **AWS**: an account with administrator access, in a region where
-  AgentCore Runtime is available (`ca-central-1` by default), with access
-  to Claude Opus 5 on Amazon Bedrock.
-- **GitHub**: a personal account or an organization to own the GitHub App
-  and the demo repository.
-
-Tools on the machine that deploys: [uv](https://docs.astral.sh/uv/), GNU
-Make, [OpenTofu](https://opentofu.org/) 1.12+, the AWS CLI v2, the
-Temporal CLI 1.9+, `tcld`, the GitHub CLI, `jq`, and Docker (or a
-compatible CLI) able to build `linux/arm64` images.
-[SETUP.md](SETUP.md#1-accounts-and-tools) lists the tested versions.
+A Temporal Cloud namespace with Serverless Workers enabled, an AWS account
+with access to Claude on Amazon Bedrock, a GitHub account, and a few
+command-line tools, including Docker:
+[SETUP.md](SETUP.md#1-accounts-and-tools) lists them with their tested
+versions.
 
 ## Getting started
 
 [SETUP.md](SETUP.md) details every step.
 
-1. **Clone and install**:
-
-   ```bash
-   git clone https://github.com/<this-repo-owner>/code-review-agentcore-temporal.git
-   cd code-review-agentcore-temporal
-   make install
-   ```
-
-2. **Create the mTLS certificate** that every component presents to
-   Temporal Cloud, and add its CA to the namespace:
-   [SETUP.md, step 3](SETUP.md#3-mtls-certificates).
-3. **Configure**: `cp .env.example .env`, then set `TEMPORAL_NAMESPACE`.
-   The other settings, such as the region, the model or the name of the
-   demo repository, have defaults: see [Configuration](#configuration).
-4. **Log in** to AWS and GitHub:
-
-   ```bash
-   aws sso login --profile <profile> && export AWS_PROFILE=<profile>
-   gh auth login && gh auth refresh --scopes workflow && gh auth setup-git
-   ```
-
-> [!NOTE]
-> Temporalites log in to the AWS account with the `access` tool:
->
-> ```bash
-> access account --aws-account-id <aws-account-id>
-> access account --aws-account-id <aws-account-id> --write
-> ```
-
-5. **Deploy**, with Docker running:
+1. Clone this repository and run `make install`.
+2. mTLS certificate: [SETUP.md §3](SETUP.md#3-mtls-certificates).
+3. `.env`: [SETUP.md §4](SETUP.md#4-configuration-env).
+4. Log in to AWS and GitHub: [SETUP.md §5-6](SETUP.md#5-aws-credentials).
+5. Start Docker, then deploy everything:
 
    ```bash
    make up
    ```
 
-   `make up` creates the AWS resources (Lambda router, ECR repository,
-   AgentCore Runtime, IAM roles, S3 bucket, secrets, KMS key), makes the
-   worker image the current Temporal Worker Deployment Version, then sets
-   up GitHub. On a first run, the browser opens twice: to create the
-   GitHub App, then to install it on the demo repository, which `make up`
-   fills with the demo application. The command is idempotent: run it
-   again after an interruption or a code change.
-6. **Try it**: `make ping` checks the scale from zero, then open a pull
-   request from `feature/customer-search` to `main` in the demo
-   repository. The review arrives within a few minutes.
-
 At rest, no worker runs: the deployment costs its storage, secrets and KMS
 key, a few dollars a month, plus the Bedrock tokens of each review.
-`make destroy` removes the AWS resources.
 
 ## Configuration
 
-`make up` reads `.env`, a copy of [`.env.example`](.env.example) with
-plain `KEY=value` lines. Both `.env` and `certs/` are git-ignored.
-
-Required:
-
-- `TEMPORAL_NAMESPACE`: your Temporal Cloud namespace, such as
-  `your-namespace.a1b2c`.
-- The mTLS client certificate and its key, at `certs/client.pem` and
-  `certs/client.key` (step 2 of [Getting started](#getting-started));
-  `TEMPORAL_TLS_CERT_PATH` and `TEMPORAL_TLS_KEY_PATH` point elsewhere.
-
-Optional, with their default:
-
-- AWS and model:
-  - `AWS_REGION` (`ca-central-1`): the region of every AWS resource,
-    where AgentCore Runtime must be available.
-  - `BEDROCK_MODEL_ID` (`global.anthropic.claude-opus-5`): the global
-    cross-region inference profile of the model.
-  - `MODEL_EFFORT` (`high`): how much effort Claude spends per answer,
-    from `low` to `max`.
-  - `MAX_PARALLEL_AGENTS` (`3`): how many reviewer agents run at once.
-- GitHub:
-  - `GITHUB_OWNER` (the account logged in to `gh`): an organization to
-    own the GitHub App and the demo repository.
-  - `DEMO_REPO` (`agentcore-review-demo-app`): the name of the demo
-    repository.
-  - `GITHUB_APP_NAME` (`Code Review AgentCore x Temporal`): the name of
-    the GitHub App, 34 characters at most.
-- Behaviour:
-  - `PR_IDLE_WARNING_SECONDS` (`600`) and `PR_IDLE_CLOSE_SECONDS` (`900`):
-    how long a pull request stays without activity before the bot warns,
-    then closes it.
-  - `AGENTCORE_IDLE_TIMEOUT` (`120`): seconds before AgentCore stops an
-    idle session.
-  - `TRACING` (`off`): `on` sends traces to CloudWatch, see
-    [Observability](#observability).
-- Custom domain: `DOMAIN_NAME`, `SUBDOMAIN` (`codereview`),
-  `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_API_TOKEN` serve the webhook on a
-  hostname of a Cloudflare zone, such as `codereview.example.com`, instead
-  of the Lambda Function URL: see
-  [SETUP.md](SETUP.md#custom-domain-cloudflare-optional).
-
-`.env.example` documents the remaining settings, such as the task queue
-and the Worker Deployment name.
+`make up` reads `.env`, a copy of [`.env.example`](.env.example), which
+documents every setting and its default. Only `TEMPORAL_NAMESPACE` is
+required, with the mTLS certificate at `certs/client.pem` and
+`certs/client.key`.
 
 ## Usage
 
 Commands run from the repository root, with the AWS and GitHub sessions of
 [Getting started](#getting-started) open.
 
-Deploy and update:
-
-- `make up`: deploy everything, in order: AWS resources, worker, GitHub
-  App and demo repository. Run it again after pulling a new version of
-  this repository: it builds and activates a new worker version only when
-  the worker code changed.
-- `make ping`: run the Ping workflow on AgentCore, for which Temporal
-  Cloud starts a worker (scale from zero).
-
-Run the demo:
-
-- Open a pull request from `feature/customer-search` to `main` in the demo
-  repository, then reply to a finding, or comment `/fix` or `/kill`.
-- Reset the demo repository between two runs: in its **Actions** tab,
-  **Reset demo**, **Run workflow**, or
-  `gh workflow run reset-demo.yml --repo <owner>/agentcore-review-demo-app`.
-  The reset closes the open pull requests and recreates the scenario
-  branches.
+Run the demo: see [DEMO.md](DEMO.md).
 
 Maintain:
 
 - `make kill-sessions`: stop every AgentCore session of the task queue.
 - `make prune`: after an update, remove the AgentCore endpoints and worker
   versions no workflow uses any more.
+- `make delete-workflows`: delete the closed workflows of the namespace.
 - `make destroy`: remove the AWS resources, after a confirmation. The
   OpenTofu state bucket, the GitHub App, its credentials and the demo
   repository stay for the next `make up`.

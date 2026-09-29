@@ -13,6 +13,8 @@ locals {
   bedrock_inference_profile_arn = format(
     "arn:aws:bedrock:%s:%s:inference-profile/%s", var.region, local.account_id, var.bedrock_model_id
   )
+  # Where AgentCore writes the runtime's logs: one log group per endpoint.
+  agentcore_log_groups = "arn:aws:logs:${var.region}:${local.account_id}:log-group:/aws/bedrock-agentcore/runtimes/*"
 }
 
 resource "aws_iam_role" "agentcore" {
@@ -39,16 +41,21 @@ resource "aws_iam_role_policy" "agentcore" {
         Action   = ["ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"]
         Resource = aws_ecr_repository.worker.arn
       },
+      # The runtime's log groups, as in the execution role of the AgentCore developer guide.
       {
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-          "logs:DescribeLogStreams",
-          "logs:DescribeLogGroups",
-        ]
-        Resource = "*"
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogGroup", "logs:DescribeLogStreams"]
+        Resource = local.agentcore_log_groups
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+        Resource = "${local.agentcore_log_groups}:log-stream:*"
+      },
+      {
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = "arn:aws:logs:${var.region}:${local.account_id}:log-group:*"
       },
       {
         Effect   = "Allow"
@@ -110,7 +117,7 @@ resource "aws_bedrockagentcore_agent_runtime" "worker" {
     network_mode = "PUBLIC"
   }
   lifecycle_configuration {
-    idle_runtime_session_timeout = var.idle_timeout
+    idle_runtime_session_timeout = 120
     max_lifetime                 = 3600
   }
   # Names and ARNs only: the worker reads secret values from Secrets Manager.
@@ -121,7 +128,6 @@ resource "aws_bedrockagentcore_agent_runtime" "worker" {
     TEMPORAL_DEPLOYMENT_NAME = var.deployment_name
     TEMPORAL_BUILD_ID        = var.build_id
     TEMPORAL_CERT_SECRET_ARN = aws_secretsmanager_secret.temporal_cert.arn
-    GITHUB_APP_SECRET_ID     = local.github_app_secret_name
     SNAPSHOTS_BUCKET         = aws_s3_bucket.snapshots.bucket
     BEDROCK_MODEL_ID         = var.bedrock_model_id
     MODEL_EFFORT             = var.model_effort

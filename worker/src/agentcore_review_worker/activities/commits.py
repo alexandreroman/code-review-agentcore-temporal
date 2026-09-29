@@ -1,7 +1,7 @@
 """The fixer's commit: one verified commit through the Git Data API, never a forced ref update.
 
-No author is set, so GitHub signs the commit as the app. The Review-Fix trailer identifies a commit an
-earlier attempt already pushed.
+No author is set, so GitHub signs the commit as the app. The Review-Fix trailer and the parent identify a commit
+an earlier attempt already pushed.
 """
 
 from agentcore_review_shared.contract import PrRef
@@ -11,7 +11,7 @@ from temporalio.exceptions import ApplicationError
 
 from ..markers import fix_trailer
 from ..models import CommitInput, CommitResult
-from ..publishing import split_changes
+from ..navigation import split_changes
 from .github_api import get, github_errors, repo_path, send
 from .heartbeats import heartbeat_while_running
 
@@ -44,7 +44,7 @@ async def commit_fix(input: CommitInput) -> CommitResult:
                 non_retryable=True,
             )
         branch = pull["head"]["ref"]
-        pushed = await _already_pushed(pr, branch, trailer)
+        pushed = await _already_pushed(pr, branch, trailer, input.expected_head_sha)
         if pushed is not None:
             return CommitResult(sha=pushed, rejected=rejected)
         if await _branch_head(pr, branch) != input.expected_head_sha:
@@ -88,9 +88,17 @@ async def _executable_paths(pr: PrRef, tree_sha: str) -> set[str]:
     return {entry["path"] for entry in tree["tree"] if entry["mode"] == EXECUTABLE_FILE}
 
 
-async def _already_pushed(pr: PrRef, branch: str, trailer: str) -> str | None:
+async def _already_pushed(pr: PrRef, branch: str, trailer: str, parent_sha: str) -> str | None:
+    """The commit an earlier attempt of this fix pushed: its trailer, on top of the expected head.
+
+    The parent tells it apart from an earlier run's fix with the same number, when the numbering restarted.
+    """
     commits = await get(pr, f"{repo_path(pr)}/commits", {"sha": branch, "per_page": 10})
-    return next((c["sha"] for c in commits if trailer in c["commit"]["message"].splitlines()), None)
+    for commit in commits:
+        has_trailer = trailer in commit["commit"]["message"].splitlines()
+        if has_trailer and commit["parents"] and commit["parents"][0]["sha"] == parent_sha:
+            return commit["sha"]
+    return None
 
 
 async def _branch_head(pr: PrRef, branch: str) -> str:

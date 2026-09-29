@@ -1,4 +1,4 @@
-from agentcore_review_worker.hunks import commentable_lines, is_commentable
+from agentcore_review_worker.hunks import commentable_lines, git_lines, is_commentable
 
 PATCH = """@@ -1,4 +1,5 @@
  import os
@@ -38,11 +38,9 @@ def test_missing_patch():
     assert commentable_lines(None) == set() and commentable_lines("") == set()
 
 
-def test_form_feed_in_a_context_line_does_not_add_an_extra_line():
-    # str.splitlines() also breaks on "\x0c"; git only breaks on "\n", so
-    # " a\x0cb" is one context line, not two.
-    patch = "@@ -1,2 +1,2 @@\n a\x0cb\n TARGET"
-    assert commentable_lines(patch) == {1, 2}
+def test_lines_split_like_git_on_newlines_only():
+    # str.splitlines() would also break on the form feed and keep the empty line after the trailing newline.
+    assert git_lines("a\x0cb\r\nTARGET\n") == ["a\x0cb", "TARGET"]
 
 
 def test_is_commentable_single_and_range():

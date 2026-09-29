@@ -10,7 +10,7 @@ MAX_BATCH_FILES = 15
 MAX_BATCH_PATCH_BYTES = 60_000
 
 
-def is_excluded(changed: ChangedFile) -> bool:
+def _is_excluded(changed: ChangedFile) -> bool:
     if changed.patch_bytes is None:
         return True
     name = PurePosixPath(changed.path).name
@@ -23,7 +23,7 @@ def partition(files: list[ChangedFile]) -> tuple[list[ChangedFile], list[Changed
     reviewed: list[ChangedFile] = []
     excluded: list[ChangedFile] = []
     for f in files:
-        if is_excluded(f):
+        if _is_excluded(f):
             excluded.append(f)
         else:
             reviewed.append(f)

@@ -22,7 +22,7 @@ from temporalio.contrib.strands import TemporalAgent
 from temporalio.contrib.strands.workflow import activity_as_tool
 from temporalio.exceptions import ApplicationError
 
-from agentcore_review_worker.workflows.policies import MODEL_ACTIVITY, TOOL_ACTIVITY
+from agentcore_review_worker.workflows.policies import MODEL_ACTIVITY, MULTI_CALL
 
 with workflow.unsafe.imports_passed_through():
     from pydantic import BaseModel
@@ -38,9 +38,7 @@ AGENT_FAILURES: list[type[BaseException]] = [
     MaxTokensReachedException,
     ContextWindowOverflowException,
 ]
-"""Raised by the Strands loop in workflow code. Listed in failure_exception_types, they fail the child workflow
-instead of retrying its task forever. A failed model activity needs no entry: Strands re-raises it unwrapped,
-and the raw ActivityError fails the workflow like any Temporal failure."""
+"""Raised by the Strands loop in workflow code; listed so they fail the child instead of retrying its task forever."""
 
 
 class ModelCallBudget(HookProvider):
@@ -72,7 +70,7 @@ class _SnapshotBound(AgentTool):
     def __init__(self, activity_fn: Callable, snapshot: SnapshotRef) -> None:
         super().__init__()
         self._activity_fn = activity_fn
-        self._tool = activity_as_tool(activity_fn, **TOOL_ACTIVITY)
+        self._tool = activity_as_tool(activity_fn, **MULTI_CALL)
         self._snapshot = snapshot.model_dump(mode="json")
         spec = copy.deepcopy(self._tool.tool_spec)
         schema = spec["inputSchema"]["json"]
@@ -95,7 +93,7 @@ class _SnapshotBound(AgentTool):
 
     async def stream(self, tool_use: ToolUse, invocation_state: dict[str, Any], **kwargs: Any) -> ToolGenerator:
         summary = summaries.tool_call(self.tool_name, tool_use["input"])
-        tool = activity_as_tool(self._activity_fn, **TOOL_ACTIVITY, summary=summary)
+        tool = activity_as_tool(self._activity_fn, **MULTI_CALL, summary=summary)
         bound = cast(ToolUse, {**tool_use, "input": {**tool_use["input"], "snapshot": self._snapshot}})
         async for event in tool.stream(bound, invocation_state, **kwargs):
             yield event

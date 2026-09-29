@@ -2,7 +2,7 @@
   "workspace": {
     "copyFiles": [".env", "client.pem", "client.key"],
     "scripts": {
-      "setup": "make worktree-init",
+      "setup": "make install",
       "run": "make up",
       "dev": "make dev"
     }

@@ -16,6 +16,8 @@ E2E_ROOT=/tmp/e2e-validation
 POLL=5
 CATEGORIES="security performance maintainability"
 SCENARIO_TITLE="Add customer search & order history"
+# Seconds before AgentCore ends an idle session, as set in infra/aws/worker.tf.
+IDLE_TIMEOUT=120
 
 {
   read -r TEMPORAL_NAMESPACE
@@ -26,14 +28,12 @@ SCENARIO_TITLE="Add customer search & order history"
   read -r TASK_QUEUE
   read -r DEV_TASK_QUEUE
   read -r DEPLOYMENT
-  read -r IDLE_TIMEOUT
   read -r PR_IDLE_WARNING
   read -r DEMO_REPO
   read -r OWNER
 } < <(make -s print-TEMPORAL_NAMESPACE print-TEMPORAL_ADDRESS print-TEMPORAL_TLS_CERT_PATH \
   print-TEMPORAL_TLS_KEY_PATH print-AWS_REGION print-TASK_QUEUE print-DEV_TASK_QUEUE \
-  print-TEMPORAL_DEPLOYMENT_NAME print-AGENTCORE_IDLE_TIMEOUT print-PR_IDLE_WARNING_SECONDS print-DEMO_REPO \
-  print-GITHUB_OWNER)
+  print-TEMPORAL_DEPLOYMENT_NAME print-PR_IDLE_WARNING_SECONDS print-DEMO_REPO print-GITHUB_OWNER)
 export TEMPORAL_NAMESPACE TEMPORAL_ADDRESS AWS_REGION
 export AWS_DEFAULT_REGION="$AWS_REGION"
 # tofu output needs it: the aws stack's state encryption reads var.region.

@@ -12,7 +12,7 @@ docstrings, log and error messages, tests, commit messages, documentation
 memory. Conversations with the user may happen in another language; the
 artifacts do not.
 
-**Why:** the project is a public conference demo shared with an international
+**Why:** the project is a public live demo shared with an international
 audience and team.
 
 **How to apply:** write every file and commit message in English, including

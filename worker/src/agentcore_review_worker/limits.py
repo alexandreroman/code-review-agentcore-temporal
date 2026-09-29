@@ -1,4 +1,4 @@
-"""The agents' model call budget: each call is a 10-20 s round trip, and a review round must stay under 3 min."""
+"""The agents' model call budget: a call often takes 60-80 s, and an agent's calls must fit CHILD_RUN_TIMEOUT."""
 
 MAX_MODEL_CALLS = 8
 HARD_TURN_LIMIT = MAX_MODEL_CALLS + 3

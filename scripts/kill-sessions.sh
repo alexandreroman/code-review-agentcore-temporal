@@ -50,7 +50,8 @@ stop_one() {
       outcome=gone
       break
     fi
-    if [[ "$error_output" == *ConflictException* && "$attempt" -lt 3 ]]; then
+    if [[ ("$error_output" == *ConflictException* || "$error_output" == *ThrottlingException*) \
+      && "$attempt" -lt 3 ]]; then
       sleep 1
       continue
     fi

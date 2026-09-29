@@ -302,6 +302,17 @@ def test_clean_report_pins_the_category_and_keeps_known_open_ids():
     assert cleaned.resolved_ids == ["S-02", "S-09", "S-10"]
 
 
+def test_clean_report_matches_resolved_ids_whatever_their_padding():
+    report = ReviewerReport(resolved_ids=["S-1", "s-009", "S-x"])
+    assert clean_report(report, Category.SECURITY, ["S-01", "S-09"]).resolved_ids == ["S-01", "S-09"]
+
+
+def test_clean_report_gives_finding_paths_their_plain_form():
+    report = ReviewerReport(findings=[draft(path="./src//A.java"), draft(path="../outside.java")])
+    cleaned = clean_report(report, Category.SECURITY, [])
+    assert [f.path for f in cleaned.findings] == ["src/A.java", "../outside.java"]
+
+
 def test_a_fix_round_keeps_only_critical_or_high_findings():
     report = ReviewerReport(findings=[draft(severity=s) for s in ("critical", "high", "medium", "low")])
     cleaned = clean_report(report, Category.SECURITY, [], fix_round=True)
@@ -374,22 +385,21 @@ def test_resolved_ids_are_merged_and_sorted_by_category_then_number():
     assert resolved_ids(reports) == ["S-99", "S-100", "P-01", "M-01"]
 
 
-def test_apply_summary_drops_duplicates_and_follows_the_order():
+def test_apply_summary_drops_duplicates_and_sorts_most_severe_first():
     new = [finding("S-01", severity="low"), finding("S-02"), finding("S-03", severity="medium")]
-    summary = ReviewSummary(summary_markdown="s", ordered_ids=["S-02", "S-404", "S-02"], duplicates=["S-03"])
+    summary = ReviewSummary(summary_markdown="s", duplicates=["S-03", "S-404"])
     assert [f.id for f in apply_summary(new, summary)] == ["S-02", "S-01"]
 
 
 def test_apply_summary_never_drops_every_finding():
     new = [finding("S-01"), finding("S-02")]
-    summary = ReviewSummary(summary_markdown="s", ordered_ids=[], duplicates=["S-01", "S-02"])
+    summary = ReviewSummary(summary_markdown="s", duplicates=["S-01", "S-02"])
     assert [f.id for f in apply_summary(new, summary)] == ["S-01", "S-02"]
 
 
 def test_fallback_summary_keeps_the_most_severe_finding_per_line():
     new = [finding("S-01", severity="medium"), finding("S-02", severity="critical"), finding("S-03", line=9)]
     summary = fallback_summary(SynthesisInput(new_findings=new, resolved_ids=["P-03"]))
-    assert summary.ordered_ids == ["S-02", "S-03"]
     assert summary.duplicates == ["S-01"]
     assert "S-02 (critical)" in summary.summary_markdown
     assert "P-03" not in summary.summary_markdown  # the review body lists the resolved IDs

@@ -6,14 +6,14 @@ type: project
 
 # Project objective
 
-A 15-minute conference talk showing only two screens (GitHub and Temporal
-UI) and four moments: see "What the demo shows" in `README.md`.
+The project backs a 15-minute live demo of four moments on two screens,
+GitHub and Temporal UI (see `DEMO.md`).
 
 **Why:** the audience must see, live and without incident, why Temporal and
 AgentCore matter for agentic workloads.
 
-**How to apply:** reliability and readability on stage beat features;
-every artifact that crosses the network stays small (multi-stage image,
-nothing the runtime already provides), because the demo deploys from slow
-conference uplinks; drop any file or step that serves none of the four
-moments.
+**How to apply:** reliability and readability during the live demo beat
+features; every artifact that crosses the network stays small
+(multi-stage image, nothing the runtime already provides), because the
+demo may deploy from slow event uplinks; drop any file or step that serves
+none of the four moments.

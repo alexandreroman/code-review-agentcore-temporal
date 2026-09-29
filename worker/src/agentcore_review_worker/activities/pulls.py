@@ -46,6 +46,7 @@ class PullActivities:
         )
 
     @activity.defn(name="FetchDiff")
+    @heartbeat_while_running
     async def fetch_diff(self, input: BatchInput) -> BatchPatches:
         """The patches of a reviewer's files (the comparison ListFiles read) and the top-level tree."""
         pr = input.pr

@@ -21,7 +21,7 @@ class ReviewerWorkflow:
             input.batch,
             result_type=BatchPatches,
             summary=summaries.diff_files(input.batch.paths),
-            **policies.FETCH_DIFF,
+            **policies.GITHUB_CALL,
         )
         report = await run_agent(
             name=f"{input.category} reviewer",

@@ -6,16 +6,19 @@ import logging
 import os
 import signal
 import socket
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from . import tracing
-from .runtime import build_worker, connect
+from .runtime import EXECUTOR_THREADS, build_worker, connect
 from .settings import dev_settings
 
 logger = logging.getLogger(__name__)
 
 
 async def run() -> None:
+    loop = asyncio.get_running_loop()
+    loop.set_default_executor(ThreadPoolExecutor(max_workers=EXECUTOR_THREADS))  # sized for the model calls
     settings = dev_settings(os.environ)
     identity = f"dev:{socket.gethostname()}"
     cert = Path(os.environ["TEMPORAL_TLS_CERT_PATH"]).read_bytes()
@@ -27,7 +30,6 @@ async def run() -> None:
     # A signal handler (not a bare KeyboardInterrupt) drives the worker's own graceful
     # shutdown, so Ctrl-C on stage stops it without a traceback or a dirty event loop.
     stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
     async with worker:

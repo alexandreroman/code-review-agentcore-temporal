@@ -4,8 +4,9 @@ Requests go through the Converse API, signed with the caller's AWS credentials: 
 developer's in the dev worker. The region comes from the standard boto3 resolution, as for the worker's other AWS
 clients: AWS_DEFAULT_REGION (exported by the Makefile in dev, provided by the runtime on AgentCore) or the profile.
 
-Temporal owns retries: the Bedrock client makes one attempt with a 170 s read timeout, inside the model activity's
-180 s start_to_close, and a Bedrock error reaches Temporal typed by its error code (see MODEL_RETRY).
+Temporal owns retries: the Bedrock client makes one attempt, and a Bedrock error reaches Temporal typed by its error
+code (see MODEL_RETRY). Its 170 s read timeout bounds the silence between two chunks of the stream, under the model
+activity's start_to_close, which bounds the whole call.
 """
 
 from collections.abc import AsyncGenerator

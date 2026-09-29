@@ -28,6 +28,7 @@ CHECK_NAME = "AI Review"
 
 
 @activity.defn(name="UpdateCheck")
+@heartbeat_while_running
 async def update_check(input: CheckInput) -> None:
     """Create or update the AI Review check run of a round, found again by its external ID."""
     pr = input.pr
@@ -111,6 +112,7 @@ async def recover_counters(input: RecoveryInput) -> RecoveredCounters:
 
 
 @activity.defn(name="PostComment")
+@heartbeat_while_running
 async def post_comment(input: CommentInput) -> None:
     """Comment in the Conversation once: a retry finds the earlier attempt's marker among the bot's comments."""
     pr = input.pr
@@ -120,6 +122,7 @@ async def post_comment(input: CommentInput) -> None:
 
 
 @activity.defn(name="ClosePR")
+@heartbeat_while_running
 async def close_pr(pr: PrRef) -> None:
     """Close the pull request; closing a closed one changes nothing, so a retry is harmless."""
     with github_errors():

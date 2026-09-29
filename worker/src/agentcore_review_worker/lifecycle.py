@@ -19,6 +19,7 @@ from agentcore_review_worker.models import (
     SynthesisInput,
     ThreadComment,
 )
+from agentcore_review_worker.navigation import repository_path
 from agentcore_review_worker.summaries import count
 
 Action = Literal["close", "review", "fix", "reply"]
@@ -266,16 +267,26 @@ def clean_report(
 ) -> ReviewerReport:
     """Pin every finding to the reviewer's category and keep only resolved IDs it was asked about.
 
+    IDs and paths take their plain form ("s-1" gives S-01, "./src/A.java" gives src/A.java), so that a resolved ID
+    matches its open finding and a finding's path its file in the diff. A path outside the repository stays as it is:
+    its finding goes into the review body.
+
     In a fix round, only critical or high findings stay: the rounds after a fix converge whatever the model reports.
     """
-    resolved = {raw.strip().upper() for raw in report.resolved_ids} & set(open_ids)
+    resolved = {_plain_finding_id(raw) for raw in report.resolved_ids} & set(open_ids)
     drafts = report.findings
     if fix_round:
         drafts = [draft for draft in drafts if draft.severity.blocking]
-    return ReviewerReport(
-        findings=[draft.model_copy(update={"category": category}) for draft in drafts],
-        resolved_ids=sorted(resolved, key=id_sort_key),
-    )
+    findings = [
+        draft.model_copy(update={"category": category, "path": repository_path(draft.path) or draft.path})
+        for draft in drafts
+    ]
+    return ReviewerReport(findings=findings, resolved_ids=sorted(resolved, key=id_sort_key))
+
+
+def _plain_finding_id(raw: str) -> str | None:
+    parsed = parse_finding_id(raw.strip().upper())
+    return format_finding_id(*parsed) if parsed is not None else None
 
 
 def number_findings(
@@ -300,18 +311,15 @@ def resolved_ids(reports: list[ReviewerReport]) -> list[str]:
 
 
 def apply_summary(new: list[Finding], summary: ReviewSummary) -> list[Finding]:
-    """The round's findings without duplicates, in the synthesis order; unknown IDs are ignored.
+    """The round's findings without duplicates, most severe first; unknown IDs are ignored.
 
     A synthesis that marks every finding as a duplicate is ignored on that point: a duplicate
     always repeats a finding that stays.
     """
-    by_id = {f.id: f for f in new}
-    dropped = set(summary.duplicates) & by_id.keys()
-    if dropped == by_id.keys():
+    dropped = set(summary.duplicates)
+    if all(f.id in dropped for f in new):
         dropped = set()
-    ordered = [by_id[i] for i in dict.fromkeys(summary.ordered_ids) if i in by_id and i not in dropped]
-    placed = {f.id for f in ordered} | dropped
-    return ordered + sorted((f for f in new if f.id not in placed), key=sort_key)
+    return sorted((f for f in new if f.id not in dropped), key=sort_key)
 
 
 def fallback_summary(input: SynthesisInput) -> ReviewSummary:
@@ -327,11 +335,7 @@ def fallback_summary(input: SynthesisInput) -> ReviewSummary:
         text = f"{count(len(merged), 'new finding')} in this round, most severe first: {with_severity(merged)}."
     else:
         text = "No new finding in this round."
-    return ReviewSummary(
-        summary_markdown=text,
-        ordered_ids=[f.id for f in merged],
-        duplicates=[f.id for f in input.new_findings if f.id not in kept],
-    )
+    return ReviewSummary(summary_markdown=text, duplicates=[f.id for f in input.new_findings if f.id not in kept])
 
 
 def with_severity(findings: list[Finding]) -> str:

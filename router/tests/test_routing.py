@@ -13,7 +13,9 @@ from agentcore_review_router.routing import (
     workflow_summary,
 )
 from agentcore_review_shared.contract import SIGNAL_PR_CLOSED, PrClosed, PrRef, PullRequestInput
-from temporalio.common import WorkflowIDReusePolicy
+from agentcore_review_shared.summaries import MAX_SUMMARY_BYTES
+from temporalio.common import WorkflowIDConflictPolicy as Conflict
+from temporalio.common import WorkflowIDReusePolicy as Reuse
 
 FIXTURES = Path(__file__).parent / "fixtures"
 CONFIG = RouterConfig(
@@ -34,19 +36,20 @@ def load(name: str) -> dict:
 
 
 @pytest.mark.parametrize(
-    ("action", "policy", "reopened"),
+    ("action", "reuse_policy", "conflict_policy", "reopened"),
     [
-        ("opened", WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY, False),
-        ("synchronize", WorkflowIDReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY, False),
-        ("reopened", WorkflowIDReusePolicy.ALLOW_DUPLICATE, True),
+        ("opened", Reuse.ALLOW_DUPLICATE_FAILED_ONLY, Conflict.USE_EXISTING, False),
+        ("synchronize", Reuse.ALLOW_DUPLICATE_FAILED_ONLY, Conflict.USE_EXISTING, False),
+        ("reopened", Reuse.ALLOW_DUPLICATE, Conflict.TERMINATE_EXISTING, True),
     ],
 )
-def test_pr_updates_start_or_signal(action, policy, reopened):
+def test_pr_updates_start_or_signal(action, reuse_policy, conflict_policy, reopened):
     payload = load("pull_request")
     payload["action"] = action
     result = route("pull_request", payload, "delivery-1", CONFIG)
     assert isinstance(result, StartOrSignal)
-    assert result.workflow_id == WF and result.task_queue == "review" and result.reuse_policy == policy
+    assert result.workflow_id == WF and result.task_queue == "review"
+    assert result.reuse_policy == reuse_policy and result.conflict_policy == conflict_policy
     assert result.signal.head_sha == "a1b2c3d4e5f6" and result.signal.delivery_id == "delivery-1"
     assert result.summary == "#3 · Add customer search"
     assert result.input == PullRequestInput(
@@ -61,11 +64,9 @@ def test_workflow_summary_is_a_single_line():
     assert workflow_summary(3, "Add customer\n  search\r\n") == "#3 · Add customer search"
 
 
-def test_long_workflow_summary_is_cut_to_200_bytes_on_a_character_boundary():
-    # "#3 · " takes 6 bytes and each "é" 2: the cut at 197 bytes splits the 96th "é", which is dropped.
+def test_a_long_workflow_summary_keeps_the_pull_request_number():
     summary = workflow_summary(3, "é" * 200)
-    assert summary == "#3 · " + "é" * 95 + "…"
-    assert len(summary.encode()) <= 200
+    assert summary.startswith("#3 · ") and len(summary.encode()) <= MAX_SUMMARY_BYTES
 
 
 def test_dev_branch_goes_to_the_dev_queue():

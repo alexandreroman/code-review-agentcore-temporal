@@ -1,11 +1,4 @@
-import pytest
-from agentcore_review_worker.batching import (
-    MAX_BATCH_FILES,
-    MAX_BATCH_PATCH_BYTES,
-    is_excluded,
-    make_batches,
-    partition,
-)
+from agentcore_review_worker.batching import MAX_BATCH_FILES, MAX_BATCH_PATCH_BYTES, make_batches, partition
 from agentcore_review_worker.models import ChangedFile
 
 
@@ -13,23 +6,32 @@ def cf(path: str, patch_bytes: int | None = 100) -> ChangedFile:
     return ChangedFile(path=path, patch_bytes=patch_bytes)
 
 
-@pytest.mark.parametrize("path", ["uv.lock", "poetry.lock", "web/package-lock.json", "static/app.min.js"])
-def test_lock_and_generated_files_are_excluded(path):
-    assert is_excluded(cf(path))
-
-
-@pytest.mark.parametrize(
-    "path", ["src/main/java/com/example/orders/OrderService.java", "README.md", "OrderLock.java", "app.js"]
-)
-def test_regular_files_are_reviewed(path):
-    assert not is_excluded(cf(path))
-
-
-def test_partition_keeps_order():
-    files = [cf("A.java"), cf("uv.lock"), cf("B.java"), cf("img.png", None)]
+def test_lock_generated_and_binary_files_are_excluded_in_order():
+    files = [
+        cf("src/main/java/com/example/orders/OrderService.java"),
+        cf("uv.lock"),
+        cf("README.md"),
+        cf("poetry.lock"),
+        cf("OrderLock.java"),
+        cf("web/package-lock.json"),
+        cf("app.js"),
+        cf("static/app.min.js"),
+        cf("img.png", None),
+    ]
     reviewed, excluded = partition(files)
-    assert [f.path for f in reviewed] == ["A.java", "B.java"]
-    assert [f.path for f in excluded] == ["uv.lock", "img.png"]
+    assert [f.path for f in reviewed] == [
+        "src/main/java/com/example/orders/OrderService.java",
+        "README.md",
+        "OrderLock.java",
+        "app.js",
+    ]
+    assert [f.path for f in excluded] == [
+        "uv.lock",
+        "poetry.lock",
+        "web/package-lock.json",
+        "static/app.min.js",
+        "img.png",
+    ]
 
 
 def test_file_count_threshold():

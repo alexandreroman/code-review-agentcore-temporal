@@ -1,4 +1,4 @@
-"""Secret shapes, written by `make github-app` / `make secrets` and read by the router and the worker."""
+"""Secret shapes, written by `make github` / `make secrets` and read by the router and the worker."""
 
 from typing import Annotated
 
@@ -10,7 +10,7 @@ NonEmpty = Annotated[str, StringConstraints(min_length=1)]
 
 
 class GitHubAppSecret(BaseModel):
-    """Written by `make github-app` from the manifest conversion; `make github` refreshes the slug after a rename."""
+    """Written by `make github` from the manifest conversion; it also refreshes the slug after a rename."""
 
     app_id: int
     slug: NonEmpty

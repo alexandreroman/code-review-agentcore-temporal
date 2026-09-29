@@ -1,15 +1,6 @@
-# AgentCore worker image (linux/arm64). Build context: the repository root.
-#
-# Three stages so the final image ships only the base and the venv: no uv, no
-# source tree, no other workspace package. Bytecode is compiled at build
-# time because the worker runs as uid 1000 and cannot write __pycache__, so
-# without it every AgentCore cold start would recompile everything.
-#
-# The third-party dependencies (deps stage) and the workspace packages (app
-# stage) are split across two layers in the final image on purpose: a
-# code-only change in shared/src or worker/src only invalidates the small
-# workspace-package layer, so pushing it over a slow uplink stays fast
-# instead of re-pushing the whole venv every time.
+# AgentCore worker image (linux/arm64), built from the repository root. The final image adds only the venv to the base,
+# with bytecode compiled at build time (uid 1000 cannot write __pycache__) and the workspace packages in a layer of
+# their own: a code change pushes that small layer, not the whole venv.
 FROM python:3.14-slim AS deps
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.19 /uv /usr/local/bin/uv
@@ -34,10 +25,7 @@ COPY shared/src shared/src
 COPY worker/src worker/src
 RUN uv sync --frozen --no-dev --package agentcore-review-worker --no-editable
 
-# `COPY --from` flattens each wildcard match's own contents into the
-# destination instead of nesting it (a Dockerfile quirk, unlike plain `cp`),
-# so the two workspace packages and their dist-info directories are staged
-# here first, where an ordinary `cp` can nest them correctly.
+# `COPY --from` would flatten each wildcard match: the packages and dist-info are staged here, where cp nests them.
 RUN mkdir -p /out && cp -a \
       /app/.venv/lib/python3.14/site-packages/agentcore_review_worker* \
       /app/.venv/lib/python3.14/site-packages/agentcore_review_shared* \

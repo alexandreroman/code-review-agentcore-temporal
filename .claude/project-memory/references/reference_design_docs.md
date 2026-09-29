@@ -14,7 +14,7 @@ entry point for a new session). The whole `docs/` directory is git-ignored:
 these documents are never committed. The public reference is `README.md`,
 `SETUP.md` and `DEMO.md` at the repository root.
 
-**Why:** background for design questions, kept out of the public
+**Why:** background for design questions, outside the public
 repository.
 
 **How to access:** start from `STATUS.md`; read the specs for the intent

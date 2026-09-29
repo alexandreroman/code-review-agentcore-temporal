@@ -12,7 +12,7 @@ and GitHub error classification. Workflows, agents, infrastructure
 and the runtime wiring (entry points, settings, drain, tracing) have none;
 the e2e-validation skill exercises them for real.
 
-**Why:** the project is a teaching-oriented conference demo; tests of
+**Why:** the project is a teaching-oriented live demo; tests of
 infrastructure, tooling or library behaviour cost maintenance and teach
 nothing.
 

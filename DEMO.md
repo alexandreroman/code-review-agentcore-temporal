@@ -23,8 +23,7 @@ request, comment and reset below happens there, not in this repository.
 > during the demo nothing big must travel.
 
 1. `aws sso login --profile <profile>` and `export AWS_PROFILE=<profile>`
-   in the demo terminal (Temporalites: the `access` commands of
-   [Getting started](README.md#getting-started)), start Docker.
+   in the demo terminal, start Docker.
 2. `make up`: deploy everything now.
 3. Validate: `/e2e-validation full` in Claude Code (about 30 minutes). It
    checks all four moments, the reset, the dev mode and the return to zero.
@@ -40,17 +39,16 @@ request, comment and reset below happens there, not in this repository.
 > image. Docs and tests are safe to edit, and so is `demo/`: it only
 > reaches a demo repository that is still empty. The deployment is done:
 > no `make up` before the demo. After a new build anyway, demo on a fresh
-> PR only: a PR whose workflow started on an older build keeps the older
-> behaviour until its workflow moves to the new build.
+> PR only: an open PR moves to the new build only after its next action
+> or idle timer (see
+> [Updating and tearing down](SETUP.md#updating-and-tearing-down)).
 
 ## Pre-demo checklist (30 minutes before)
 
 1. **Network**: connect, and keep a phone hotspot at hand, tested with
    `make ping`; disconnect VPNs if the network is unstable.
-2. **Credentials**: `aws sso login --profile <profile>` (Temporalites: the
-   `access` commands of [Getting started](README.md#getting-started); the
-   session must outlast the demo), `AWS_PROFILE` exported in the demo
-   terminal, `gh auth status`.
+2. **Credentials**: log in to AWS again (the session must outlast the
+   demo), `gh auth status`.
 3. **Reset** the demo repository: its **Actions** tab, **Reset demo**,
    **Run workflow**, or
    `gh workflow run reset-demo.yml --repo <owner>/agentcore-review-demo-app`.
@@ -70,9 +68,7 @@ request, comment and reset below happens there, not in this repository.
 > for 10 minutes and closes it at 15. For a PR prepared in advance, raise
 > `PR_IDLE_WARNING_SECONDS` and `PR_IDLE_CLOSE_SECONDS` in `.env` and run
 > `make up` the day before (a router-only change, no new image); a PR keeps
-> the durations its workflow started with. A pull request closed by the bot
-> can be reopened: the reopen starts a new review, numbered after the
-> previous one.
+> the durations its workflow started with.
 
 ## Run-through (15 minutes)
 
@@ -148,9 +144,7 @@ Key points:
 
 ## After the demo
 
-Reset the demo repository. Nothing else: sessions drain by themselves,
-and at rest the infrastructure only costs its storage, secrets and KMS
-key, a few dollars a month.
+Reset the demo repository. Nothing else: sessions drain by themselves.
 
 ## Recovery
 

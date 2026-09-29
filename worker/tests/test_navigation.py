@@ -4,15 +4,18 @@ from pathlib import Path
 
 import pytest
 from agentcore_review_worker import navigation
+from agentcore_review_worker.models import FileChange
 from agentcore_review_worker.navigation import (
     MAX_FILE_BYTES,
     MAX_GLOB_RESULTS,
     MAX_GREP_RESULTS,
+    MAX_READ_BYTES,
     MAX_READ_LINES,
     glob_files,
     glob_paths,
     grep_files,
     read_file,
+    split_changes,
 )
 
 
@@ -46,10 +49,6 @@ def test_glob_is_capped(tmp_path):
 @pytest.mark.parametrize("path", ["..", "../", "/etc", "app/../.."])
 def test_glob_refuses_paths_outside_the_repository(repo, path):
     assert glob_files(repo, "*", path=path).startswith("Error:")
-
-
-def test_glob_refuses_absolute_patterns(repo):
-    assert glob_files(repo, "/etc/*").startswith("Error:")
 
 
 def test_grep_finds_matches_with_line_numbers(repo):
@@ -97,7 +96,7 @@ def test_grep_is_capped_and_clips_long_lines(tmp_path):
     root.mkdir()
     (root / "a.txt").write_text("\n".join(["match " + "x" * 1000] * (MAX_GREP_RESULTS + 5)))
     out = grep_files(root, "match").splitlines()
-    assert len(out) == MAX_GREP_RESULTS + 1 and out[-1] == "... truncated: 5 more matches"
+    assert len(out) == MAX_GREP_RESULTS + 1 and out[-1] == "... truncated: more matches not shown"
     assert len(out[0]) < 400
 
 
@@ -123,7 +122,7 @@ def test_read_respects_the_byte_budget(tmp_path):
     root.mkdir()
     (root / "wide.txt").write_text("\n".join("y" * 1000 for _ in range(300)))
     out = read_file(root, "wide.txt")
-    assert len(out.encode()) <= 40_000 + 200 and "showing lines 1-" in out.splitlines()[0]
+    assert len(out.encode()) <= MAX_READ_BYTES + 200 and "showing lines 1-" in out.splitlines()[0]
 
 
 def test_read_errors(repo):
@@ -139,23 +138,6 @@ def test_symlink_pointing_outside_is_refused(repo, tmp_path):
     assert read_file(repo, "link.txt").startswith("Error:")
     assert "link.txt" not in glob_files(repo, "*.txt")
     assert "outside" not in grep_files(repo, "outside")
-
-
-def test_grep_and_read_number_lines_like_git_splitting_on_newlines_only(tmp_path):
-    # str.splitlines() also breaks on "\x0c"; git only breaks on "\n", so
-    # "a\x0cb" is one line and TARGET is line 2, not line 3.
-    root = tmp_path / "ff"
-    root.mkdir()
-    (root / "form_feed.txt").write_bytes(b"a\x0cb\nTARGET")
-    assert grep_files(root, "TARGET") == "form_feed.txt:2: TARGET"
-    assert read_file(root, "form_feed.txt") == "     1\ta\x0cb\n     2\tTARGET"
-
-
-def test_read_strips_trailing_cr_from_crlf_files(tmp_path):
-    root = tmp_path / "crlf"
-    root.mkdir()
-    (root / "win.txt").write_bytes(b"line1\r\nline2\r\n")
-    assert read_file(root, "win.txt") == "     1\tline1\n     2\tline2"
 
 
 def test_tools_report_malformed_paths_instead_of_raising(repo):
@@ -233,12 +215,29 @@ def test_glob_paths_errors():
     assert glob_paths(["app/a.py"], "*", "../x").startswith("Error: path '../x' is outside the repository")
     assert glob_paths(["app/a.py"], "*", "/etc").startswith("Error:")
     assert glob_paths(["app/a.py"], "*", "nope") == "Error: path 'nope' not found."
+    for path in ("app/a.py", "./app/a.py", "app/a.py/"):
+        assert glob_paths(["app/a.py"], "*", path) == f"Error: path {path!r} is not a directory."
+    assert glob_paths(["app/a.py"], "").startswith("Error: invalid glob pattern")
 
 
-def test_glob_paths_reports_a_file_as_not_a_directory():
-    assert glob_paths(["app/a.py"], "*", "app/a.py") == "Error: path 'app/a.py' is not a directory."
+@pytest.mark.parametrize("pattern", ["../*", "app/../../*", "/etc/*"])
+def test_glob_refuses_patterns_outside_the_repository(repo, pattern):
+    expected = f"Error: glob pattern {pattern!r} reaches outside the repository."
+    assert glob_files(repo, pattern) == expected
+    assert glob_paths(["app/a.py"], pattern) == expected
 
 
-@pytest.mark.parametrize("pattern", ["", "/etc/passwd"])
-def test_glob_paths_rejects_invalid_patterns(pattern):
-    assert glob_paths(["app/a.py"], pattern).startswith("Error: invalid glob pattern")
+def test_split_changes_rejects_protected_and_escaping_paths():
+    paths = [
+        "src/A.java",
+        "./src//B.java",
+        ".github/workflows/ci.yml",
+        ".GitHub/x",
+        "../etc/passwd",
+        "/Abs.java",
+        "",
+        "src/A.java",
+    ]
+    accepted, rejected = split_changes([FileChange(path=p, new_content=f"{i}") for i, p in enumerate(paths)])
+    assert [(c.path, c.new_content) for c in accepted] == [("src/A.java", "7"), ("src/B.java", "1")]
+    assert rejected == [".github/workflows/ci.yml", ".GitHub/x", "../etc/passwd", "/Abs.java", ""]

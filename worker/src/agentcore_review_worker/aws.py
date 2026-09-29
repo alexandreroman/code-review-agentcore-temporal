@@ -3,11 +3,16 @@
 from functools import cache
 
 import boto3
+from botocore.config import Config
+
+# An S3 call gives up inside its activity attempt, which Temporal then retries: 2 × (3 + 10) s = 26 s at worst, under
+# every S3 activity's start-to-close.
+S3_CONFIG = Config(connect_timeout=3, read_timeout=10, retries={"total_max_attempts": 2})
 
 
 @cache
 def s3():
-    return boto3.client("s3")
+    return boto3.client("s3", config=S3_CONFIG)
 
 
 @cache

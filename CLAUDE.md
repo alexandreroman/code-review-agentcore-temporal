@@ -27,7 +27,7 @@ make up        # deploy everything (AWS, worker, GitHub)
 - `shared/` — contract shared by the router and the worker
 - `router/` — GitHub webhook handler (AWS Lambda)
 - `worker/` — Temporal workflows, review agents, activities
-- `tools/` — GitHub App registration tooling called by the Makefile
+- `tools/` — GitHub App registration tooling called by `scripts/github.sh`
 - `infra/` — OpenTofu stacks (`bootstrap`, `aws`, `github`)
 - `scripts/` — bash scripts behind the Make targets
 - `demo/` — demo application (baseline and scenario patch) that `make up`
@@ -38,8 +38,7 @@ make up        # deploy everything (AWS, worker, GitHub)
 `/e2e-validation` (smoke) or `/e2e-validation full` validates the deployed
 demo against real resources (`.claude/skills/e2e-validation/`): it opens
 pull requests in the demo repository and spends Bedrock tokens, so run it
-only when asked. The planted defects it expects live in
-`expected-findings.yaml` next to it.
+only when asked.
 
 ## Agents
 

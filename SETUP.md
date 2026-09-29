@@ -102,12 +102,9 @@ cp .env.example .env
 
 Set `TEMPORAL_NAMESPACE` to your namespace (`your-namespace.a1b2c` is the
 placeholder): it is the only required setting, with the certificate of the
-previous step at its default paths. Every other setting is optional:
-[Configuration](README.md#configuration) lists them with their default,
-such as `AWS_REGION`, `GITHUB_OWNER` or `DEMO_REPO`, and
-[`.env.example`](.env.example) documents each one.
-
-Plain `KEY=value` lines, no quotes: the Makefile includes the file.
+previous step at its default paths. [`.env.example`](.env.example)
+documents every other setting and its default, such as `AWS_REGION`,
+`GITHUB_OWNER` or `DEMO_REPO`.
 
 ## 5. AWS credentials
 
@@ -316,8 +313,7 @@ reload, without deploying anything.
   read.
 - **`Docker is not running`**: start Docker, then run the target again.
 - **AWS `ExpiredToken` or SSO errors**: `aws sso login --profile
-  <profile>` (Temporalites: the `access` commands of
-  [AWS credentials](#5-aws-credentials)).
+  <profile>`.
 - **`GitHub App <slug> is still not installed`** after 10 minutes: install
   the app on the demo repository, then run `make up` again.
 - **A review fails with `AccessDeniedException` or
@@ -353,4 +349,4 @@ reload, without deploying anything.
   start.
 - To replace the GitHub App, delete it in the GitHub settings
   (`https://github.com/settings/apps/<slug>`, **Advanced**), then run
-  `make github-app FORCE=1` and `make up`.
+  `make github FORCE=1` and `make up`.

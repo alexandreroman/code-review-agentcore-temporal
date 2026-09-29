@@ -10,7 +10,6 @@ SHELL := /bin/bash
 
 # Defaults for every setting .env may leave out (documented in .env.example).
 AWS_REGION ?= ca-central-1
-TEMPORAL_NAMESPACE ?=
 TEMPORAL_TLS_CERT_PATH ?= certs/client.pem
 TEMPORAL_TLS_KEY_PATH ?= certs/client.key
 TEMPORAL_DEPLOYMENT_NAME ?= agentcore-review-demo-worker
@@ -24,12 +23,8 @@ MODEL_EFFORT ?= high
 MAX_PARALLEL_AGENTS ?= 3
 DEMO_REPO ?= agentcore-review-demo-app
 GITHUB_APP_NAME ?= Code Review AgentCore x Temporal
-AGENTCORE_IDLE_TIMEOUT ?= 120
 GITHUB_APP_CALLBACK_PORT ?= 8765
-DOMAIN_NAME ?=
 SUBDOMAIN ?= codereview
-CLOUDFLARE_ZONE_ID ?=
-CLOUDFLARE_API_TOKEN ?=
 TRACING ?= off
 
 # Derived defaults, also applied when .env sets these to an empty value.
@@ -62,7 +57,6 @@ export TF_VAR_deployment_name = $(TEMPORAL_DEPLOYMENT_NAME)
 export TF_VAR_bedrock_model_id = $(BEDROCK_MODEL_ID)
 export TF_VAR_model_effort = $(MODEL_EFFORT)
 export TF_VAR_max_parallel_agents = $(MAX_PARALLEL_AGENTS)
-export TF_VAR_idle_timeout = $(AGENTCORE_IDLE_TIMEOUT)
 export TF_VAR_demo_repo = $(DEMO_REPO)
 export TF_VAR_domain_name = $(DOMAIN_NAME)
 export TF_VAR_subdomain = $(SUBDOMAIN)
@@ -71,7 +65,6 @@ export TF_VAR_tracing = $(TRACING)
 
 PROJECT := code-review-agentcore-temporal
 NAMESPACE_PLACEHOLDER := your-namespace.a1b2c
-GITHUB_APP := uv run --quiet python -m agentcore_review_tools.github_app
 TOFU_AWS := tofu -chdir=infra/aws
 TOFU_GITHUB := tofu -chdir=infra/github
 # Expanded by the shell of the recipe that uses it, so STS is only called then.
@@ -83,6 +76,12 @@ require = $(if $(strip $($(1))),,$(error $(1) is not set: $(2)))
 require_namespace = $(if $(filter-out $(NAMESPACE_PLACEHOLDER),$(strip $(TEMPORAL_NAMESPACE))),,$(error \
 	TEMPORAL_NAMESPACE is not set: put your Temporal Cloud namespace in .env))
 
+# Listed first among the prerequisites of the targets that need the namespace, so that a missing one stops them
+# before their slower prerequisites run (a recipe is only expanded after its prerequisites are built).
+.PHONY: namespace
+namespace:
+	$(call require_namespace)
+
 ##@ Develop
 
 .PHONY: install
@@ -90,24 +89,8 @@ install: ## Install every workspace package and the dev tools
 	uv sync --all-packages
 
 .PHONY: dev
-dev: infra-init ## Run the local worker (dev task queue on Temporal Cloud) with hot reload
-	$(call require_namespace)
+dev: namespace infra-init ## Run the local worker (dev task queue on Temporal Cloud) with hot reload
 	@GITHUB_OWNER=$(GITHUB_OWNER) scripts/dev.sh
-
-PR ?=
-ACTION ?= update
-QUEUE ?= $(DEV_TASK_QUEUE)
-
-.PHONY: review-pr
-review-pr: ## Drive a pull request's workflow by hand: PR=<n> [ACTION=update|fix|close] [QUEUE=<queue>]
-	$(call require_namespace)
-	$(call require,PR,pass the pull request number: make review-pr PR=<n>)
-	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
-	scripts/review-pr.sh "$(GITHUB_OWNER)" "$(DEMO_REPO)" "$(PR)" "$(ACTION)" "$(QUEUE)"
-
-.PHONY: worktree-init
-worktree-init: install ## Prepare a new worktree: .env and dependencies
-	@[ -f .env ] || cp .env.example .env
 
 ##@ Quality
 
@@ -152,8 +135,7 @@ infra-init:
 # infra, deploy, prune and destroy depend on router-build: every plan of the aws
 # stack, destroy included, reads build/router through archive_file data sources.
 .PHONY: infra
-infra: router-build infra-init
-	$(call require_namespace)
+infra: namespace router-build infra-init
 	scripts/infra.sh
 
 # Push the mTLS client certificate from .env to Secrets Manager (read by the worker and the router).
@@ -161,17 +143,9 @@ infra: router-build infra-init
 secrets:
 	scripts/secrets.sh
 
-# Register the GitHub App through the manifest flow (interactive). make up does
-# it on the first run; FORCE=1 registers a new app over the stored one.
-.PHONY: github-app
-github-app: infra-init
-	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
-	$(GITHUB_APP) register --owner $(GITHUB_OWNER) --name "$(GITHUB_APP_NAME)" \
-		--port $(GITHUB_APP_CALLBACK_PORT) --webhook-url "$$($(TOFU_AWS) output -raw webhook_url)" \
-		$(if $(FORCE),--force)
-
-# Register the GitHub App if needed, sync it (slug, webhook), apply the github stack (demo repository, rulesets,
-# Actions secrets) and push the demo application from demo/ into an empty demo repository.
+# Register the GitHub App if needed (interactive; FORCE=1 registers a new app over the stored one), sync it (slug,
+# webhook), apply the github stack (demo repository, rulesets, Actions secrets) and push the demo application from
+# demo/ into an empty demo repository.
 .PHONY: github
 github: infra-init
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
@@ -179,38 +153,31 @@ github: infra-init
 
 # Build and push the worker image, then make it the current Worker Deployment Version.
 .PHONY: deploy
-deploy: router-build infra-init
-	$(call require_namespace)
+deploy: namespace router-build infra-init
 	scripts/deploy.sh
 
 .PHONY: up
-up: ## Deploy everything: state, AWS, secrets, worker, GitHub App and demo repository (idempotent)
-	$(call require_namespace)
+up: namespace ## Deploy everything: state, AWS, secrets, worker, GitHub App and demo repository (idempotent)
 	$(MAKE) --no-print-directory bootstrap infra secrets deploy github info-publish
 
 .PHONY: kill-sessions
-kill-sessions: infra-init ## Stop every AgentCore session polling the production task queue
-	$(call require_namespace)
+kill-sessions: namespace infra-init ## Stop every AgentCore session polling the production task queue
 	scripts/kill-sessions.sh
 
 .PHONY: prune
-prune: router-build infra-init ## Remove the endpoints and versions of builds no workflow is pinned to any more
-	$(call require_namespace)
+prune: namespace router-build infra-init ## Remove the endpoints and versions of builds no workflow is pinned to
 	scripts/prune.sh
 
 .PHONY: delete-workflows
-delete-workflows: ## Delete every closed workflow execution of the namespace (running ones are kept)
-	$(call require_namespace)
+delete-workflows: namespace ## Delete every closed workflow execution of the namespace (running ones are kept)
 	scripts/delete-workflows.sh
 
 .PHONY: destroy
-destroy: router-build infra-init ## Destroy the AWS resources (asks for confirmation; GitHub and the state bucket stay)
-	$(call require_namespace)
+destroy: namespace router-build infra-init ## Destroy the AWS resources (asks first; GitHub and the state bucket stay)
 	scripts/destroy.sh
 
 .PHONY: ping
-ping: ## Run the Ping workflow on the production task queue (scale-from-zero check)
-	$(call require_namespace)
+ping: namespace ## Run the Ping workflow on the production task queue (scale-from-zero check)
 	temporal workflow execute --type Ping --task-queue $(TASK_QUEUE) --workflow-id ping-$$(date +%s) \
 		--input '"hello"' --tls-cert-path $(TEMPORAL_TLS_CERT_PATH) --tls-key-path $(TEMPORAL_TLS_KEY_PATH)
 
@@ -219,10 +186,9 @@ ping: ## Run the Ping workflow on the production task queue (scale-from-zero che
 router-build:
 	scripts/router-build.sh
 
-##@ Workspace
-
+# Publish endpoints and links to the workspace info panel (best effort).
 .PHONY: info-publish
-info-publish: ## Publish endpoints and links to the workspace info panel
+info-publish:
 	-@GITHUB_OWNER=$(GITHUB_OWNER) scripts/info-panel.sh
 
 ##@ Helpers

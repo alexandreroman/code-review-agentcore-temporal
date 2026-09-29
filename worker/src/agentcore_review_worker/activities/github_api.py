@@ -23,7 +23,7 @@ from ..aws import read_secret
 GITHUB_RAW = "application/vnd.github.raw+json"
 PER_PAGE = 100
 MAX_ITEMS = 3000
-# Under the shared client's default: a slow request fails inside its activity attempt, with time left to retry.
+# A slow request fails inside its activity attempt, with time left to retry.
 GITHUB_TIMEOUT_SECONDS = 10.0
 WRITE_SPACING_SECONDS = 1.0  # content creation is capped at 80 per minute and 500 per hour
 

@@ -81,7 +81,7 @@ class _CachedToken:
 
 
 class GitHubApp:
-    def __init__(self, client_id: str, private_key_pem: str, *, timeout: float = 20.0) -> None:
+    def __init__(self, client_id: str, private_key_pem: str, *, timeout: float) -> None:
         self._client_id = client_id
         self._private_key = private_key_pem
         self._http = httpx.AsyncClient(base_url=API_URL, timeout=timeout)
