@@ -1,5 +1,12 @@
 # Code Review with AgentCore x Temporal
 
+[![CI][ci-badge]][ci]
+[![License][license-badge]](LICENSE)
+
+[ci]: https://github.com/alexandreroman/code-review-agentcore-temporal/actions/workflows/ci.yml
+[ci-badge]: https://github.com/alexandreroman/code-review-agentcore-temporal/actions/workflows/ci.yml/badge.svg
+[license-badge]: https://img.shields.io/badge/license-Apache--2.0-blue.svg
+
 Install the GitHub App on a repository and every pull request gets three
 AI reviewers. Security, performance and maintainability agents read the
 diff and search the repository; a fourth one merges their findings into a
