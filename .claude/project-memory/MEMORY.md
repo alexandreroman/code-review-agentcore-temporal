@@ -39,3 +39,4 @@
 - [Docs focus on the integration](references/feedback_readme_focus.md) — deployable AgentCore x Temporal reference; no talk, no conference, no make dev in README
 - [One make up deploys everything](references/project_single_make_up.md) — GitHub App, install wait, demo repo pushed from demo/ inside make up; step targets hidden
 - [Teaser video](references/project_teaser_video.md) — Remotion teaser in git-ignored docs/video/, rendered to committed assets/app-overview.mp4
+- [Timeout layering rule](references/project_timeout_layering.md) — inner layers give up first; a killed session costs one 10 s heartbeat

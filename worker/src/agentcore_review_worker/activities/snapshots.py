@@ -6,7 +6,6 @@ to S3, never held in memory.
 
 import asyncio
 import tempfile
-from collections.abc import Awaitable
 from pathlib import Path
 
 import httpx2 as httpx
@@ -20,10 +19,10 @@ from ..aws import s3
 from ..models import SnapshotInput, SnapshotRef
 from ..settings import AppSettings
 from .github_api import github, github_errors, repo_path
+from .heartbeats import heartbeating
 
 MAX_ARCHIVE_BYTES = 200 * 1024 * 1024
 CHUNK_BYTES = 1024 * 1024
-HEARTBEAT_SECONDS = 5.0
 
 
 def _snapshot_prefix(pr: PrRef) -> str:
@@ -47,7 +46,8 @@ class SnapshotActivities:
         if await asyncio.to_thread(_exists, self._bucket, key):
             return ref
         with tempfile.TemporaryDirectory() as work:
-            await _heartbeating(self._copy_to_s3(pr, input.sha, Path(work) / "archive.tar.gz", key))
+            # A download or an upload over a slow link outlasts the heartbeat timeout.
+            await heartbeating(self._copy_to_s3(pr, input.sha, Path(work) / "archive.tar.gz", key))
         return ref
 
     async def _copy_to_s3(self, pr: PrRef, sha: str, archive: Path, key: str) -> None:
@@ -94,16 +94,6 @@ async def _download_tarball(pr: PrRef, sha: str, archive: Path) -> None:
                         non_retryable=True,
                     )
                 out.write(chunk)
-
-
-async def _heartbeating[T](work: Awaitable[T]) -> T:
-    """Await `work` while heartbeating: a download or an upload over a slow link outlasts the 15 s heartbeat timeout."""
-    task = asyncio.ensure_future(work)
-    while True:
-        done, _ = await asyncio.wait({task}, timeout=HEARTBEAT_SECONDS)
-        if done:
-            return task.result()
-        activity.heartbeat()
 
 
 def _delete_prefix(bucket: str, prefix: str) -> int:

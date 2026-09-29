@@ -13,12 +13,14 @@ from ..markers import fix_trailer
 from ..models import CommitInput, CommitResult
 from ..publishing import split_changes
 from .github_api import get, github_errors, repo_path, send
+from .heartbeats import heartbeat_while_running
 
 REGULAR_FILE = "100644"
 EXECUTABLE_FILE = "100755"
 
 
 @activity.defn(name="CommitFix")
+@heartbeat_while_running
 async def commit_fix(input: CommitInput) -> CommitResult:
     pr = input.pr
     trailer = fix_trailer(input.workflow_id, input.fix_number)

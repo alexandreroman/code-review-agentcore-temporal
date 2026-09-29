@@ -13,6 +13,7 @@ from ..batching import partition
 from ..models import BatchInput, BatchPatches, ChangedFile, ChangeSet, FilePatch, ListFilesInput
 from ..settings import AppSettings
 from .github_api import get, github_errors, repo_path
+from .heartbeats import heartbeat_while_running
 
 COMPARE_MAX_FILES = 300  # GitHub lists at most 300 files per comparison, without pagination
 
@@ -22,6 +23,7 @@ class PullActivities:
         self._max_parallel_agents = settings.max_parallel_agents
 
     @activity.defn(name="ListFiles")
+    @heartbeat_while_running
     async def list_files(self, input: ListFilesInput) -> ChangeSet:
         """The real head, and the files changed since the last reviewed SHA (the whole pull request at first).
 

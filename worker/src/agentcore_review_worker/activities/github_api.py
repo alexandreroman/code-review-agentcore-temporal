@@ -23,6 +23,8 @@ from ..aws import read_secret
 GITHUB_RAW = "application/vnd.github.raw+json"
 PER_PAGE = 100
 MAX_ITEMS = 3000
+# Under the shared client's default: a slow request fails inside its activity attempt, with time left to retry.
+GITHUB_TIMEOUT_SECONDS = 10.0
 WRITE_SPACING_SECONDS = 1.0  # content creation is capped at 80 per minute and 500 per hour
 
 _secret_id: str | None = None
@@ -49,7 +51,7 @@ def _secret() -> GitHubAppSecret:
 def github() -> GitHubApp:
     """The process's GitHub App client, built on first use from Secrets Manager."""
     secret = _secret()
-    return GitHubApp(secret.client_id, secret.private_key)
+    return GitHubApp(secret.client_id, secret.private_key, timeout=GITHUB_TIMEOUT_SECONDS)
 
 
 def bot_login() -> str:

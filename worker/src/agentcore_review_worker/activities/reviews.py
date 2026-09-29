@@ -21,6 +21,7 @@ from .github_api import (
     repo_path,
     send,
 )
+from .heartbeats import heartbeat_while_running
 from .pulls import compared_files
 
 CHECK_NAME = "AI Review"
@@ -49,6 +50,7 @@ async def update_check(input: CheckInput) -> None:
 
 
 @activity.defn(name="PublishReview")
+@heartbeat_while_running
 async def publish_review(input: PublishInput) -> dict[str, int]:
     """Publish the round's single COMMENT review, unless the bot's review with its round marker already exists.
 
@@ -83,6 +85,7 @@ async def publish_review(input: PublishInput) -> dict[str, int]:
 
 
 @activity.defn(name="RecoverCounters")
+@heartbeat_while_running
 async def recover_counters(input: RecoveryInput) -> RecoveredCounters:
     """Read back the numbers an earlier run of this workflow ID used.
 

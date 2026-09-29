@@ -14,6 +14,7 @@ from temporalio import activity
 from ..models import SnapshotRef
 from ..navigation import glob_files, glob_paths, grep_files, is_outside_repository, read_file, render_file
 from .github_api import get, get_raw, github_errors, repo_path
+from .heartbeats import heartbeat_while_running
 from .snapshot_cache import local_root
 
 GREP_UNAVAILABLE = (
@@ -23,6 +24,7 @@ GREP_UNAVAILABLE = (
 
 
 @activity.defn(name="Glob")
+@heartbeat_while_running
 async def glob(snapshot: SnapshotRef, pattern: str, path: str | None = None) -> str:
     """Find files by glob pattern.
 
@@ -46,6 +48,7 @@ async def glob(snapshot: SnapshotRef, pattern: str, path: str | None = None) -> 
 
 # The `glob` parameter is part of the tool's schema, as in Claude Code's Grep: it shadows the Glob tool's function.
 @activity.defn(name="Grep")
+@heartbeat_while_running
 async def grep(snapshot: SnapshotRef, pattern: str, path: str | None = None, glob: str | None = None) -> str:
     """Search file contents with a regular expression. Returns at most 50 matches as "path:line: text".
 
@@ -60,6 +63,7 @@ async def grep(snapshot: SnapshotRef, pattern: str, path: str | None = None, glo
 
 
 @activity.defn(name="Read")
+@heartbeat_while_running
 async def read(
     snapshot: SnapshotRef, file_path: str, offset: int | str | None = None, limit: int | str | None = None
 ) -> str:

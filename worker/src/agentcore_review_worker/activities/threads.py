@@ -24,6 +24,7 @@ from .github_api import (
     send,
     spaced_write,
 )
+from .heartbeats import heartbeat_while_running
 
 THREADS_QUERY = """
 query($owner: String!, $repo: String!, $number: Int!, $after: String) {
@@ -41,6 +42,7 @@ RESOLVE_THREAD = "mutation($id: ID!) { resolveReviewThread(input: {threadId: $id
 
 
 @activity.defn(name="ResolveThreads")
+@heartbeat_while_running
 async def resolve_threads(input: ResolveInput) -> int:
     """Resolve the open finding threads of the findings a round resolved; the number resolved.
 
@@ -64,20 +66,19 @@ async def resolve_threads(input: ResolveInput) -> int:
 
 
 @activity.defn(name="CloseEarlierThreads")
+@heartbeat_while_running
 async def close_earlier_threads(input: RecoveryInput) -> int:
     """Reply once in each open finding thread of an earlier run, then resolve it; the number closed.
 
     The new run's review replaces the earlier run's findings. Every attempt reads the threads and comments again,
     so a retry skips the threads already resolved and the notes already posted (their marker is keyed on the
-    thread). A heartbeat per thread stops an attempt that timed out before the next one starts.
+    thread).
     """
     pr = input.pr
     closed = 0
     with github_errors():
         comments = await get_pages(pr, f"{repo_path(pr)}/pulls/{pr.number}/comments")
-        activity.heartbeat()
         for thread in await _open_finding_threads(pr):
-            activity.heartbeat()
             # The REST ID of the thread's first comment: GraphQL gives it as a BigInt serialized as a string.
             root_id = int(_first_comment(thread)["fullDatabaseId"])
             marker = superseded_marker(input.workflow_id, root_id)
