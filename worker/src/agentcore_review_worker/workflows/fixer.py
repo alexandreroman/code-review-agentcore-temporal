@@ -11,6 +11,7 @@ from agentcore_review_worker.workflows.agents import AGENT_FAILURES, navigation_
 
 with workflow.unsafe.imports_passed_through():
     from agentcore_review_worker import prompts, summaries
+    from agentcore_review_worker.limits import FIXER_MODEL_CALLS
     from agentcore_review_worker.models import CommitInput, CommitResult, FixerInput, FixPlan
 
 
@@ -24,6 +25,7 @@ class FixerWorkflow:
             tools=navigation_tools(input.snapshot),
             output=FixPlan,
             prompt=prompts.fixer_prompt(input.findings),
+            max_model_calls=FIXER_MODEL_CALLS,
         )
         commit = CommitInput(
             pr=input.pr,

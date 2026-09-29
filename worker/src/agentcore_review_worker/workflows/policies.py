@@ -57,7 +57,7 @@ COMMIT_FIX = _options(180, THREE_ATTEMPTS)
 DELETE_SNAPSHOTS = _options(30, SINGLE_ATTEMPT)  # never fatal: the S3 lifecycle rule is the safety net
 PING = _options(30, THREE_ATTEMPTS)  # a broken worker must fail make ping, not hang it
 
-# Children never retry: their activities do. A reviewer makes up to HARD_TURN_LIMIT (limits.py) model calls, often
-# 60-80 s each, plus a recovery after a killed session, and outlasts one model call's schedule-to-close. A child that
-# times out leaves its reviewer unavailable.
+# Children never retry: their activities do. An agent makes up to its model call budget (limits.py) plus 3 backstop
+# turns (run_agent), 15 for the fixer: at 5-60 s each they take up to 15 min, leaving room for a recovery after a
+# killed session and outlasting one model call's schedule-to-close. A child that times out leaves its agent unavailable.
 CHILD_RUN_TIMEOUT = timedelta(minutes=20)

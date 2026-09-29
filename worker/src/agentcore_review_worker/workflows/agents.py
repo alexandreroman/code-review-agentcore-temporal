@@ -29,7 +29,7 @@ with workflow.unsafe.imports_passed_through():
 
     from agentcore_review_worker import summaries
     from agentcore_review_worker.activities import tools as navigation_activities
-    from agentcore_review_worker.limits import HARD_TURN_LIMIT, budget_message, tool_call_allowed
+    from agentcore_review_worker.limits import MAX_MODEL_CALLS, budget_message, tool_call_allowed
     from agentcore_review_worker.models import MODEL_NAME, SnapshotRef
 
 AGENT_FAILURES: list[type[BaseException]] = [
@@ -44,9 +44,10 @@ AGENT_FAILURES: list[type[BaseException]] = [
 class ModelCallBudget(HookProvider):
     """Counts model calls and cancels tool calls once the budget is spent, forcing the agent to conclude."""
 
-    def __init__(self, output_tool: str) -> None:
+    def __init__(self, output_tool: str, max_calls: int) -> None:
         self._model_calls = 0
         self._output_tool = output_tool
+        self._max_calls = max_calls
 
     def register_hooks(self, registry: HookRegistry, **kwargs: Any) -> None:
         registry.add_callback(BeforeModelCallEvent, self._count)
@@ -56,8 +57,8 @@ class ModelCallBudget(HookProvider):
         self._model_calls += 1
 
     def _gate(self, event: BeforeToolCallEvent) -> None:
-        if not tool_call_allowed(self._model_calls, event.tool_use["name"], self._output_tool):
-            event.cancel_tool = budget_message(self._output_tool)
+        if not tool_call_allowed(self._model_calls, event.tool_use["name"], self._output_tool, self._max_calls):
+            event.cancel_tool = budget_message(self._output_tool, self._max_calls)
 
 
 class _SnapshotBound(AgentTool):
@@ -105,7 +106,13 @@ def navigation_tools(snapshot: SnapshotRef) -> list[AgentTool]:
 
 
 async def run_agent[T: BaseModel](
-    *, name: str, system_prompt: str, tools: list[AgentTool], output: type[T], prompt: str | list[dict]
+    *,
+    name: str,
+    system_prompt: str,
+    tools: list[AgentTool],
+    output: type[T],
+    prompt: str | list[dict],
+    max_model_calls: int = MAX_MODEL_CALLS,
 ) -> T:
     """Run an agent to its structured output.
 
@@ -119,10 +126,11 @@ async def run_agent[T: BaseModel](
         system_prompt=system_prompt,
         tools=tools,
         structured_output_model=output,
-        hooks=[ModelCallBudget(output.__name__)],
+        hooks=[ModelCallBudget(output.__name__, max_model_calls)],
         callback_handler=None,  # no printing from workflow code
     )
-    result = await agent.invoke_async(prompt, limits={"turns": HARD_TURN_LIMIT})
+    # Strands turn cap: a backstop for a model that keeps calling tools after being told to stop.
+    result = await agent.invoke_async(prompt, limits={"turns": max_model_calls + 3})
     if result.structured_output is None:
         raise ApplicationError(
             f"{name} unavailable: no structured output (stop reason {result.stop_reason})",
