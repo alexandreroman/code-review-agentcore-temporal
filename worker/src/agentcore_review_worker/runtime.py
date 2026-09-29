@@ -109,16 +109,12 @@ def build_worker(
 ) -> Worker:
     github_api.configure(settings.app.github_app_secret)
     deployment = None
-    # The dev worker's Ctrl-C mimics AgentCore's /kill: activities stop at once, as in a crash, and resume at
-    # attempt 2. An AgentCore worker only stops once idle, so its graceful shutdown rarely has anything to finish.
-    graceful_shutdown_timeout = timedelta(0)
     if settings.deployment is not None:
         deployment = WorkerDeploymentConfig(
             version=settings.deployment,
             use_worker_versioning=True,
             default_versioning_behavior=VersioningBehavior.PINNED,
         )
-        graceful_shutdown_timeout = timedelta(seconds=120)
     return Worker(
         client,
         task_queue=settings.task_queue,
@@ -127,6 +123,9 @@ def build_worker(
         interceptors=list(interceptors),
         identity=identity,
         deployment_config=deployment,
-        graceful_shutdown_timeout=graceful_shutdown_timeout,
+        # No grace period: an AgentCore session drains only after agentcore.DRAIN_IDLE_SECONDS without activity, so
+        # it has nothing left to finish. Any other stop (/kill, maximum lifetime, Ctrl-C) cancels the activities at
+        # once, and they resume at attempt 2 on another worker; the GitHub activities are idempotent.
+        graceful_shutdown_timeout=timedelta(0),
         activity_task_poller_behavior=ACTIVITY_TASK_POLLERS,
     )
