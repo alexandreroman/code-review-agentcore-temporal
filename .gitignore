@@ -12,3 +12,5 @@ build/
 .terraform-validate/
 *.tfstate
 *.tfstate.backup
+
+.DS_Store
