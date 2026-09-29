@@ -198,6 +198,11 @@ prune: router-build infra-init ## Remove the endpoints and versions of builds no
 	$(call require_namespace)
 	scripts/prune.sh
 
+.PHONY: delete-workflows
+delete-workflows: ## Delete every closed workflow execution of the namespace (running ones are kept)
+	$(call require_namespace)
+	scripts/delete-workflows.sh
+
 .PHONY: destroy
 destroy: router-build infra-init ## Destroy the AWS resources (asks for confirmation; GitHub and the state bucket stay)
 	$(call require_namespace)
@@ -225,7 +230,7 @@ info-publish: ## Publish endpoints and links to the workspace info panel
 .PHONY: help
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*##"; printf "Usage: make \033[36m<target>\033[0m\n"} \
-		/^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } \
+		/^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-16s\033[0m %s\n", $$1, $$2 } \
 		/^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) }' $(firstword $(MAKEFILE_LIST))
 
 # Prints a resolved setting (used by the e2e-validation skill): make -s print-VAR
