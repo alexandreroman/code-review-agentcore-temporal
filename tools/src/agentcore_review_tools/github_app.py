@@ -1,10 +1,12 @@
 """GitHub App tooling behind the Makefile.
 
-- register: creates the app through the manifest flow (make github-app)
+- register: creates the app through the manifest flow, unless one is already registered (make up; make github-app
+  FORCE=1 registers a new one)
 - sync: refreshes the stored slug after a rename in the app settings, and points the app's webhook at the
-  router (make github, make up)
+  router (make up)
 - installation-id: prints the app's installation ID on a repository; when the app is not installed there, prints
-  its install link and exits with status 2 (make github, make up, make review-pr)
+  its install link and exits with status 2 (make up, make review-pr). With --wait, it opens the install link in
+  the browser and waits for the installation instead (make up)
 """
 
 import argparse
@@ -12,6 +14,7 @@ import html
 import json
 import secrets
 import sys
+import time
 import webbrowser
 from collections.abc import Callable
 from functools import cache
@@ -35,6 +38,8 @@ PERMISSIONS = {
 EVENTS = ["pull_request", "issue_comment", "pull_request_review_comment"]
 # scripts/github.sh reads this exit status as "the app is not installed on the repository".
 NOT_INSTALLED_EXIT_STATUS = 2
+INSTALL_POLL_SECONDS = 5
+INSTALL_WAIT_SECONDS = 600
 SECRET_TAGS = [{"Key": "Project", "Value": "code-review-agentcore-temporal"}]
 
 
@@ -184,17 +189,17 @@ def store_app(app: GitHubAppSecret) -> None:
 def require_registered_app() -> GitHubAppSecret:
     app = registered_app()
     if app is None:
-        sys.exit("The GitHub App is not registered yet: run make github-app, then make up again.")
+        sys.exit(
+            "The GitHub App is not registered yet: make up registers it (make github-app FORCE=1 registers a new one)."
+        )
     return app
 
 
 def register(args: argparse.Namespace) -> None:
     existing = registered_app()
     if existing and not args.force:
-        sys.exit(
-            f"GitHub App {existing.slug} is already registered. To register a new one, delete it in the GitHub "
-            "settings, then run make github-app FORCE=1."
-        )
+        print(f"GitHub App {existing.slug} is already registered.")
+        return
     state = secrets.token_urlsafe(24)
     local_url = f"http://localhost:{args.port}/"
     with httpx.Client(timeout=20) as http:
@@ -205,9 +210,8 @@ def register(args: argparse.Namespace) -> None:
             app = convert(http, code)
             store_app(app)
             print(f"Registered GitHub App {app.slug} (stored in {GITHUB_APP_SECRET}).")
-            print("Next: make up creates the demo repository and prints the link to install the app on it.")
             slug = html.escape(app.slug)
-            return f"<p>GitHub App <b>{slug}</b> created. Back to the terminal: run <code>make up</code>.</p>"
+            return f"<p>GitHub App <b>{slug}</b> created. You can close this page and go back to the terminal.</p>"
 
         def on_ready() -> None:
             print(f"Opening {local_url}: click 'Create GitHub App' in the browser (Ctrl-C to abort).")
@@ -216,9 +220,7 @@ def register(args: argparse.Namespace) -> None:
         try:
             serve_once(args.port, page, state, on_code, on_ready)
         except OSError as error:
-            sys.exit(
-                f"make github-app: cannot listen on localhost:{args.port} ({error}); change GITHUB_APP_CALLBACK_PORT"
-            )
+            sys.exit(f"Cannot listen on localhost:{args.port} ({error}): change GITHUB_APP_CALLBACK_PORT in .env.")
 
 
 def sync_slug(http: httpx.Client, app: GitHubAppSecret) -> GitHubAppSecret:
@@ -258,15 +260,39 @@ def sync(args: argparse.Namespace) -> None:
         sync_webhook(http, app, args.url)
 
 
+def wait_for_installation(http: httpx.Client, app: GitHubAppSecret, owner: str, repo: str) -> int | None:
+    """Poll until the app is installed on the repository; None when the wait times out."""
+    deadline = time.monotonic() + INSTALL_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        time.sleep(INSTALL_POLL_SECONDS)
+        found = installation_id(http, app, owner, repo)
+        if found is not None:
+            return found
+    return None
+
+
 def print_installation_id(args: argparse.Namespace) -> None:
     app = require_registered_app()
+    install_url = f"https://github.com/apps/{app.slug}/installations/new"
     with httpx.Client(timeout=20) as http:
         found = installation_id(http, app, args.owner, args.repo)
+        if found is None and args.wait:
+            print(
+                f"Action needed: install GitHub App {app.slug} on {args.owner}/{args.repo}. Opening {install_url} "
+                f"(waiting up to {INSTALL_WAIT_SECONDS // 60} minutes, Ctrl-C to abort).",
+                file=sys.stderr,
+            )
+            webbrowser.open(install_url)
+            found = wait_for_installation(http, app, args.owner, args.repo)
     if found is None:
-        install_url = f"https://github.com/apps/{app.slug}/installations/new"
-        print(
-            f"Action needed: install GitHub App {app.slug} on {args.owner}/{args.repo}: {install_url}", file=sys.stderr
-        )
+        if args.wait:
+            notice = (
+                f"GitHub App {app.slug} is still not installed on {args.owner}/{args.repo}: install it "
+                f"({install_url}), then run make up again."
+            )
+        else:
+            notice = f"Action needed: install GitHub App {app.slug} on {args.owner}/{args.repo}: {install_url}"
+        print(notice, file=sys.stderr)
         sys.exit(NOT_INSTALLED_EXIT_STATUS)
     print(found)
 
@@ -289,6 +315,9 @@ def main() -> None:
     installation = commands.add_parser("installation-id", help="print the app's installation ID on a repository")
     installation.add_argument("--owner", required=True)
     installation.add_argument("--repo", required=True)
+    installation.add_argument(
+        "--wait", action="store_true", help="when the app is not installed, open its install link and wait for it"
+    )
     installation.set_defaults(handler=print_installation_id)
     args = parser.parse_args()
     try:

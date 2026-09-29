@@ -1,9 +1,9 @@
 # Demo run-through
 
-A 15-minute talk with two screens only: **GitHub** and **Temporal UI**.
+A 15-minute demo with two screens only: **GitHub** and **Temporal UI**.
 Four moments, in this order:
 
-| # | Moment            | What the audience sees                               |
+| # | Moment            | What the demo shows                                  |
 |---|-------------------|------------------------------------------------------|
 | 1 | Scale from zero   | No worker at rest; Temporal starts one on AgentCore  |
 | 2 | Parallel agents   | Three reviewers as child workflows, then a synthesis |
@@ -15,12 +15,12 @@ Four moments, in this order:
 
 ## The day before
 
-On a stable network, never on conference Wi-Fi:
+On a stable network, never on a shared event Wi-Fi:
 
 1. `aws sso login --profile <profile>` and `export AWS_PROFILE=<profile>`
    in the demo terminal, start Docker.
 2. `make up`: deploy everything now. A first image push takes tens of
-   minutes on a slow uplink; on stage, nothing big must travel.
+   minutes on a slow uplink; during the demo, nothing big must travel.
 3. Validate: `/e2e-validation full` in Claude Code (about 30 minutes). It
    checks all four moments, the reset, the dev mode and the return to zero.
 4. Check the Bedrock quotas of the region (Service Quotas, Amazon
@@ -32,18 +32,18 @@ On a stable network, never on conference Wi-Fi:
    these paths, so any change makes the next `make up` build and push a
    new image. Docs and tests are safe to edit.
 
-## Pre-stage checklist (30 minutes before)
+## Pre-demo checklist (30 minutes before)
 
 1. **Network**: connect, and keep a phone hotspot at hand, tested with
    `make ping`; disconnect VPNs if the network is unstable.
 2. **Credentials**: `aws sso login --profile <profile>` (the session must
-   outlast the talk), `AWS_PROFILE` exported in the demo terminal,
+   outlast the demo), `AWS_PROFILE` exported in the demo terminal,
    `gh auth status`.
 3. **`make up`**: it must be a no-op ("already in ECR", "already the
    current version"). If it starts building an image, stop it (`Ctrl-C`)
-   and keep the deployed build. After any `make deploy`, demo on a fresh
-   PR only: a PR whose workflow started on an older build keeps the older
-   behaviour until its workflow moves to the new build.
+   and keep the deployed build. After a `make up` that builds a new image,
+   demo on a fresh PR only: a PR whose workflow started on an older build
+   keeps the older behaviour until its workflow moves to the new build.
 4. **Reset**: Actions, **Reset demo**, **Run workflow**, or
    `gh workflow run reset-demo.yml --repo <owner>/agentcore-review-demo-app`.
    Wait for the green run.
@@ -53,12 +53,12 @@ On a stable network, never on conference Wi-Fi:
    for the `AI Review` check (a minute or two). Then close the PR and delete
    the branch.
 6. **Idle pull requests**: the bot warns on a PR idle for 10 minutes and
-   closes it at 15. Open the demo PR on stage, not before. For a PR
+   closes it at 15. Open the demo PR live, not before. For a PR
    prepared in advance, raise `PR_IDLE_WARNING_SECONDS` and
    `PR_IDLE_CLOSE_SECONDS` in `.env` and run `make up` the day before (a
    router-only change, no new image); a PR keeps the durations its
    workflow started with.
-7. **Back to zero**: `make kill-sessions`, so no worker runs when the talk
+7. **Back to zero**: `make kill-sessions`, so no worker runs when the demo
    starts.
 8. **Tabs**, in this order:
    - GitHub: **Pull requests**, **New pull request**, compare
@@ -88,7 +88,7 @@ On a stable network, never on conference Wi-Fi:
 | 10:00 | Merge the PR       | Workflow completes with its outcome | —      |
 | 10:30 | Buffer             | Code tour, questions                | —      |
 
-Talking points:
+Key points:
 
 - **2:00, scale from zero.** From the compare tab, title "Add customer
   search & order history", **Create pull request**. In Temporal UI, the
@@ -119,8 +119,8 @@ Talking points:
   child workflow checks the claim against the code with the same tools.
   The bot answers in the thread with evidence, starting with
   "**S-0x stays open.**" An agent may also dismiss a finding when the
-  code proves the human right; on stage, a question on a real defect keeps
-  the answer predictable.
+  code proves the human right; during the demo, a question on a real defect
+  keeps the answer predictable.
 - **7:30, `/fix`.** Post it as a PR comment: the fixer handles every open
   finding (in a finding's thread, `/fix` fixes that finding only;
   `/fix S-01 P-02` fixes the findings it names, and nothing at all if
@@ -135,7 +135,7 @@ Talking points:
   `PullRequestOutcome` (merged, by whom, rounds, findings still open) and
   deletes the PR's snapshots.
 
-## After the talk
+## After the demo
 
 Run the reset. Nothing else: sessions drain by themselves, and at rest
 the infrastructure only costs its storage, secrets and KMS key, a few

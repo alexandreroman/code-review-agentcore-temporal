@@ -1,28 +1,27 @@
 # Setup
 
 Step-by-step installation of **Code Review with AgentCore x Temporal**, from
-empty accounts to a first reviewed pull request. Plan about an hour; most of
-it is the first image push and the waits for AWS.
+empty accounts to a first reviewed pull request.
 
 Commands run from the repository root unless stated otherwise. Values in
 angle brackets and `your-namespace.a1b2c` (your Temporal Cloud namespace)
-are placeholders for your own identifiers. `<upstream-owner>` publishes
-the upstream demo repository; `<owner>` owns your copy of it.
+are placeholders for your own identifiers; `<owner>` owns the demo
+repository.
 
 ## 1. Accounts and tools
 
 Accounts:
 
 - A **Temporal Cloud** namespace with Serverless Workers enabled (a
-  prerelease feature: ask your Temporal contact to enable it), and access
-  to its settings.
+  pre-release feature: ask your Temporal contact to enable it), and access
+  to its CA certificates.
 - An **AWS** account with administrator access (the deployment creates
   IAM roles, a Lambda function, S3 buckets, an ECR repository, secrets, a
   KMS key and an AgentCore runtime), in a region where AgentCore is
   available (`ca-central-1` by default), with access to **Claude Opus 5 on
   Amazon Bedrock** (see [Bedrock model access](#bedrock-model-access)).
-- A **GitHub** account (personal or organization) to own the demo
-  repository.
+- A **GitHub** account (personal or organization) to own the GitHub App
+  and the demo repository.
 
 Tools:
 
@@ -51,14 +50,13 @@ host; on a Linux x86 host, install QEMU and binfmt support first, and
 git clone https://github.com/<this-repo-owner>/code-review-agentcore-temporal.git
 cd code-review-agentcore-temporal
 make install
-make check
 ```
 
 ## 3. mTLS certificates
 
 Every component authenticates to Temporal Cloud with an mTLS client
-certificate. One certificate serves the local worker, the `temporal` CLI,
-the AgentCore worker and the router.
+certificate. One certificate serves the AgentCore worker, the router and
+the `temporal` CLI.
 
 Generate a CA and a client certificate, valid for one year at most, at the
 default paths (`certs/` is git-ignored):
@@ -103,15 +101,11 @@ cp .env.example .env
 ```
 
 Set `TEMPORAL_NAMESPACE` to your namespace (`your-namespace.a1b2c` is the
-placeholder). Every other setting is optional, and
-[`.env.example`](.env.example) documents each one with its default. The
-most common ones:
-
-- `GITHUB_OWNER` when the demo repository belongs to an organization (the
-  default is the account logged in to `gh`);
-- `AWS_REGION` for another region than `ca-central-1`;
-- `BEDROCK_MODEL_ID` and `MODEL_EFFORT` for another model (a global
-  cross-region inference profile) or effort level.
+placeholder): it is the only required setting, with the certificate of the
+previous step at its default paths. Every other setting is optional:
+[Configuration](README.md#configuration) lists them with their default,
+such as `AWS_REGION`, `GITHUB_OWNER` or `DEMO_REPO`, and
+[`.env.example`](.env.example) documents each one.
 
 Plain `KEY=value` lines, no quotes: the Makefile includes the file.
 
@@ -128,7 +122,15 @@ aws sts get-caller-identity
 
 Export `AWS_PROFILE` in your shell: the AWS CLI does not read `.env`. SSO
 sessions expire after a few hours; log in again before a deployment or a
-talk.
+demo.
+
+> [!NOTE]
+> Temporalites log in to the AWS account with the `access` tool:
+>
+> ```bash
+> access account --aws-account-id <aws-account-id>
+> access account --aws-account-id <aws-account-id> --write
+> ```
 
 ### Bedrock model access
 
@@ -147,10 +149,8 @@ aws bedrock-runtime converse --region ca-central-1 \
 
 Replace `ca-central-1` if you set another `AWS_REGION`.
 
-`make infra` grants the AgentCore worker's role this access. The local
-worker (`make dev`) uses your own credentials: an administrator identity
-has the permissions; otherwise grant yourself the three Bedrock statements
-of `infra/aws/worker.tf`, explained in
+`make up` grants the AgentCore worker's role this access, through the
+three Bedrock statements of `infra/aws/worker.tf` explained in
 [Global cross-Region inference][gcri].
 
 [gcri]: https://docs.aws.amazon.com/bedrock/latest/userguide/global-cross-region-inference.html
@@ -163,11 +163,11 @@ gh auth refresh --scopes workflow
 gh auth setup-git
 ```
 
-The `workflow` scope lets you push the demo repository, which contains the
-"Reset demo" workflow (step 10). `gh auth setup-git` makes `git push` use
-the `gh` credentials.
+The `workflow` scope lets `make up` push the demo repository, which
+contains the "Reset demo" workflow. `gh auth setup-git` makes `git push`
+use the `gh` credentials.
 
-## 7. First deployment
+## 7. Deployment
 
 Start Docker, then:
 
@@ -175,94 +175,55 @@ Start Docker, then:
 make up
 ```
 
-`make up` chains `bootstrap` (OpenTofu state bucket and KMS key), `infra`
-(Lambda router, ECR repository, IAM roles, including the worker's Bedrock
-access, an empty secret for the Temporal certificate, snapshots bucket and
-optional custom domain), `secrets` (the mTLS client certificate into that
-secret, read by the worker and the router), `deploy` (image build
-and push, AgentCore runtime and endpoint, Temporal Worker Deployment
-Version) and `github` (GitHub App webhook, demo repository). The first
-image push uploads about 100 MB: on a slow uplink it takes a long time;
-later pushes only send the changed layers.
+`make up` deploys everything, in order, and stops at the first missing
+prerequisite. Every step is idempotent: once the cause is fixed, run
+`make up` again and it resumes where it stopped.
 
-This first run stops on purpose:
+1. **State**: the OpenTofu state bucket and its KMS key.
+2. **AWS**: the Lambda router, the ECR repository, the IAM roles
+   (including the worker's Bedrock access), an empty secret for the
+   Temporal certificate, the snapshots bucket and the optional custom
+   domain.
+3. **Secrets**: the mTLS client certificate, pushed into that secret for
+   the worker and the router.
+4. **Worker**: the image build and push, the AgentCore runtime and
+   endpoint, and the Temporal Worker Deployment Version. The first image
+   push uploads about 100 MB: on a slow uplink it takes a long time; later
+   pushes only send the changed layers.
+5. **GitHub**: the GitHub App, the demo repository and its rulesets.
 
-```text
-The GitHub App is not registered yet: run make github-app, then make up again.
-```
+On a first run, the GitHub step needs you twice in the browser.
 
-## 8. Register the GitHub App
-
-```bash
-make github-app
-```
-
-A browser page opens: click **Create GitHub App**. The app is named
-*Code Review AgentCore x Temporal* by default, with the slug
+**Create the GitHub App.** A page opens: click **Create GitHub App**. The
+app is named *Code Review AgentCore x Temporal* by default, with the slug
 `code-review-agentcore-x-temporal` (you may rename the app, or set
-`GITHUB_APP_NAME` in `.env`; GitHub caps the name at 34 characters).
-The terminal then prints `Registered GitHub App <slug> ...`. The app has
-the permissions `pull_requests: write`, `checks: write`, `contents: write`,
-`issues: read` and `metadata: read`, listens to `pull_request`,
-`issue_comment` and `pull_request_review_comment` (replies to a finding),
-and sends its webhooks to the router: its Lambda Function URL, or the
-[custom domain](#custom-domain-cloudflare-optional) when one is set. Its
-credentials go straight to Secrets Manager, in a secret that `make destroy`
-keeps.
+`GITHUB_APP_NAME` in `.env`; GitHub caps the name at 34 characters). The
+app has the permissions `pull_requests: write`, `checks: write`,
+`contents: write`, `issues: read` and `metadata: read`, listens to
+`pull_request`, `issue_comment` and `pull_request_review_comment` (replies
+to a finding), and sends its webhooks to the router: its Lambda Function
+URL, or the [custom domain](#custom-domain-cloudflare-optional) when one is
+set. Its credentials go straight to Secrets Manager, in a secret that
+`make destroy` keeps.
 
-Optionally, upload `assets/github-app-logo.png` under the app's **Display
-information**.
+`make up` then creates the public repository `agentcore-review-demo-app`
+and the Actions secrets of its reset workflow. While the repository is
+still empty, it pushes the demo application from [`demo/`](demo) (Spring
+Boot, Spring Data JPA, H2): the baseline with the "Reset demo" workflow
+on `main`, tagged `baseline`, and the customer search scenario, with its
+planted defects, tagged `scenario/customer-search`.
 
-## 9. Second deployment and app installation
-
-```bash
-make up
-```
-
-This run creates the public repository `agentcore-review-demo-app` and
-the Actions secrets of the reset workflow, then prints (on one line):
-
-```text
-Action needed: install GitHub App <slug> on <owner>/agentcore-review-demo-app:
-https://github.com/apps/<slug>/installations/new
-```
-
-GitHub only accepts an app as a ruleset bypass actor once it is installed
-on the repository, so the rulesets wait for the next run.
-
-Open the link, choose **Only select repositories**, pick
-`agentcore-review-demo-app`, and install. Run `make up` once more: it adds
-the ruleset on `main` (required `AI Review` check, admin and app bypass)
-and the ruleset on the `baseline` and `scenario/*` tags, then ends with
+**Install the GitHub App.** The installation page opens: choose **Only
+select repositories**, pick `agentcore-review-demo-app`, and install.
+`make up` waits up to 10 minutes for it, because GitHub only accepts an
+app as a ruleset bypass actor once it is installed. It then adds the
+ruleset on `main` (required `AI Review` check, admin and app bypass) and
+the ruleset on the `baseline` and `scenario/*` tags. After that first
+push, it runs the reset once, which creates the scenario branches, and
+waits for the run to turn green. The run ends with
 `GitHub App is installed on <owner>/agentcore-review-demo-app.`
 
-## 10. Push the demo repository
-
-The demo application (Spring Boot, Spring Data JPA, H2), its tags and
-the "Reset demo" workflow come from the upstream demo repository. Copy
-them into yours, next to this repository:
-
-```bash
-cd ..
-git clone https://github.com/<upstream-owner>/agentcore-review-demo-app.git
-cd agentcore-review-demo-app
-git fetch origin 'refs/tags/*:refs/tags/*'
-git remote set-url origin https://github.com/<owner>/agentcore-review-demo-app.git
-git push origin 'baseline^{commit}:refs/heads/main'
-git push origin refs/tags/baseline refs/tags/scenario/customer-search
-cd ../code-review-agentcore-temporal
-```
-
-GitHub may report a bypassed rule on `main`: you are an admin, a bypass
-actor of the ruleset. Then run the reset once; it creates the scenario
-branches:
-
-```bash
-gh workflow run reset-demo.yml --repo <owner>/agentcore-review-demo-app
-```
-
-Wait for the run to turn green in the repository's **Actions** tab (under a
-minute), then list the branches:
+Check the branches of the demo repository:
 
 ```bash
 gh api repos/<owner>/agentcore-review-demo-app/branches --jq '.[].name'
@@ -271,7 +232,10 @@ gh api repos/<owner>/agentcore-review-demo-app/branches --jq '.[].name'
 Expected branches: `dev/customer-search`, `feature/customer-search`,
 `main`.
 
-## 11. Check the installation
+Optionally, upload `assets/github-app-logo.png` under the app's **Display
+information**.
+
+## 8. Check the installation
 
 Scale-from-zero:
 
@@ -287,20 +251,6 @@ Then a real review. Open a pull request from `feature/customer-search` to
 `AI Review` check arrives in under three minutes. To check the whole
 lifecycle, see [Validation](README.md#validation). Close the PR, or run the
 reset, when you are done.
-
-## 12. Local development worker
-
-```bash
-make dev
-```
-
-The local worker connects to the same Temporal Cloud namespace and polls
-the `review-dev` task queue. It calls Bedrock, reads the GitHub App secret
-and uses the snapshots bucket with your AWS credentials (see
-[Bedrock model access](#bedrock-model-access)).
-The router sends every pull request opened from a `dev/` branch there, so
-a PR from `dev/customer-search` is reviewed by your laptop, with hot
-reload, without deploying anything.
 
 ## Custom domain (Cloudflare, optional)
 
@@ -334,6 +284,22 @@ emptying `DOMAIN_NAME` switches it back to the Function URL the same way.
 While `DOMAIN_NAME` is set, every target that applies or destroys the aws
 stack stops if `CLOUDFLARE_ZONE_ID` or `CLOUDFLARE_API_TOKEN` is missing.
 
+## Local development worker (optional)
+
+```bash
+make dev
+```
+
+The local worker connects to the same Temporal Cloud namespace, with the
+certificate of step 3, and polls the `review-dev` task queue. It calls
+Bedrock, reads the GitHub App secret
+and uses the snapshots bucket with your AWS credentials: an administrator
+identity has the permissions; otherwise grant yourself the three Bedrock
+statements of `infra/aws/worker.tf`.
+The router sends every pull request opened from a `dev/` branch there, so
+a PR from `dev/customer-search` is reviewed by your laptop, with hot
+reload, without deploying anything.
+
 ## Troubleshooting
 
 - **No review, no workflow in Temporal UI**: the webhook was lost or
@@ -342,27 +308,30 @@ stack stops if `CLOUDFLARE_ZONE_ID` or `CLOUDFLARE_API_TOKEN` is missing.
   never redelivers by itself, and keeps deliveries for 3 days. The router
   log shows what it received:
   `aws logs tail /aws/lambda/agentcore-review-demo-router --since 15m`.
-- **`context deadline exceeded` or a TLS EOF** from `make deploy` or
+- **`context deadline exceeded` or a TLS EOF** from `make up` or
   `make kill-sessions`: the Temporal CLI fails on unstable networks while
   the service is fine. Run the target again on a stable connection.
-- **`task queue review never attached`** from `make deploy`: the new
+- **`task queue review never attached`** from `make up`: the new
   worker crashed at startup. The error names the CloudWatch log group to
   read.
 - **`Docker is not running`**: start Docker, then run the target again.
 - **AWS `ExpiredToken` or SSO errors**: `aws sso login --profile
   <profile>`.
+- **`GitHub App <slug> is still not installed`** after 10 minutes: install
+  the app on the demo repository, then run `make up` again.
 - **A review fails with `AccessDeniedException` or
   `ResourceNotFoundException`** in the model activity: the account has no
   access to the model, or the identity lacks the Bedrock permissions. See
   [Bedrock model access](#bedrock-model-access).
 - **A workflow waits and no worker starts**: in Temporal UI, **Worker
   Deployments**, `agentcore-review-demo-worker` must have a current version
-  with the `review` task queue. `make deploy` restores it.
+  with the `review` task queue. `make up` restores it.
 
 ## Updating and tearing down
 
-- After a code change, `make deploy` builds a new version (build ID
-  `b_…`), creates its AgentCore endpoint and makes it current. An open
+- After pulling a new version of this repository, run `make up`: when the
+  worker code changed, it builds a new version (build ID `b_…`), creates
+  its AgentCore endpoint and makes it current. An open
   pull request stays on its build until its next action or idle timer,
   then moves to the new one; `make prune` then removes the endpoints no
   workflow uses any more.

@@ -36,3 +36,5 @@
 - [Tests cover business logic only](references/feedback_tests_business_only.md) — pure rule functions: review, routing, contract, GitHub errors
 - [Temporal UI labels and details](references/project_temporal_ui_labels.md) — short activity type names, summaries hold the detail only
 - [Observability choices](references/project_observability.md) — opt-in TRACING, OTel + SigV4 exporter, Transaction Search set by the owner
+- [Docs focus on the integration](references/feedback_readme_focus.md) — deployable AgentCore x Temporal reference; no talk, no conference, no make dev in README
+- [One make up deploys everything](references/project_single_make_up.md) — GitHub App, install wait, demo repo pushed from demo/ inside make up; step targets hidden

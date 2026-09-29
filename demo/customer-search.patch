@@ -1,0 +1,132 @@
+diff --git a/src/main/java/com/example/orders/CustomerController.java b/src/main/java/com/example/orders/CustomerController.java
+new file mode 100644
+index 0000000..516f75f
+--- /dev/null
++++ b/src/main/java/com/example/orders/CustomerController.java
+@@ -0,0 +1,67 @@
++package com.example.orders;
++
++import java.util.ArrayList;
++import java.util.List;
++
++import org.springframework.data.domain.PageRequest;
++import org.springframework.data.domain.Sort;
++import org.springframework.http.HttpStatus;
++import org.springframework.jdbc.core.simple.JdbcClient;
++import org.springframework.web.bind.annotation.GetMapping;
++import org.springframework.web.bind.annotation.PathVariable;
++import org.springframework.web.bind.annotation.RequestMapping;
++import org.springframework.web.bind.annotation.RequestParam;
++import org.springframework.web.bind.annotation.RestController;
++import org.springframework.web.server.ResponseStatusException;
++
++@RestController
++@RequestMapping("/customers")
++class CustomerController {
++
++    private final JdbcClient jdbcClient;
++    private final OrderRepository orderRepository;
++    private final OrderLineRepository orderLineRepository;
++
++    CustomerController(JdbcClient jdbcClient, OrderRepository orderRepository,
++            OrderLineRepository orderLineRepository) {
++        this.jdbcClient = jdbcClient;
++        this.orderRepository = orderRepository;
++        this.orderLineRepository = orderLineRepository;
++    }
++
++    @GetMapping("/search")
++    List<CustomerSummary> searchCustomers(@RequestParam String q, @RequestParam(defaultValue = "0") int page,
++            @RequestParam(defaultValue = "20") int size) {
++        if (size < 1 || size > 100) {
++            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "size must be between 1 and 100");
++        }
++        if (page < 0) {
++            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "page must not be negative");
++        }
++        var sql = "SELECT id, name, email FROM customers "
++                + "WHERE name LIKE '%" + q + "%' OR email LIKE '%" + q + "%' "
++                + "ORDER BY name LIMIT " + size + " OFFSET " + page * size;
++        return jdbcClient.sql(sql)
++                .query(CustomerSummary.class)
++                .list();
++    }
++
++    @GetMapping("/{customerId}/orders")
++    List<OrderSummary> customerOrders(@PathVariable long customerId, @RequestParam(defaultValue = "0") int page,
++            @RequestParam(defaultValue = "20") int size) {
++        if (size < 1 || size > 100) {
++            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "size must be between 1 and 100");
++        }
++        if (page < 0) {
++            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "page must not be negative");
++        }
++        var newestFirst = Sort.by(Sort.Direction.DESC, "createdAt", "id");
++        var orders = orderRepository.findByCustomerId(customerId, PageRequest.of(page, size, newestFirst));
++        var history = new ArrayList<OrderSummary>();
++        for (var order : orders) {
++            var lines = orderLineRepository.findByOrderId(order.getId());
++            history.add(new OrderSummary(order.getId(), order.getCreatedAt(), lines.size(), Pricing.orderTotal(lines)));
++        }
++        return history;
++    }
++}
+diff --git a/src/main/java/com/example/orders/CustomerSummary.java b/src/main/java/com/example/orders/CustomerSummary.java
+new file mode 100644
+index 0000000..8a7167a
+--- /dev/null
++++ b/src/main/java/com/example/orders/CustomerSummary.java
+@@ -0,0 +1,4 @@
++package com.example.orders;
++
++record CustomerSummary(Long id, String name, String email) {
++}
+diff --git a/src/main/java/com/example/orders/OrderLineRepository.java b/src/main/java/com/example/orders/OrderLineRepository.java
+new file mode 100644
+index 0000000..9dab745
+--- /dev/null
++++ b/src/main/java/com/example/orders/OrderLineRepository.java
+@@ -0,0 +1,10 @@
++package com.example.orders;
++
++import java.util.List;
++
++import org.springframework.data.jpa.repository.JpaRepository;
++
++interface OrderLineRepository extends JpaRepository<OrderLine, Long> {
++
++    List<OrderLine> findByOrderId(Long orderId);
++}
+diff --git a/src/main/java/com/example/orders/OrderRepository.java b/src/main/java/com/example/orders/OrderRepository.java
+index 6f72618..b8f7897 100644
+--- a/src/main/java/com/example/orders/OrderRepository.java
++++ b/src/main/java/com/example/orders/OrderRepository.java
+@@ -1,7 +1,9 @@
+ package com.example.orders;
+ 
++import java.util.List;
+ import java.util.Optional;
+ 
++import org.springframework.data.domain.Pageable;
+ import org.springframework.data.jpa.repository.EntityGraph;
+ import org.springframework.data.jpa.repository.JpaRepository;
+ 
+@@ -9,4 +11,6 @@ interface OrderRepository extends JpaRepository<Order, Long> {
+ 
+     @EntityGraph(attributePaths = {"customer", "lines"})
+     Optional<Order> findWithCustomerAndLinesById(Long id);
++
++    List<Order> findByCustomerId(Long customerId, Pageable pageable);
+ }
+diff --git a/src/main/java/com/example/orders/OrderSummary.java b/src/main/java/com/example/orders/OrderSummary.java
+new file mode 100644
+index 0000000..9bae96b
+--- /dev/null
++++ b/src/main/java/com/example/orders/OrderSummary.java
+@@ -0,0 +1,6 @@
++package com.example.orders;
++
++import java.time.Instant;
++
++record OrderSummary(Long id, Instant createdAt, int lineCount, long totalCents) {
++}

@@ -1,0 +1,56 @@
+# Puts the demo back in its starting state: closes the open pull requests,
+# moves main back to the baseline tag and recreates the scenario branches
+# from the scenario/customer-search tag.
+#
+# It authenticates as the review GitHub App: the app bypasses the ruleset on
+# main (force-push), and its closes reach the review webhook, which ends the
+# Temporal workflow of each pull request.
+name: Reset demo
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: reset-demo
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  reset:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Create a GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ secrets.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Close open pull requests
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          for number in $(gh pr list --repo "$REPO" --state open --limit 100 --json number --jq '.[].number'); do
+            gh pr close "$number" --repo "$REPO"
+          done
+
+      - name: Move main to baseline and recreate the scenario branches
+        env:
+          TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          git init -q -b reset "$RUNNER_TEMP/demo"
+          cd "$RUNNER_TEMP/demo"
+          git fetch -q --no-tags "https://x-access-token:${TOKEN}@github.com/${REPO}.git" \
+            "+refs/tags/baseline:refs/tags/baseline" \
+            "+refs/tags/scenario/customer-search:refs/tags/scenario/customer-search"
+          git push --atomic --force "https://x-access-token:${TOKEN}@github.com/${REPO}.git" \
+            "baseline^{commit}:refs/heads/main" \
+            "scenario/customer-search^{commit}:refs/heads/feature/customer-search" \
+            "scenario/customer-search^{commit}:refs/heads/dev/customer-search"

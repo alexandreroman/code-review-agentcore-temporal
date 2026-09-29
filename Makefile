@@ -45,8 +45,8 @@ endif
 # a bare `export` would expand $(GITHUB_OWNER), hence run gh, for every recipe.
 export AWS_REGION TEMPORAL_NAMESPACE TEMPORAL_ADDRESS TEMPORAL_TLS_CERT_PATH TEMPORAL_TLS_KEY_PATH \
 	TEMPORAL_DEPLOYMENT_NAME TASK_QUEUE DEV_TASK_QUEUE PR_IDLE_WARNING_SECONDS PR_IDLE_CLOSE_SECONDS \
-	BEDROCK_MODEL_ID MODEL_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO DOMAIN_NAME \
-	CLOUDFLARE_ZONE_ID CLOUDFLARE_API_TOKEN TRACING
+	BEDROCK_MODEL_ID MODEL_EFFORT MAX_PARALLEL_AGENTS DEMO_REPO GITHUB_APP_NAME \
+	GITHUB_APP_CALLBACK_PORT DOMAIN_NAME CLOUDFLARE_ZONE_ID CLOUDFLARE_API_TOKEN TRACING
 export AWS_DEFAULT_REGION = $(AWS_REGION)
 
 # OpenTofu input variables (no secret among them: the Cloudflare provider reads CLOUDFLARE_API_TOKEN itself).
@@ -133,49 +133,58 @@ check: test lint infra-check ## Run tests and static checks
 
 ##@ Deploy
 
+# Create the OpenTofu state bucket and KMS key (once per AWS account).
 .PHONY: bootstrap
-bootstrap: ## Create the OpenTofu state bucket and KMS key (once per AWS account)
+bootstrap:
 	@scripts/bootstrap.sh "$(STATE_BUCKET)"
 
-# -reconfigure: the bucket comes from the command line on every run, so a saved
-# backend configuration never needs migrating.
+# Initialise the OpenTofu backends (S3 state, per worktree). -reconfigure: the
+# bucket comes from the command line on every run, so a saved backend
+# configuration never needs migrating.
 .PHONY: infra-init
-infra-init: ## Initialise the OpenTofu backends (S3 state, per worktree)
+infra-init:
 	$(TOFU_AWS) init -reconfigure -input=false -backend-config="bucket=$(STATE_BUCKET)" \
 		-backend-config="region=$(AWS_REGION)" >/dev/null
 	$(TOFU_GITHUB) init -reconfigure -input=false -backend-config="bucket=$(STATE_BUCKET)" \
 		-backend-config="region=$(AWS_REGION)" >/dev/null
 
+# Apply the aws stack (keeps the deployed build and its endpoints).
 # infra, deploy, prune and destroy depend on router-build: every plan of the aws
 # stack, destroy included, reads build/router through archive_file data sources.
 .PHONY: infra
-infra: router-build infra-init ## Apply the aws stack (keeps the deployed build and its endpoints)
+infra: router-build infra-init
 	$(call require_namespace)
 	scripts/infra.sh
 
+# Push the mTLS client certificate from .env to Secrets Manager (read by the worker and the router).
 .PHONY: secrets
-secrets: ## Push the mTLS client certificate from .env to Secrets Manager (read by the worker and the router)
+secrets:
 	scripts/secrets.sh
 
+# Register the GitHub App through the manifest flow (interactive). make up does
+# it on the first run; FORCE=1 registers a new app over the stored one.
 .PHONY: github-app
-github-app: infra-init ## Register the GitHub App through the manifest flow (interactive, once)
+github-app: infra-init
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
 	$(GITHUB_APP) register --owner $(GITHUB_OWNER) --name "$(GITHUB_APP_NAME)" \
 		--port $(GITHUB_APP_CALLBACK_PORT) --webhook-url "$$($(TOFU_AWS) output -raw webhook_url)" \
 		$(if $(FORCE),--force)
 
+# Register the GitHub App if needed, sync it (slug, webhook), apply the github stack (demo repository, rulesets,
+# Actions secrets) and push the demo application from demo/ into an empty demo repository.
 .PHONY: github
-github: infra-init ## Sync the app (slug, webhook), apply the github stack (demo repository, ruleset, Actions secrets)
+github: infra-init
 	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
 	@GITHUB_OWNER=$(GITHUB_OWNER) scripts/github.sh
 
+# Build and push the worker image, then make it the current Worker Deployment Version.
 .PHONY: deploy
-deploy: router-build infra-init ## Build and push the worker image, then make it the current Worker Deployment Version
+deploy: router-build infra-init
 	$(call require_namespace)
 	scripts/deploy.sh
 
 .PHONY: up
-up: ## Deploy everything: state, AWS, secrets, worker, GitHub (idempotent, stops at a missing prerequisite)
+up: ## Deploy everything: state, AWS, secrets, worker, GitHub App and demo repository (idempotent)
 	$(call require_namespace)
 	$(MAKE) --no-print-directory bootstrap infra secrets deploy github info-publish
 
@@ -200,8 +209,9 @@ ping: ## Run the Ping workflow on the production task queue (scale-from-zero che
 	temporal workflow execute --type Ping --task-queue $(TASK_QUEUE) --workflow-id ping-$$(date +%s) \
 		--input '"hello"' --tls-cert-path $(TEMPORAL_TLS_CERT_PATH) --tls-key-path $(TEMPORAL_TLS_KEY_PATH)
 
+# Build the router Lambda: code into build/router, dependency layer into build/router-deps.
 .PHONY: router-build
-router-build: ## Build the router Lambda: code into build/router, dependency layer into build/router-deps
+router-build:
 	scripts/router-build.sh
 
 ##@ Workspace

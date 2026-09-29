@@ -1,10 +1,10 @@
 # Code Review with AgentCore x Temporal
 
-Conference demo: AI agents review GitHub pull requests, orchestrated by
-Temporal and run as Serverless Workers on Amazon Bedrock AgentCore.
+AI agents review GitHub pull requests, orchestrated by Temporal and run as
+Serverless Workers on Amazon Bedrock AgentCore.
 
 See [README.md](README.md) for full documentation, [SETUP.md](SETUP.md)
-for the installation and [DEMO.md](DEMO.md) for the talk run-through.
+for the installation and [DEMO.md](DEMO.md) for the demo run-through.
 
 ## Tech stack
 
@@ -30,6 +30,8 @@ make up        # deploy everything (AWS, worker, GitHub)
 - `tools/` — GitHub App registration tooling called by the Makefile
 - `infra/` — OpenTofu stacks (`bootstrap`, `aws`, `github`)
 - `scripts/` — bash scripts behind the Make targets
+- `demo/` — demo application (baseline and scenario patch) that `make up`
+  pushes to the demo repository
 
 ## E2E validation
 

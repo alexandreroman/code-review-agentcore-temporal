@@ -47,7 +47,7 @@ async def _process(event: dict, headers: dict[str, str], fields: dict[str, Any],
     try:
         signed = _is_signed(body, headers.get("x-hub-signature-256"))
     except Exception:
-        logger.exception("router not configured (has make github-app run?)", extra=fields)
+        logger.exception("router not configured (has make up run?)", extra=fields)
         return 503, "router not configured"
     if not signed:
         return 401, "invalid signature"
