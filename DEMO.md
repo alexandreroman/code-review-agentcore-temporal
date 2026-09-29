@@ -10,74 +10,75 @@ Four moments, in this order:
 | 3 | Durability        | `/kill` stops the sessions; the review resumes       |
 | 4 | Human in the loop | Agent answers in a thread; `/fix` turns check green  |
 
-`<owner>` below is the owner of the demo repository
-`agentcore-review-demo-app`.
+The demo runs in the demo repository, `<owner>/agentcore-review-demo-app`
+(unless `DEMO_REPO` names another one), that `make up` creates: a Spring
+Boot order management application, the code the agents review. Every pull
+request, comment and reset below happens there, not in this repository.
 
 ## The day before
 
-On a stable network, never on a shared event Wi-Fi:
+> [!IMPORTANT]
+> Deploy the day before, on a stable network, never on a shared event
+> Wi-Fi: a first image push takes tens of minutes on a slow uplink, and
+> during the demo nothing big must travel.
 
 1. `aws sso login --profile <profile>` and `export AWS_PROFILE=<profile>`
-   in the demo terminal, start Docker.
-2. `make up`: deploy everything now. A first image push takes tens of
-   minutes on a slow uplink; during the demo, nothing big must travel.
+   in the demo terminal (Temporalites: the `access` commands of
+   [Getting started](README.md#getting-started)), start Docker.
+2. `make up`: deploy everything now.
 3. Validate: `/e2e-validation full` in Claude Code (about 30 minutes). It
    checks all four moments, the reset, the dev mode and the return to zero.
 4. Check the Bedrock quotas of the region (Service Quotas, Amazon
    Bedrock, the global cross-region tokens and requests per minute of
    Claude Opus 5): enough for a few reviews.
-5. Afterwards, leave `pyproject.toml`, `uv.lock`, the member
-   `pyproject.toml` files, `shared/src/`, `worker/src/` and
-   `worker/Dockerfile` untouched, committed or not: the build ID hashes
-   these paths, so any change makes the next `make up` build and push a
-   new image. Docs and tests are safe to edit.
+
+> [!WARNING]
+> Once deployed, leave `pyproject.toml`, `uv.lock`, the member
+> `pyproject.toml` files, `shared/src/`, `worker/src/` and
+> `worker/Dockerfile` untouched, committed or not: the build ID hashes
+> these paths, so any change makes the next `make up` build and push a new
+> image. Docs and tests are safe to edit, and so is `demo/`: it only
+> reaches a demo repository that is still empty. The deployment is done:
+> no `make up` before the demo. After a new build anyway, demo on a fresh
+> PR only: a PR whose workflow started on an older build keeps the older
+> behaviour until its workflow moves to the new build.
 
 ## Pre-demo checklist (30 minutes before)
 
 1. **Network**: connect, and keep a phone hotspot at hand, tested with
    `make ping`; disconnect VPNs if the network is unstable.
-2. **Credentials**: `aws sso login --profile <profile>` (the session must
-   outlast the demo), `AWS_PROFILE` exported in the demo terminal,
-   `gh auth status`.
-3. **`make up`**: it must be a no-op ("already in ECR", "already the
-   current version"). If it starts building an image, stop it (`Ctrl-C`)
-   and keep the deployed build. After a `make up` that builds a new image,
-   demo on a fresh PR only: a PR whose workflow started on an older build
-   keeps the older behaviour until its workflow moves to the new build.
-4. **Reset**: Actions, **Reset demo**, **Run workflow**, or
+2. **Credentials**: `aws sso login --profile <profile>` (Temporalites: the
+   `access` commands of [Getting started](README.md#getting-started); the
+   session must outlast the demo), `AWS_PROFILE` exported in the demo
+   terminal, `gh auth status`.
+3. **Reset** the demo repository: its **Actions** tab, **Reset demo**,
+   **Run workflow**, or
    `gh workflow run reset-demo.yml --repo <owner>/agentcore-review-demo-app`.
    Wait for the green run.
-5. **Blank PR** to check access and quotas end to end (webhook, AgentCore,
-   Bedrock access, GitHub App): in the demo repository, edit `README.md` in
-   the browser, commit to a new branch `warmup/check`, open the PR, and wait
-   for the `AI Review` check (a minute or two). Then close the PR and delete
-   the branch.
-6. **Idle pull requests**: the bot warns on a PR idle for 10 minutes and
-   closes it at 15. Open the demo PR live, not before. For a PR
-   prepared in advance, raise `PR_IDLE_WARNING_SECONDS` and
-   `PR_IDLE_CLOSE_SECONDS` in `.env` and run `make up` the day before (a
-   router-only change, no new image); a PR keeps the durations its
-   workflow started with.
-7. **Back to zero**: `make kill-sessions`, so no worker runs when the demo
+4. **Back to zero**: `make kill-sessions`, so no worker runs when the demo
    starts.
-8. **Tabs**, in this order:
-   - GitHub: **Pull requests**, **New pull request**, compare
-     `feature/customer-search` into `main` (the page the PR is opened from);
+5. **Tabs**, in this order:
+   - GitHub, in the demo repository: **Pull requests**, **New pull
+     request**, compare `feature/customer-search` into `main` (the page the
+     PR is opened from);
    - Temporal UI: the namespace's workflows, filtered with
      `WorkflowType="PullRequestWorkflow"`;
-   - Temporal UI: **Worker Deployments**, `agentcore-review-demo-worker`;
-   - hidden, for plan B: the same compare page with `dev/customer-search`,
-     and a terminal at the repository root (run `make dev` once, then stop
-     it, so that its next start is fast).
-9. **Readability**: browser zoom at 150 to 175 %, terminal font at 20 pt
-   or more, bookmarks bar hidden, notifications off (Do Not Disturb), chat
-   and mail closed.
+   - Temporal UI: **Worker Deployments**, `agentcore-review-demo-worker`.
+
+> [!IMPORTANT]
+> Open the demo PR live, not before: the bot warns on a pull request idle
+> for 10 minutes and closes it at 15. For a PR prepared in advance, raise
+> `PR_IDLE_WARNING_SECONDS` and `PR_IDLE_CLOSE_SECONDS` in `.env` and run
+> `make up` the day before (a router-only change, no new image); a PR keeps
+> the durations its workflow started with. A pull request closed by the bot
+> can be reopened: the reopen starts a new review, numbered after the
+> previous one.
 
 ## Run-through (15 minutes)
 
 | Time  | Do                 | Show                                | Moment |
 |-------|--------------------|-------------------------------------|--------|
-| 0:00  | Architecture slide | GitHub, router, Temporal, AgentCore | —      |
+| 0:00  | README diagram     | GitHub, router, Temporal, AgentCore | —      |
 | 2:00  | Open the PR        | Workflow starts, then a session     | 1      |
 | 3:00  | Open the workflow  | Three reviewers in parallel         | 2      |
 | 4:00  | Comment `/kill`    | Sessions stop, work resumes         | 3      |
@@ -105,22 +106,22 @@ Key points:
   are not repeated and not billed again.
 - **5:30, human in the loop.** One review, inline comments tagged by
   category (`S-01` for security, `P-01` for performance, `M-01` for
-  maintainability), a summary, and a red `AI Review` check that blocks the
-  merge.
+  maintainability), a summary, and a red `AI Review` check.
   The workflow waits for a signal; its memo shows its state without any
-  worker, and a minute later no worker listens on the queue. Its pending
-  `idle warning` timer is durable: in 10 minutes, Temporal starts a worker
-  just to post the warning, and closes the PR 5 minutes later. Reopening
-  it starts a new review, numbered after the previous one: the bot says
-  so in a comment right away, since the new round takes a few minutes.
+  worker. After a minute without activity, the worker in the AgentCore
+  session drains and stops: it leaves the **Workers** tab of Temporal UI,
+  and no worker listens on the queue any more. AgentCore ends the idle
+  session 2 minutes later. Its pending `idle warning` timer is durable:
+  in 10 minutes, Temporal starts a worker just to post the warning, and
+  closes the PR 5 minutes later. Reopening it starts a new review,
+  numbered after the previous one: the bot says so in a comment right
+  away, since the new round takes a few minutes.
 - **6:30, discussion.** Reply in the thread of the SQL injection finding:
   "Why is this a problem? The input is validated upstream." 👀 on the
   reply. A worker starts on demand; in Temporal UI, a `…-discussion-1`
   child workflow checks the claim against the code with the same tools.
   The bot answers in the thread with evidence, starting with
-  "**S-0x stays open.**" An agent may also dismiss a finding when the
-  code proves the human right; during the demo, a question on a real defect
-  keeps the answer predictable.
+  "**S-0x stays open.**"
 - **7:30, `/fix`.** Post it as a PR comment: the fixer handles every open
   finding (in a finding's thread, `/fix` fixes that finding only;
   `/fix S-01 P-02` fixes the findings it names, and nothing at all if
@@ -135,35 +136,30 @@ Key points:
   `PullRequestOutcome` (merged, by whom, rounds, findings still open) and
   deletes the PR's snapshots.
 
+> [!IMPORTANT]
+> The ruleset on `main` requires the `AI Review` check: the merge stays
+> blocked as long as a critical or high finding is open. Lower findings
+> leave the check green.
+
+> [!TIP]
+> In the discussion, question a real defect, such as the SQL injection:
+> the answer stays predictable. An agent may also dismiss a finding when
+> the code proves the human right.
+
 ## After the demo
 
-Run the reset. Nothing else: sessions drain by themselves, and at rest
-the infrastructure only costs its storage, secrets and KMS key, a few
-dollars a month.
-
-## Plan B: AgentCore fails
-
-Symptoms: no session 30 seconds after the PR, or AgentCore errors in the
-workflow. Switch to the local worker, same Temporal Cloud namespace:
-
-1. In the terminal: `make dev`, and wait for `polling review-dev`.
-2. Open the PR from the hidden `dev/customer-search` compare tab: the `dev/`
-   prefix routes it to the `review-dev` queue, served by the laptop.
-3. Play the same scenario. Instead of `/kill`, press `Ctrl-C` on the local
-   worker during the review, then run `make dev` again: the interrupted
-   activity resumes on the new worker. A `/kill` comment on this PR only
-   answers "Dev worker: Ctrl-C is your friend."
-4. Scale-from-zero and the session kill are lost; everything else is
-   identical.
+Reset the demo repository. Nothing else: sessions drain by themselves,
+and at rest the infrastructure only costs its storage, secrets and KMS
+key, a few dollars a month.
 
 ## Recovery
 
 | Symptom                        | Action                                     |
 |--------------------------------|--------------------------------------------|
 | No workflow after the PR       | App settings, Recent Deliveries: Redeliver |
-| No worker 30 s after the start | Plan B                                     |
 | `/kill` answers nothing        | Carry on: the review completes anyway      |
 | No answer to the reply in 90 s | Skip it: comment `/fix` on the PR          |
 | A "Fix N" comment after `/fix` | Comment `/fix` again, or admin merge       |
 | Check red after `/fix`         | Admin merge: the outcome records it        |
 | Review slower than 3 minutes   | Tour the history meanwhile                 |
+| PR closed for inactivity       | Reopen it: a new review starts             |

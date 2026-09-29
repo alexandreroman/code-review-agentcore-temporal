@@ -75,7 +75,7 @@ session from the workflow history.
   it introduces, and turns the `AI Review` check green.
 
 [DEMO.md](DEMO.md) is the timed run-through of a live demo, with its
-checklist and plan B.
+checklist and recovery actions.
 
 ## Architecture
 

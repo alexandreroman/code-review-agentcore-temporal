@@ -100,8 +100,9 @@ STEP
 ```
 
 Success: exit 0, no `MISSING` line. **Stop** on failure: report the missing
-items to the human (AWS: `aws sso login`; `gh auth login`; nothing
-deployed: `make up`).
+items to the human (AWS: `aws sso login`, or for a Temporalite the two
+`access account` commands of the README's Getting started; `gh auth login`;
+nothing deployed: `make up`).
 
 ## Setup — Reset and return to zero (timeout 600000)
 

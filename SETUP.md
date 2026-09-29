@@ -316,7 +316,8 @@ reload, without deploying anything.
   read.
 - **`Docker is not running`**: start Docker, then run the target again.
 - **AWS `ExpiredToken` or SSO errors**: `aws sso login --profile
-  <profile>`.
+  <profile>` (Temporalites: the `access` commands of
+  [AWS credentials](#5-aws-credentials)).
 - **`GitHub App <slug> is still not installed`** after 10 minutes: install
   the app on the demo repository, then run `make up` again.
 - **A review fails with `AccessDeniedException` or
