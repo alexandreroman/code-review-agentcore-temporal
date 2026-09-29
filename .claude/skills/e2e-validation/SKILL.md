@@ -231,12 +231,22 @@ fi
 
 # E2E-02 verdict: resumption without replay.
 if [[ -n "${KILL_AT:-}" ]]; then
-  killed=$(jq -cs 'add | unique' "$E2E_DIR/pollers-before.json" "$E2E_DIR/pollers-at-kill.json")
-  report="$E2E_DIR/e2e-02.json"
+  fetched=""
   for wf in "${round1[@]}"; do
-    file=$(fetch_history "$wf") || continue
+    fetch_history "$wf" >/dev/null && fetched="$fetched $wf"
+  done
+  # Killed sessions: the pollers listed before and at /kill, plus the sessions that started activities before /kill
+  # (the poller lists can miss them).
+  killed=$({
+    cat "$E2E_DIR/pollers-before.json" "$E2E_DIR/pollers-at-kill.json"
+    for wf in $fetched; do
+      jqe -c --argjson kill "$KILL_AT" 'include "e2e"; identities_before($kill)' "$E2E_DIR/history/$wf.json"
+    done
+  } | jq -cs 'add | unique')
+  report="$E2E_DIR/e2e-02.json"
+  for wf in $fetched; do
     jqe -c --argjson kill "$KILL_AT" --argjson killed "$killed" \
-      'include "e2e"; kill_report($kill) + {resumed: resumed_starts($killed)}' "$file"
+      'include "e2e"; kill_report($kill) + {resumed: starts_elsewhere($kill; $killed)}' "$E2E_DIR/history/$wf.json"
   done | jq -s --argjson kill "$KILL_AT" '{
     finished_before: (map(.finished_before) | add),
     retried_before: (map(.retried_before) | add),
@@ -244,10 +254,11 @@ if [[ -n "${KILL_AT:-}" ]]; then
     resume_s: ((map(.resumed[]) | min) as $m | if $m then ($m - $kill) * 10 | round / 10 else null end)}' >"$report"
   cat "$report"
   save RESUME_S "$(jq -r '.resume_s // "none"' "$report")"
-  if jq -e '.retried_before == 0 and .interrupted >= 1 and .resume_s != null' "$report" >/dev/null \
+  if jq -e '.retried_before == 0 and .resume_s != null' "$report" >/dev/null \
     && [[ "${KILL_CONFIRMED:-no}" == yes ]]; then
-    kept=$(jq -r '"\(.finished_before) finished activities kept attempt 1, \(.interrupted) retried"' "$report")
-    result E2E-02 ok "$kept, resumed ${RESUME_S}s after /kill"
+    kept=$(jq -r '"\(.finished_before) finished activities kept attempt 1, \(.interrupted) interrupted and retried"' \
+      "$report")
+    result E2E-02 ok "$kept, resumed ${RESUME_S}s after /kill on a new session"
   else
     result E2E-02 FAIL "$(jq -c . "$report"), confirmation comment: ${KILL_CONFIRMED:-no}"
     collect "${round1[@]}"
@@ -269,9 +280,12 @@ STEP
 ```
 
 Success for E2E-02: the bot confirmed the stopped sessions; every activity
-completed before the kill needed one attempt; at least one activity
-scheduled before the kill was retried (attempt 2 or more), on a session
-that was not killed.
+completed before the kill kept its single attempt; after the kill, work
+resumed on an AgentCore session other than the killed ones (the pollers
+listed before and at `/kill`, and the sessions that started activities
+before it). Activities interrupted by the kill (retried at attempt 2 or
+more) are reported, not required: the stop takes a few seconds, so short
+model calls in flight may finish first.
 
 Success for E2E-03: from the execution start to the second `UpdateCheck`
 completion (the round's conclusion) takes at most 180 s, the bot published
@@ -519,6 +533,11 @@ runs after it, so no idle timer is left to wake a worker.
 
 ### E2E-07 — Dev mode (timeout 600000)
 
+The block first resets the demo repository, since the E2E-06b merge left
+`dev/customer-search` without any commit against `main`; no production PR
+is open then, so the reset wakes no AgentCore worker and leaves the E2E-09
+clock alone.
+
 1. Start the local worker with the Bash tool's `run_in_background` option
    (keep the task ID to stop it later):
 
@@ -532,6 +551,7 @@ runs after it, so no idle timer is left to wake a worker.
 bash <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
 fail() { result E2E-07 FAIL "$1"; collect ${DEV_WF:+"$DEV_WF"}; exit 1; }
+reset_and_wait 120 "$TASK_QUEUE" || fail "reset before the dev PR failed"
 ready() { grep -q "polling $DEV_TASK_QUEUE" "$E2E_DIR/dev-worker.log"; }
 wait_until 120 "local worker polling $DEV_TASK_QUEUE" ready || fail "local worker not polling (dev-worker.log)"
 PR=$(open_pr dev/customer-search "$SCENARIO_TITLE (dev)") || fail "gh pr create failed"
@@ -603,6 +623,7 @@ Requires E2E-06b (`LAST_PROD_AT`).
 ```bash
 bash <<'STEP'
 source .claude/skills/e2e-validation/helpers.sh
+fail() { result E2E-09 FAIL "$1"; collect; exit 1; }
 deadline=$((LAST_PROD_AT + 60 + IDLE_TIMEOUT + 30))
 pause=$((deadline + 60 - $(now)))
 if ((pause > 0)); then
@@ -610,12 +631,22 @@ if ((pause > 0)); then
   sleep "$pause"
 fi
 group="/aws/bedrock-agentcore/runtimes/$RUNTIME_ID-$BUILD"
-last_log=$(aws logs filter-log-events --log-group-name "$group" --start-time "$((LAST_PROD_AT * 1000))" \
-  --query 'max(events[].timestamp)' --output text)
-drained=$(aws logs filter-log-events --log-group-name "$group" --start-time "$((LAST_PROD_AT * 1000))" \
-  --filter-pattern '"drained"' --query 'max(events[].timestamp)' --output text)
-late=$(aws logs filter-log-events --log-group-name "$group" --start-time "$((deadline * 1000))" \
-  --query 'length(events)' --output text)
+# log_times START_MS [OPTION...]: the timestamps of the runtime log events since START_MS, one per line. The CLI
+# applies --query to each result page (the last one is often empty and prints None), so max() or length() would
+# print one line per page: list the timestamps and aggregate them here.
+log_times() {
+  local start_ms="$1" out
+  shift
+  out=$(aws logs filter-log-events --log-group-name "$group" --start-time "$start_ms" "$@" \
+    --query 'events[].timestamp' --output text) || return 1
+  tr '\t' '\n' <<<"$out" | grep -E '^[0-9]+$' || true
+}
+logs=$(log_times "$((LAST_PROD_AT * 1000))") || fail "aws logs filter-log-events failed"
+drains=$(log_times "$((LAST_PROD_AT * 1000))" --filter-pattern '"drained"') || fail "aws logs filter-log-events failed"
+late_logs=$(log_times "$((deadline * 1000))") || fail "aws logs filter-log-events failed"
+last_log=$(sort -n <<<"$logs" | tail -1)
+drained=$(sort -n <<<"$drains" | tail -1)
+late=$(grep -c . <<<"$late_logs")
 last_poll=$(tcli task-queue describe --task-queue "$TASK_QUEUE" -o json \
   | jqe 'include "e2e"; agentcore_last_poll // 0 | floor')
 after() { [[ "$1" =~ ^[0-9]+$ ]] && echo "+$(($1 / 1000 - LAST_PROD_AT))s" || echo none; }
@@ -623,9 +654,7 @@ echo "last runtime log $(after "$last_log"), drained $(after "$drained"), events
 if [[ "$late" == 0 && "$last_poll" -le $((LAST_PROD_AT + 135)) ]]; then
   result E2E-09 ok "last log $(after "$last_log"), drained $(after "$drained"), no poll after +135s"
 else
-  msg="$late log event(s) after +$((deadline - LAST_PROD_AT))s, last poll +$((last_poll - LAST_PROD_AT))s"
-  result E2E-09 FAIL "$msg"
-  collect
+  fail "$late log event(s) after +$((deadline - LAST_PROD_AT))s, last poll +$((last_poll - LAST_PROD_AT))s"
 fi
 STEP
 ```

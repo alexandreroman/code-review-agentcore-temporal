@@ -50,10 +50,16 @@ def kill_report($kill):
      retried_before: [.[] | select(.completed and .completed < $kill and .attempt > 1)] | length,
      interrupted: [.[] | select(.attempt > 1 and .scheduled < $kill)] | length};
 
-# Start times of the retried attempts run by an AgentCore session absent from $killed.
-def resumed_starts($killed):
+# Worker identities that started an activity attempt before $kill: the killed
+# sessions, even when the task queue listed no poller at the time.
+def identities_before($kill):
+  [activities[] | select(.started and .started < $kill) | .identity // empty] | unique;
+
+# Start times of the activity attempts (any attempt number) started after $kill
+# by an AgentCore session absent from $killed: the work resumed elsewhere.
+def starts_elsewhere($kill; $killed):
   [activities[]
-   | select(.attempt > 1 and ((.identity // "") | startswith("agentcore:"))
+   | select(.started and .started > $kill and ((.identity // "") | startswith("agentcore:"))
             and (.identity as $i | $killed | index($i) | not))
    | .started];
 
