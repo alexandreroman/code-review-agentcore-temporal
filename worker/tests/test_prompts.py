@@ -44,7 +44,7 @@ def test_the_focus_stays_out_of_the_shared_prefix():
 def test_a_patch_holding_a_code_fence_stays_inside_a_longer_one():
     patch = FilePatch(path="README.md", status="modified", patch="@@ -1 +1,3 @@\n+```java\n+run();\n+```")
     shared = reviewer_prompt(Category.SECURITY, BatchPatches(patches=[patch], tree=[]), [], [])[0]["text"]
-    assert "\n````diff\n@@ -1 +1,3 @@\n+```java\n+run();\n+```\n````" in shared
+    assert "\n````diff\n@@ -1 +1,3 @@\n    1 +```java\n    2 +run();\n    3 +```\n````" in shared
 
 
 def test_open_findings_appear_only_in_incremental_rounds():

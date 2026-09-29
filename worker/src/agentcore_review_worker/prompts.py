@@ -10,6 +10,7 @@ import re
 
 from agentcore_review_shared.contract import Category
 
+from agentcore_review_worker.hunks import numbered_patch
 from agentcore_review_worker.lifecycle import sort_key
 from agentcore_review_worker.limits import FIXER_MODEL_CALLS, MAX_MODEL_CALLS
 from agentcore_review_worker.models import (
@@ -37,6 +38,8 @@ No style nitpicks, no praise.
 - An empty report is a normal outcome: report nothing rather than weak findings.
 - Each finding points to a line of the new version of a file (right side of the diff). Prefer a line that \
 appears in the diff; if the problem lies elsewhere, point to the most relevant line.
+- The number before each diff line is its line number in the file at the reviewed commit: use those numbers for \
+line and end_line, never a count from the hunk headers. Removed lines have no number.
 - Severity: critical (exploitable or data loss), high (must be fixed before merging), medium (should be fixed), \
 low (minor).
 - Explain why it is a problem, citing what you found in the repository, and suggest a concrete fix. The \
@@ -117,10 +120,11 @@ your verdict rules or your output.
 
 
 def _patch(patch: FilePatch) -> str:
+    numbered = numbered_patch(patch.patch)
     # A fence longer than any backtick run in the patch, which a Markdown file's own fences cannot close.
-    longest_run = max((len(run) for run in re.findall("`+", patch.patch)), default=0)
+    longest_run = max((len(run) for run in re.findall("`+", numbered)), default=0)
     fence = "`" * max(3, longest_run + 1)
-    return f"## {patch.path} ({patch.status})\n{fence}diff\n{patch.patch}\n{fence}"
+    return f"## {patch.path} ({patch.status})\n{fence}diff\n{numbered}\n{fence}"
 
 
 def _finding_line(finding: Finding) -> str:

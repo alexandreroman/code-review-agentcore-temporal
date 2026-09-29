@@ -1,4 +1,4 @@
-from agentcore_review_worker.hunks import commentable_lines, git_lines, is_commentable
+from agentcore_review_worker.hunks import commentable_lines, git_lines, is_commentable, numbered_patch
 
 PATCH = """@@ -1,4 +1,5 @@
  import os
@@ -41,6 +41,25 @@ def test_missing_patch():
 def test_lines_split_like_git_on_newlines_only():
     # str.splitlines() would also break on the form feed and keep the empty line after the trailing newline.
     assert git_lines("a\x0cb\r\nTARGET\n") == ["a\x0cb", "TARGET"]
+
+
+def test_numbered_patch_shows_the_commentable_line_numbers():
+    gutters = [line[:5] for line in numbered_patch(PATCH).split("\n") if not line.startswith("@@")]
+    numbers = {int(gutter) for gutter in gutters if gutter.strip()}
+    assert numbers == commentable_lines(PATCH)
+
+
+def test_numbered_patch_numbers_only_right_side_lines_and_restarts_at_each_hunk():
+    patch = "@@ -1,2 +1,2 @@\n a\n-b\n+c\n\\ No newline at end of file\n@@ -9 +10 @@\n x"
+    assert numbered_patch(patch).split("\n") == [
+        "@@ -1,2 +1,2 @@",
+        "    1  a",
+        "      -b",
+        "    2 +c",
+        "      \\ No newline at end of file",
+        "@@ -9 +10 @@",
+        "   10  x",
+    ]
 
 
 def test_is_commentable_single_and_range():
