@@ -1,6 +1,6 @@
 """The /fix and /kill commands: permission check, a Temporal signal or AgentCore session stops, then feedback on
-the pull request (a reaction or a short comment). Plain replies to a finding go through the same permission check
-before reaching the pull request workflow, which answers them.
+the pull request (a reaction or a short comment). Plain replies to a finding and plain comments in the Conversation go
+through the same permission check before reaching the pull request workflow, which answers them.
 
 A /kill whose stops are not all confirmed within the webhook's budget hands the rest to an asynchronous
 invocation of this same Lambda, which finishes the stops and posts the comment.
@@ -72,25 +72,33 @@ async def run_command(command: RunCommand, client: Client, deadline: float, fiel
 
 
 async def forward_reply(action: ForwardReply, client: Client, fields: dict[str, Any]) -> str:
-    """A plain reply in a finding's thread: checked like a command, then queued in the workflow, which answers.
+    """A plain reply in a finding's thread, or a plain comment in the Conversation: checked like a command, then
+    queued in the workflow, which answers.
 
-    A plain reply is not addressed to the bot: when ignored, it gets neither a reaction nor a comment.
+    A plain comment is not a command: when ignored, it gets neither a reaction nor a comment. Once queued, a reply in
+    a thread gets 👀, and a Conversation comment only when it mentions the bot: the workflow may leave any other one
+    unanswered.
     """
     app = runtime.github()
-    if await _comment_author(app, action.pr, action.thread_root_id) != action.bot_login:
+    in_thread = action.thread_root_id is not None
+    if in_thread and await _comment_author(app, action.pr, action.thread_root_id) != action.bot_login:
         return "reply in a thread that is not a finding"
     permission = await _permission(app, action.pr, action.author)
     if not can_run_commands(permission):
-        return f"reply ignored: {action.author or 'unknown user'} has {permission or 'no'} access"
+        return f"comment ignored: {action.author or 'unknown user'} has {permission or 'no'} access"
     posted = CommentPosted(
         comment_id=action.comment_id,
         thread_root_id=action.thread_root_id,
         author=action.author,
         delivery_id=action.delivery_id,
+        mentioned=action.mentioned,
     )
     if not await temporal_ops.signal(client, action.workflow_id, SIGNAL_COMMENT_POSTED, posted):
-        return "reply ignored: no review in progress"
-    await _best_effort(_react(app, action.pr, "review", action.comment_id, REACTION_ACK), fields)
+        return "comment ignored: no review in progress"
+    if in_thread:
+        await _best_effort(_react(app, action.pr, "review", action.comment_id, REACTION_ACK), fields)
+    elif action.mentioned:
+        await _best_effort(_react(app, action.pr, "issue", action.comment_id, REACTION_ACK), fields)
     return f"signal {SIGNAL_COMMENT_POSTED} to {action.workflow_id}"
 
 

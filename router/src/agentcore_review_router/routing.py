@@ -1,5 +1,6 @@
 """Pure mapping from a GitHub webhook event to the action the router must perform."""
 
+import re
 from dataclasses import dataclass
 from typing import Literal
 
@@ -21,6 +22,15 @@ COMMANDS: dict[str, Command] = {"/fix": "fix", "/kill": "kill"}
 # Where a command was posted: "issue" for the PR's Conversation tab (issue_comment), "review" for a review
 # thread, such as a reply to a finding (pull_request_review_comment). GitHub reacts on each through its own endpoint.
 CommentKind = Literal["issue", "review"]
+
+# The parts of a comment where a mention notifies nobody, removed in this order: a code block runs to its closing
+# fence (or to the end when unclosed) and may hold anything, so it goes first.
+_UNNOTIFIED_PARTS = (
+    re.compile(r"^[ \t]*(`{3,}|~{3,}).*?(^[ \t]*\1|\Z)", re.MULTILINE | re.DOTALL),  # fenced code block
+    re.compile(r"<!--.*?(-->|\Z)", re.DOTALL),  # HTML comment
+    re.compile(r"`[^`]*`"),  # inline code
+    re.compile(r"^[ \t]*>.*$", re.MULTILINE),  # quoted line
+)
 
 
 @dataclass(frozen=True)
@@ -68,15 +78,19 @@ class RunCommand:
 
 @dataclass(frozen=True)
 class ForwardReply:
-    """A plain reply in a review thread: forwarded only when the thread is a finding (bot_login wrote its root)."""
+    """A plain comment for the worker to answer: a reply in a review thread, forwarded only when the thread is a
+    finding (bot_login wrote its root), or a comment in the Conversation."""
 
     workflow_id: str
     pr: PrRef
     comment_id: int
-    thread_root_id: int
+    # The first comment of the review thread the reply was posted in; None in the Conversation.
+    thread_root_id: int | None
     author: str
     delivery_id: str
     bot_login: str
+    # The Conversation comment mentions the bot: it is addressed to it.
+    mentioned: bool
 
 
 @dataclass(frozen=True)
@@ -100,6 +114,20 @@ def route(event: str, payload: dict, delivery_id: str, config: RouterConfig) -> 
 def workflow_summary(number: int, title: str) -> str:
     """`#3 · Add customer search`, made to fit Temporal UI like the worker's summaries."""
     return fit(f"#{number} · {title}")
+
+
+def mentions_bot(body: str, app_slug: str) -> bool:
+    """Whether the comment mentions @<app slug> or @<app slug>[bot], in any case, as a whole login.
+
+    GitHub logins hold letters, digits and hyphens: @tar-bot-fan names another user, @tar-bot[botfan] is no bot
+    login, and an address such as ops@tar-bot mentions nobody. A mention in a fenced code block, inline code, an
+    HTML comment or a quoted line does not count: GitHub notifies nobody for those, and a quote reply repeats an
+    earlier mention.
+    """
+    for part in _UNNOTIFIED_PARTS:
+        body = part.sub(" ", body)
+    pattern = rf"(?<![\w-])@{re.escape(app_slug)}(\[bot\])?(?![\w-]|\[bot)"
+    return re.search(pattern, body, re.IGNORECASE) is not None
 
 
 def _pr_ref(payload: dict, number: int) -> PrRef:
@@ -167,7 +195,9 @@ def _route_issue_comment(payload: dict, delivery_id: str, config: RouterConfig) 
 def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: str, config: RouterConfig) -> Action:
     """Both comment events share the same shape for the fields a command needs: action, comment and sender.
 
-    A review comment may also be a plain reply in a thread, which the worker answers when the thread is a finding.
+    Any other comment in the Conversation goes to the worker, which answers it when it mentions the bot or calls for
+    an answer. A review comment may be a plain reply in a thread, which the worker answers when the thread is a
+    finding; a review thread a human started is left alone.
     """
     if payload.get("action") != "created":
         return Ignore("comment was not created")
@@ -177,7 +207,8 @@ def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: s
     bot_login = f"{config.app_slug}[bot]"
     if author == bot_login:
         return Ignore("comment from the bot itself")
-    words = (comment.get("body") or "").split()
+    body = comment.get("body") or ""
+    words = body.split()
     if not words:
         return Ignore("empty comment")
     # Only review comments belong to a thread; a top-level review comment has no in_reply_to_id.
@@ -197,7 +228,7 @@ def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: s
             thread_root_id=thread_root_id,
             arguments=tuple(words[1:]),
         )
-    if thread_root_id is None:
+    if kind == "review" and thread_root_id is None:
         return Ignore("not a command")
     return ForwardReply(
         workflow_id=workflow_id,
@@ -207,4 +238,6 @@ def _route_command(payload: dict, number: int, kind: CommentKind, delivery_id: s
         author=author,
         delivery_id=delivery_id,
         bot_login=bot_login,
+        # In a finding's thread, every reply gets an answer: a mention changes nothing there.
+        mentioned=kind == "issue" and mentions_bot(body, config.app_slug),
     )

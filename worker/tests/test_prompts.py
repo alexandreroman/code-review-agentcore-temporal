@@ -1,13 +1,22 @@
 from agentcore_review_shared.contract import Category
 from agentcore_review_worker.models import (
     BatchPatches,
+    ConversationComment,
+    ConversationInput,
     DismissedFinding,
     FilePatch,
     Finding,
+    PrRef,
+    SnapshotRef,
     SynthesisInput,
     ThreadComment,
 )
-from agentcore_review_worker.prompts import discussion_prompt, reviewer_prompt, synthesis_prompt
+from agentcore_review_worker.prompts import (
+    conversation_prompt,
+    discussion_prompt,
+    reviewer_prompt,
+    synthesis_prompt,
+)
 
 PATH = "src/main/java/com/example/orders/OrderRepository.java"
 PATCHES = BatchPatches(
@@ -90,3 +99,35 @@ def test_synthesis_prompt_lists_findings_without_comment_ids():
     text = synthesis_prompt(SynthesisInput(new_findings=new, resolved_ids=["P-03"], unavailable=["performance"]))
     assert '"S-01"' in text and "comment_id" not in text
     assert "P-03" in text and "performance" in text
+
+
+SNAPSHOT = SnapshotRef(pr=PrRef(owner="o", repo="r", number=3, installation_id=1), sha="abc")
+
+
+def conversation(mentioned: bool = True, **overrides) -> ConversationInput:
+    comments = [
+        ConversationComment(id=1, author="bob", body="Looks good overall.", author_association="MEMBER"),
+        ConversationComment(id=2, author="alice", body="Where is the search query built?", author_association="OWNER"),
+    ]
+    fields = dict(comments=comments, bot_login="bot[bot]", author="alice", mentioned=mentioned, snapshot=SNAPSHOT)
+    return ConversationInput(**(fields | overrides))
+
+
+def test_conversation_prompt_answers_only_the_last_comment():
+    text = conversation_prompt(conversation())
+    assert text.index("Looks good overall.") < text.index("Where is the search query built?")
+    assert "Only the last comment, by @alice, awaits an answer" in text
+    assert "Comments by @bot[bot] are yours." in text
+
+
+def test_conversation_prompt_tells_whether_the_bot_was_mentioned():
+    assert "It mentions you" in conversation_prompt(conversation(mentioned=True))
+    assert "It does not mention you" in conversation_prompt(conversation(mentioned=False))
+
+
+def test_conversation_prompt_lists_the_open_and_dismissed_findings():
+    dismissed = DismissedFinding(finding=finding("S-02"), reason="validated upstream", dismissed_by="alice")
+    text = conversation_prompt(conversation(open_findings=[finding("S-01")], dismissed_findings=[dismissed]))
+    assert f"S-01 (high) {PATH}:1" in text
+    assert "S-02" in text and "validated upstream" in text
+    assert "No finding is open." in conversation_prompt(conversation())

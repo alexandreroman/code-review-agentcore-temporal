@@ -1,7 +1,7 @@
 """The agents' model call budgets: a call often takes 5-60 s, and an agent's calls must fit CHILD_RUN_TIMEOUT."""
 
 MAX_MODEL_CALLS = 8
-"""The default budget: reviewers, synthesis and discussion."""
+"""The default budget: reviewers, synthesis, discussion and conversation."""
 
 FIXER_MODEL_CALLS = 12
 """The fixer reads more files than a reviewer (every file it changes, and the types it uses) before writing."""

@@ -1,20 +1,28 @@
-"""What the bot writes on GitHub: review comments and body, check output, thread replies, /fix refusals and
-failures, closing and inactivity comments.
+"""What the bot writes on GitHub: review comments and body, check output, thread replies, Conversation answers, /fix
+refusals and failures, closing and inactivity comments.
 
 Pure functions: the activities call them with data they fetched, the workflow with its state.
 """
 
 import re
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from agentcore_review_shared.contract import FINDING_ID_PATTERN
 from pydantic import BaseModel
 
 from agentcore_review_worker.hunks import is_commentable
-from agentcore_review_worker.lifecycle import MAX_BOT_REPLIES_PER_THREAD, merge_status, sort_key, with_severity
+from agentcore_review_worker.lifecycle import (
+    MAX_BOT_REPLIES_PER_THREAD,
+    MAX_CONVERSATION_ANSWERS,
+    merge_status,
+    sort_key,
+    with_severity,
+)
 from agentcore_review_worker.markers import finding_marker
 from agentcore_review_worker.models import (
     CheckOutput,
+    ConversationReply,
     DiscussionReply,
     Finding,
     ReviewContent,
@@ -219,6 +227,52 @@ def budget_reply(marker: str) -> str:
 
 def failed_reply(marker: str) -> str:
     return f"I could not answer this time. Reply again to retry.\n\n{marker}"
+
+
+# Fixed texts of the Conversation, written here rather than by the model: an off-topic comment never gets the
+# model's own words.
+OFF_TOPIC_TEXT = "I only answer questions about this repository's code and this pull request."
+NO_ANSWER_TEXT = "I could not find an answer to this in the code: let's leave it to a human reviewer."
+
+
+@dataclass(frozen=True)
+class ConversationPost:
+    """What the bot posts in the Conversation after the conversation agent ran."""
+
+    body: str
+    answered: bool  # the agent's own answer, which counts toward MAX_CONVERSATION_ANSWERS
+
+
+def conversation_post(reply: ConversationReply, mentioned: bool, marker: str) -> ConversationPost | None:
+    """The bot's comment for the conversation agent's reply; None when the bot stays silent.
+
+    A mention always gets a comment: the agent's answer, or a fixed text. Without one, the comment may be meant for
+    other people: the bot speaks only to answer it. An off-topic comment never gets the model's answer, and a blank
+    answer counts as none.
+    """
+    answer = reply.answer.strip()
+    if not reply.off_topic and reply.respond and answer:
+        return ConversationPost(f"{answer}\n\n{marker}", answered=True)
+    if not mentioned:
+        return None
+    text = OFF_TOPIC_TEXT if reply.off_topic else NO_ANSWER_TEXT
+    return ConversationPost(f"{text}\n\n{marker}", answered=False)
+
+
+def no_review_comment(marker: str) -> str:
+    """A mention when no round has been published: the first one failed or could not publish."""
+    return f"No review has been published yet: push a commit to start one, then ask again.\n\n{marker}"
+
+
+def conversation_budget_comment(marker: str) -> str:
+    return (
+        f"I have answered {MAX_CONVERSATION_ANSWERS} times in this conversation: let's leave the rest to a human "
+        f"reviewer. Questions about a finding can still go to its thread.\n\n{marker}"
+    )
+
+
+def failed_conversation_comment(marker: str) -> str:
+    return f"I could not answer this time. Comment again to retry.\n\n{marker}"
 
 
 def off_thread_fix_reply(thread_finding_id: str, requested_ids: list[str], marker: str) -> str:

@@ -15,6 +15,7 @@ REVIEWER_WORKFLOW = "ReviewerWorkflow"
 FIXER_WORKFLOW = "FixerWorkflow"
 SYNTHESIS_WORKFLOW = "SynthesisWorkflow"
 DISCUSSION_WORKFLOW = "DiscussionWorkflow"
+CONVERSATION_WORKFLOW = "ConversationWorkflow"
 
 
 def pr_workflow_id(owner: str, repo: str, number: int) -> str:
@@ -107,12 +108,18 @@ class FixRequested(BaseModel):
 
 
 class CommentPosted(BaseModel):
-    """A plain reply in a finding's review thread; the worker reads the thread itself, so the body stays out."""
+    """A plain comment for the bot to answer: a reply in a finding's review thread, or a comment in the Conversation.
+
+    The worker reads the thread or the Conversation itself, so the body stays out.
+    """
 
     comment_id: int
-    thread_root_id: int
+    # The first comment of the review thread the reply was posted in; None in the Conversation.
+    thread_root_id: int | None = None
     author: str
     delivery_id: str
+    # The comment mentions the bot (Conversation only): addressed to it, it always gets an answer.
+    mentioned: bool = False
 
 
 class PrClosed(BaseModel):

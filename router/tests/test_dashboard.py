@@ -30,7 +30,13 @@ def test_review_queries_read_the_production_queue():
     assert set(queries) == {"running", "agents_running", "completed_24h"}
     assert all("TaskQueue = 'review'" in query for query in queries.values())
     assert "WorkflowType = 'PullRequestWorkflow' AND ExecutionStatus = 'Running'" in queries["running"]
-    for name in ("ReviewerWorkflow", "FixerWorkflow", "SynthesisWorkflow", "DiscussionWorkflow"):
+    for name in (
+        "ReviewerWorkflow",
+        "FixerWorkflow",
+        "SynthesisWorkflow",
+        "DiscussionWorkflow",
+        "ConversationWorkflow",
+    ):
         assert f"'{name}'" in queries["agents_running"]
 
 

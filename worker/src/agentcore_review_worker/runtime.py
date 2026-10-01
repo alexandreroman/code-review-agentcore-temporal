@@ -19,6 +19,7 @@ from .activities.pulls import PullActivities
 from .activities.snapshots import SnapshotActivities
 from .agent_model import strands_plugin
 from .settings import AppSettings, WorkerSettings
+from .workflows.conversation import ConversationWorkflow
 from .workflows.discussion import DiscussionWorkflow
 from .workflows.fixer import FixerWorkflow
 from .workflows.ping import PingWorkflow
@@ -43,6 +44,7 @@ WORKFLOWS: list[type] = [
     SynthesisWorkflow,
     FixerWorkflow,
     DiscussionWorkflow,
+    ConversationWorkflow,
 ]
 
 
@@ -59,6 +61,7 @@ def activities(settings: AppSettings, identity: str) -> list[Callable]:
         reviews.publish_review,
         reviews.recover_counters,
         reviews.post_comment,
+        reviews.read_conversation,
         reviews.close_pr,
         threads.resolve_threads,
         threads.close_earlier_threads,

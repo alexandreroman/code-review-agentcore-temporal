@@ -2,7 +2,7 @@
 
 It handles metadata only (paths, SHAs, snapshot keys, findings); patches and file contents stay in the
 agents' child workflows. Continue-as-new happens between two rounds only, since it would terminate
-running children, and carries the pending push, fix requests and thread replies over.
+running children, and carries the pending push, fix requests and comments to answer over.
 
 An idle pull request gets a warning comment, then is closed: a durable timer waits for the next deadline,
 counted from the start of the idle period kept in the state.
@@ -24,6 +24,7 @@ from temporalio import workflow
 from temporalio.exceptions import ActivityError, ApplicationError, ChildWorkflowError
 
 from agentcore_review_worker.workflows import policies
+from agentcore_review_worker.workflows.conversation import ConversationWorkflow
 from agentcore_review_worker.workflows.discussion import DiscussionWorkflow
 from agentcore_review_worker.workflows.fixer import FixerWorkflow
 from agentcore_review_worker.workflows.reviewer import ReviewerWorkflow
@@ -57,6 +58,10 @@ with workflow.unsafe.imports_passed_through():
         CheckOutput,
         CommentInput,
         CommitResult,
+        ConversationInput,
+        ConversationRead,
+        ConversationReadInput,
+        ConversationReply,
         DiscussionInput,
         DiscussionReply,
         FixerInput,
@@ -164,7 +169,10 @@ class PullRequestWorkflow:
             self._link_signal(f"reply {reply.comment_id}")
             if queue_full:
                 workflow.logger.warning("reply queue full: the oldest queued reply is dropped")
-            workflow.logger.info("reply by %s queued (thread %d)", reply.author, reply.thread_root_id)
+            if reply.thread_root_id is None:
+                workflow.logger.info("comment by %s queued (conversation)", reply.author)
+            else:
+                workflow.logger.info("reply by %s queued (thread %d)", reply.author, reply.thread_root_id)
         else:
             workflow.logger.info("reply ignored: delivery %s already seen", reply.delivery_id)
 
@@ -671,16 +679,25 @@ class PullRequestWorkflow:
         except ActivityError as error:
             workflow.logger.warning("fix refusal not posted: %s", error.cause or error)
 
-    # --- discussion in a finding's thread ---
+    # --- answers to comments ---
 
     async def _reply(self) -> None:
-        """Answer the oldest queued reply; a dismissal also resolves the thread and recomputes the check."""
+        """Answer the oldest queued comment: a reply in a finding's thread, or a comment in the Conversation."""
+        reply = self._state.pending_replies.pop(0)
+        if reply.thread_root_id is None:
+            await self._answer_conversation(reply)
+        else:
+            await self._reply_in_thread(reply, reply.thread_root_id)
+
+    # --- discussion in a finding's thread ---
+
+    async def _reply_in_thread(self, reply: CommentPosted, thread_root_id: int) -> None:
+        """Answer a reply in a finding's thread; a dismissal also resolves the thread and recomputes the check."""
         state = self._state
-        reply = state.pending_replies.pop(0)
         marker = markers.reply_marker(self._id, reply.comment_id)
-        finding = lifecycle.open_finding_in_thread(state, reply.thread_root_id)
+        finding = lifecycle.open_finding_in_thread(state, thread_root_id)
         if finding is None:
-            await self._answer_closed_thread(reply.thread_root_id, marker)
+            await self._answer_closed_thread(thread_root_id, marker)
             return
         trace.get_current_span().update_name(f"Reply {finding.id}")
         phase = self._phase
@@ -688,13 +705,13 @@ class PullRequestWorkflow:
         try:
             thread: ThreadRead = await workflow.execute_activity(
                 "ReadThread",
-                ThreadInput(pr=self._pr, thread_root_id=reply.thread_root_id),
+                ThreadInput(pr=self._pr, thread_root_id=thread_root_id),
                 result_type=ThreadRead,
                 summary=finding.id,
                 **policies.GITHUB_CALL,
             )
             if publishing.bot_answers(thread.comments, thread.bot_login) >= lifecycle.MAX_BOT_REPLIES_PER_THREAD:
-                await self._post_reply(reply.thread_root_id, publishing.budget_reply(marker), marker, finding.id)
+                await self._post_reply(thread_root_id, publishing.budget_reply(marker), marker, finding.id)
                 return
             assert state.last_reviewed_sha is not None  # a finding is open only after a published round
             snapshot = await self._snapshot(state.last_reviewed_sha)
@@ -712,10 +729,10 @@ class PullRequestWorkflow:
                 )
             except ChildWorkflowError as error:
                 workflow.logger.error("discussion %d failed: %s", number, error.cause or error)
-                await self._post_reply(reply.thread_root_id, publishing.failed_reply(marker), marker, finding.id)
+                await self._post_reply(thread_root_id, publishing.failed_reply(marker), marker, finding.id)
                 return
             body = publishing.reply_body(finding.id, answer, marker)
-            await self._post_reply(reply.thread_root_id, body, marker, finding.id)
+            await self._post_reply(thread_root_id, body, marker, finding.id)
             if answer.verdict == "dismiss":
                 lifecycle.dismiss(state, finding.id, answer.answer, reply.author)
                 self._show_details()
@@ -768,6 +785,88 @@ class PullRequestWorkflow:
         # only place reporting the unlisted files.
         output = publishing.check_output(state.open_findings)
         await self._complete_check(state.last_reviewed_sha, state.last_reviewed_round, output)
+
+    # --- answers in the Conversation ---
+
+    async def _answer_conversation(self, reply: CommentPosted) -> None:
+        """Answer a comment in the Conversation with the conversation agent; a mention always gets a comment.
+
+        A comment that does not mention the bot may be meant for other people: it gets an answer only when the agent
+        has one, and never a fixed text.
+        """
+        state = self._state
+        marker = markers.reply_marker(self._id, reply.comment_id)
+        # A pending review always runs before a reply, so no reviewed code here means the first round failed or
+        # could not publish.
+        if state.last_reviewed_sha is None:
+            await self._answer_mention(reply, publishing.no_review_comment(marker), marker)
+            return
+        if state.conversation_answers >= lifecycle.MAX_CONVERSATION_ANSWERS:
+            await self._answer_mention(reply, publishing.conversation_budget_comment(marker), marker)
+            return
+        trace.get_current_span().update_name("Reply conversation")
+        phase = self._phase
+        self._set_phase(f"answering @{reply.author} in the conversation")
+        try:
+            conversation: ConversationRead = await workflow.execute_activity(
+                "ReadConversation",
+                ConversationReadInput(pr=self._pr, comment_id=reply.comment_id),
+                result_type=ConversationRead,
+                summary=f"@{reply.author}",
+                **policies.GITHUB_CALL,
+            )
+            if not conversation.comments:
+                workflow.logger.info("comment %d by %s is gone: not answered", reply.comment_id, reply.author)
+                return
+            snapshot = await self._snapshot(state.last_reviewed_sha)
+            state.conversation_count += 1
+            number = state.conversation_count
+            agent_input = ConversationInput(
+                comments=conversation.comments,
+                bot_login=conversation.bot_login,
+                author=reply.author,
+                mentioned=reply.mentioned,
+                open_findings=state.open_findings,
+                dismissed_findings=state.dismissed_findings,
+                snapshot=snapshot,
+            )
+            try:
+                answer: ConversationReply = await workflow.execute_child_workflow(
+                    ConversationWorkflow.run,
+                    agent_input,
+                    id=f"{self._id}-conversation-{number}",
+                    run_timeout=policies.CHILD_RUN_TIMEOUT,
+                    static_summary=f"@{reply.author}",
+                    static_details=summaries.conversation_details(agent_input),
+                )
+            except ChildWorkflowError as error:
+                workflow.logger.error("conversation %d failed: %s", number, error.cause or error)
+                await self._answer_mention(reply, publishing.failed_conversation_comment(marker), marker)
+                return
+            post = publishing.conversation_post(answer, reply.mentioned, marker)
+            if post is None:
+                workflow.logger.info("conversation %d: comment by %s left unanswered", number, reply.author)
+                return
+            await self._post_comment(post.body, marker, "conversation answer")
+            if post.answered:
+                state.conversation_answers += 1
+        except ActivityError as error:
+            workflow.logger.error("answer to %s in the conversation failed: %s", reply.author, error.cause or error)
+            # The same marker makes this a no-op when the failed post reached GitHub after all.
+            await self._answer_mention(reply, publishing.failed_conversation_comment(marker), marker)
+        finally:
+            self._set_phase(phase)
+
+    async def _answer_mention(self, reply: CommentPosted, body: str, marker: str) -> None:
+        """Post a fixed answer, only to a comment that mentions the bot: any other one gets silence."""
+        if not reply.mentioned:
+            return
+        try:
+            await self._post_comment(body, marker, "conversation answer")
+        except ActivityError as error:
+            workflow.logger.warning(
+                "answer to %s in the conversation not posted: %s", reply.author, error.cause or error
+            )
 
     # --- end ---
 

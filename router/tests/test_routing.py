@@ -9,6 +9,7 @@ from agentcore_review_router.routing import (
     RunCommand,
     SendSignal,
     StartOrSignal,
+    mentions_bot,
     route,
     workflow_summary,
 )
@@ -171,15 +172,97 @@ def test_plain_replies_in_a_review_thread_are_forwarded(body):
     )
     assert result.bot_login == "tar-bot[bot]"
     assert result.pr.number == 3
+    assert result.mentioned is False
 
 
-@pytest.mark.parametrize("event", COMMENT_EVENTS)
-@pytest.mark.parametrize("body", ["/fixit", "please /fix", "/FIX", "", "LGTM", "/review"])
-def test_non_commands_outside_a_review_thread_are_ignored(event, body):
-    payload = load(event)
+def test_a_mention_in_a_review_thread_changes_nothing():
+    payload = load("pull_request_review_comment")
+    payload["comment"]["body"] = "@tar-bot why?"
+    result = route("pull_request_review_comment", payload, "d", CONFIG)
+    assert isinstance(result, ForwardReply) and result.thread_root_id == 666 and result.mentioned is False
+
+
+@pytest.mark.parametrize("body", ["/fixit", "please /fix", "/FIX", "LGTM", "/review"])
+def test_plain_comments_in_the_conversation_are_forwarded(body):
+    payload = load("issue_comment")
     payload["comment"]["body"] = body
-    payload["comment"].pop("in_reply_to_id", None)
-    assert isinstance(route(event, payload, "d", CONFIG), Ignore)
+    result = route("issue_comment", payload, "d", CONFIG)
+    assert isinstance(result, ForwardReply)
+    assert (result.workflow_id, result.comment_id, result.thread_root_id, result.author, result.delivery_id) == (
+        WF,
+        555,
+        None,
+        "octocat",
+        "d",
+    )
+    assert result.bot_login == "tar-bot[bot]" and result.mentioned is False
+
+
+def test_a_conversation_comment_tells_whether_it_mentions_the_bot():
+    payload = load("issue_comment")
+    payload["comment"]["body"] = "@Tar-Bot where is the search query built?"
+    result = route("issue_comment", payload, "d", CONFIG)
+    assert isinstance(result, ForwardReply) and result.mentioned is True
+
+
+@pytest.mark.parametrize("body", ["/fixit", "please /fix", "/FIX", "", "LGTM", "@tar-bot why?"])
+def test_non_commands_outside_a_review_thread_are_ignored(body):
+    payload = load("pull_request_review_comment")
+    payload["comment"]["body"] = body
+    del payload["comment"]["in_reply_to_id"]
+    assert isinstance(route("pull_request_review_comment", payload, "d", CONFIG), Ignore)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "@tar-bot why?",
+        "Why, @tar-bot?",
+        "@TAR-BOT[bot] where is this called?",
+        "cc @tar-bot[bot].",
+        "(@tar-bot)",
+        "first line\n@tar-bot second line",
+    ],
+)
+def test_a_mention_of_the_bot_is_detected_in_any_case(body):
+    assert mentions_bot(body, "tar-bot") is True
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "tar-bot, why?",  # no @
+        "@tar-bot-fan why?",  # another user
+        "@tar-bots why?",
+        "@tar why?",
+        "ops@tar-bot.example",  # an address
+        "@octocat why?",
+        "@tar-bot[botfan] why?",  # not the bot suffix
+        "@tar-bot[bot]s why?",
+    ],
+)
+def test_a_longer_login_or_an_address_is_no_mention(body):
+    assert mentions_bot(body, "tar-bot") is False
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "> @tar-bot why?\n\nI wondered too.",  # a quote reply
+        "  > cc @tar-bot",
+        "```\n@tar-bot why?\n```",
+        "~~~java\n// @tar-bot\n~~~\nDone.",
+        "```\n@tar-bot never closed",
+        "Type `@tar-bot` to call it.",
+        "<!-- @tar-bot -->Thanks!",
+    ],
+)
+def test_a_mention_in_a_quote_code_or_html_comment_is_no_mention(body):
+    assert mentions_bot(body, "tar-bot") is False
+
+
+def test_a_mention_after_a_quote_counts():
+    assert mentions_bot("> Is this safe?\n\n@tar-bot what do you think?", "tar-bot") is True
 
 
 @pytest.mark.parametrize("event", COMMENT_EVENTS)

@@ -10,7 +10,7 @@ from typing import Any
 
 from agentcore_review_shared.summaries import MAX_SUMMARY_CHARS, fit
 
-from agentcore_review_worker.models import Finding, SynthesisInput
+from agentcore_review_worker.models import ConversationInput, Finding, SynthesisInput
 
 MAX_LIST_ITEMS = 20
 SHORT_SHA = 7
@@ -185,6 +185,19 @@ def finding_line(finding: Finding) -> str:
 
 def finding_list(findings: list[Finding]) -> str:
     return _bullet_list([finding_line(finding) for finding in findings])
+
+
+def conversation_details(input: ConversationInput) -> str:
+    """The comment to answer, then what the conversation agent reads besides the code."""
+    mention = ", mentioning the bot" if input.mentioned else ""
+    counts = _bullet_list(
+        [
+            f"Comments read: {len(input.comments)}",
+            f"Open findings: {len(input.open_findings)}",
+            f"Dismissed findings: {len(input.dismissed_findings)}",
+        ]
+    )
+    return f"Comment by @{input.author}{mention}\n\n{counts}"
 
 
 def synthesis_details(input: SynthesisInput) -> str:

@@ -17,7 +17,7 @@ from agentcore_review_shared.contract import (
 WRITE_PERMISSIONS = frozenset({"admin", "write"})
 
 REACTION_DENIED = "confused"  # 😕
-REACTION_ACK = "eyes"  # 👀 acknowledges a /fix or a forwarded reply
+REACTION_ACK = "eyes"  # 👀 acknowledges a /fix, a forwarded reply or a mention of the bot
 REACTION_KILL = "rocket"  # GitHub has no 💥 reaction: the /kill comment carries it
 
 NO_REVIEW_REPLY = "No review in progress."

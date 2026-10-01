@@ -3,6 +3,7 @@ from agentcore_review_worker.lifecycle import merge_status
 from agentcore_review_worker.markers import extract_finding_ids, reply_marker
 from agentcore_review_worker.models import (
     CheckOutput,
+    ConversationReply,
     DiscussionReply,
     Finding,
     ReviewContent,
@@ -11,12 +12,16 @@ from agentcore_review_worker.models import (
 from agentcore_review_worker.publishing import (
     MAX_BODY_CHARS,
     MAX_INLINE_COMMENTS,
+    NO_ANSWER_TEXT,
+    OFF_TOPIC_TEXT,
+    ConversationPost,
     bot_answers,
     budget_reply,
     build_review,
     check_output,
     closing_comment,
     comment_body,
+    conversation_post,
     failed_fix_comment,
     failed_reply,
     idle_close_comment,
@@ -272,3 +277,36 @@ def test_only_the_agents_answers_count_toward_the_budget():
     ]
     assert bot_answers(thread, "bot[bot]") == 1
     assert bot_answers([], "bot[bot]") == 0
+
+
+ANSWER = ConversationReply(off_topic=False, respond=True, answer=" The query is built in `OrderRepository`. ")
+
+
+@pytest.mark.parametrize("mentioned", [True, False])
+def test_an_answer_is_posted_and_counted_with_or_without_a_mention(mentioned):
+    post = conversation_post(ANSWER, mentioned, "<!-- m -->")
+    assert post == ConversationPost("The query is built in `OrderRepository`.\n\n<!-- m -->", answered=True)
+
+
+@pytest.mark.parametrize("answer", ["Sure, here is a poem.", ""])
+def test_an_off_topic_mention_gets_the_fixed_text_never_the_model_answer(answer):
+    reply = ConversationReply(off_topic=True, respond=True, answer=answer)
+    assert conversation_post(reply, True, "<!-- m -->") == ConversationPost(
+        f"{OFF_TOPIC_TEXT}\n\n<!-- m -->", answered=False
+    )
+    assert conversation_post(reply, False, "<!-- m -->") is None
+
+
+@pytest.mark.parametrize(
+    "reply",
+    [
+        ConversationReply(off_topic=False, respond=False, answer=""),
+        ConversationReply(off_topic=False, respond=False, answer="An answer the agent chose not to give."),
+        ConversationReply(off_topic=False, respond=True, answer="  \n "),
+    ],
+)
+def test_no_answer_gets_the_fallback_on_a_mention_and_silence_otherwise(reply):
+    assert conversation_post(reply, True, "<!-- m -->") == ConversationPost(
+        f"{NO_ANSWER_TEXT}\n\n<!-- m -->", answered=False
+    )
+    assert conversation_post(reply, False, "<!-- m -->") is None

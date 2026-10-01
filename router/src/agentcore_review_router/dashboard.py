@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from agentcore_review_shared.contract import (
+    CONVERSATION_WORKFLOW,
     DISCUSSION_WORKFLOW,
     FIXER_WORKFLOW,
     PULL_REQUEST_WORKFLOW,
@@ -38,7 +39,7 @@ READ_BUDGET = 6.0
 # The server lists pollers seen in the last ~5 minutes. An idle worker's long polls last about a minute, so a live
 # session can show a last access close to 60 s old: 75 s keeps it counted.
 ACTIVE_WITHIN = timedelta(seconds=75)
-AGENT_WORKFLOWS = (REVIEWER_WORKFLOW, FIXER_WORKFLOW, SYNTHESIS_WORKFLOW, DISCUSSION_WORKFLOW)
+AGENT_WORKFLOWS = (REVIEWER_WORKFLOW, FIXER_WORKFLOW, SYNTHESIS_WORKFLOW, DISCUSSION_WORKFLOW, CONVERSATION_WORKFLOW)
 
 
 @dataclass(frozen=True)

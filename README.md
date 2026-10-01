@@ -65,7 +65,9 @@ built for it:
   minutes, then close it 5 minutes later, across worker restarts and
   deploys.
 - **Human in the loop**: a reply to a finding gets an answer from an
-  agent, which may dismiss the finding when the human is right. A `/fix`
+  agent, which may dismiss the finding when the human is right. In the
+  Conversation tab, another agent answers questions about the code and
+  the PR; a comment that mentions the bot always gets a reply. A `/fix`
   comment lets an agent push the smallest local fix, for every open
   finding on the PR or for that finding only in its thread. The next
   round reviews the fix alone, reporting only a critical or high problem

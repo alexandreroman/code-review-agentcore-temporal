@@ -1,13 +1,23 @@
-"""Review side effects on GitHub: the AI Review check, the round's review, Conversation comments, the close for
-inactivity, and the recovery of an earlier run's numbering.
+"""Review side effects on GitHub: the AI Review check, the round's review, Conversation comments (posted, or read for
+the conversation agent), the close for inactivity, and the recovery of an earlier run's numbering.
 """
 
 from agentcore_review_shared.contract import PrRef
 from temporalio import activity
 
 from ..hunks import commentable_lines
+from ..lifecycle import conversation_history
 from ..markers import extract_finding_ids, last_finding_numbers, last_fix_number, last_round, round_marker
-from ..models import CheckInput, CommentInput, PublishInput, RecoveredCounters, RecoveryInput
+from ..models import (
+    CheckInput,
+    CommentInput,
+    ConversationComment,
+    ConversationRead,
+    ConversationReadInput,
+    PublishInput,
+    RecoveredCounters,
+    RecoveryInput,
+)
 from ..publishing import build_review
 from .github_api import (
     author_login,
@@ -119,6 +129,27 @@ async def post_comment(input: CommentInput) -> None:
     with github_errors():
         path = f"{repo_path(pr)}/issues/{pr.number}/comments"
         await post_once(pr, path, path, input.body, input.marker)
+
+
+@activity.defn(name="ReadConversation")
+@heartbeat_while_running
+async def read_conversation(input: ConversationReadInput) -> ConversationRead:
+    """The Conversation's comments the conversation agent reads, oldest first, ending with the comment to answer."""
+    pr = input.pr
+    with github_errors():
+        comments = await get_pages(pr, f"{repo_path(pr)}/issues/{pr.number}/comments")
+        login = bot_login()
+    comments.sort(key=lambda c: (c["created_at"], c["id"]))
+    read = [
+        ConversationComment(
+            id=c["id"],
+            author=author_login(c),
+            body=body_of(c),
+            author_association=c.get("author_association") or "NONE",
+        )
+        for c in comments
+    ]
+    return ConversationRead(comments=conversation_history(read, login, input.comment_id), bot_login=login)
 
 
 @activity.defn(name="ClosePR")

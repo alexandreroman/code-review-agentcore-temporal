@@ -85,6 +85,10 @@ class PullRequestState(BaseModel):
     round: int = 0
     fix_count: int = 0
     discussion_count: int = 0
+    # Runs of the conversation agent, which number its child workflows, and its answers posted in the Conversation,
+    # which count toward MAX_CONVERSATION_ANSWERS: a run may end without a comment.
+    conversation_count: int = 0
+    conversation_answers: int = 0
     # The last finding number used in each category, absent until its first finding: S-03 leaves 3 for security.
     last_finding_numbers: dict[Category, int] = Field(default_factory=dict)
     # Start of the current idle period (the end of the last action, or the last signal) and whether its warning
@@ -189,7 +193,33 @@ class DiscussionInput(BaseModel):
     snapshot: SnapshotRef
 
 
-# Structured outputs of the reviewer, synthesis, fixer and discussion agents: the field descriptions reach the model.
+class ConversationComment(ThreadComment):
+    # How the author relates to the repository: OWNER, MEMBER, COLLABORATOR, CONTRIBUTOR, NONE...
+    author_association: str
+
+
+class ConversationReadInput(BaseModel):
+    pr: PrRef
+    comment_id: int  # the comment to answer: the history ends with it
+
+
+class ConversationRead(BaseModel):
+    comments: list[ConversationComment]  # oldest first, ending with the comment to answer; empty once it is deleted
+    bot_login: str  # "<app slug>[bot]": tells the bot's comments from the humans'
+
+
+class ConversationInput(BaseModel):
+    comments: list[ConversationComment]  # oldest first, ending with the comment to answer
+    bot_login: str
+    author: str  # the human to answer
+    mentioned: bool  # the comment mentions the bot: it is addressed to it
+    open_findings: list[Finding] = Field(default_factory=list)
+    dismissed_findings: list[DismissedFinding] = Field(default_factory=list)
+    snapshot: SnapshotRef
+
+
+# Structured outputs of the reviewer, synthesis, fixer, discussion and conversation agents: the field descriptions
+# reach the model.
 
 
 class ReviewerReport(BaseModel):
@@ -222,6 +252,17 @@ class DiscussionReply(BaseModel):
         description="dismiss only when the code shows the finding is wrong or does not apply"
     )
     answer: str = Field(description="Markdown answer to the human, about 150 words at most")
+
+
+class ConversationReply(BaseModel):
+    off_topic: bool = Field(
+        description="true when the comment is not about this repository's code or this pull request, even when it "
+        "is addressed to you"
+    )
+    respond: bool = Field(description="true when the comment calls for an answer from you and the code gives you one")
+    answer: str = Field(
+        default="", description="Markdown answer to the human, about 150 words at most; empty when you do not respond"
+    )
 
 
 class CheckOutput(BaseModel):

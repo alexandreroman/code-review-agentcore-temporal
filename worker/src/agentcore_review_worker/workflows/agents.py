@@ -1,4 +1,5 @@
-"""Agent building blocks shared by the reviewer, synthesis, fixer and discussion workflows (workflow side).
+"""Agent building blocks shared by the reviewer, synthesis, fixer, discussion and conversation workflows (workflow
+side).
 
 A TemporalAgent runs the Strands loop inside the workflow: each model call is the plugin's activity,
 each tool call is an activity (Glob, Grep, Read), and hooks run deterministically in workflow code.

@@ -11,6 +11,7 @@ from agentcore_review_shared.contract import Category, CommentPosted, FixRequest
 
 from agentcore_review_worker.models import (
     ChangeSet,
+    ConversationComment,
     DismissedFinding,
     Finding,
     PullRequestState,
@@ -38,6 +39,18 @@ MAX_RESOLVED_THREADS = 50
 
 MAX_BOT_REPLIES_PER_THREAD = 3
 """The bot's answers in one thread before it hands over to a human: keeps a discussion from looping."""
+
+MAX_CONVERSATION_ANSWERS = 10
+"""The conversation agent's answers on one pull request before it hands over to a human: caps the cost."""
+
+MAX_CONVERSATION_COMMENTS = 20
+"""The latest Conversation comments the conversation agent reads, the comment to answer included."""
+
+MAX_CONVERSATION_BODY_CHARS = 4000
+"""A longer Conversation comment reaches the conversation agent cut, with a note."""
+
+TRUSTED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+"""The author associations whose Conversation comments the conversation agent reads."""
 
 
 def id_sort_key(finding_id: str) -> tuple[int, int, str]:
@@ -129,7 +142,8 @@ def record_fix_request(state: PullRequestState, request: FixRequested) -> bool:
 
 
 def record_reply(state: PullRequestState, reply: CommentPosted) -> bool:
-    """Queue a reply to a finding, unless its webhook delivery was already seen; the oldest replies are dropped."""
+    """Queue a comment to answer (a reply to a finding, or a Conversation comment), unless its webhook delivery was
+    already seen; the oldest queued comments are dropped."""
     if reply.delivery_id in state.reply_deliveries:
         return False
     recent = state.reply_deliveries + [reply.delivery_id]
@@ -250,6 +264,33 @@ def discussion_thread(
         if comment.id == up_to_comment_id:
             break
     return kept
+
+
+def conversation_history(
+    comments: list[ConversationComment], bot_login: str, comment_id: int
+) -> list[ConversationComment]:
+    """What the conversation agent reads: the latest comments of the bot and of the repository's members, up to the
+    comment to answer, which is kept whoever wrote it. Empty when that comment is not among them (deleted meanwhile).
+
+    On a public repository anyone may comment. The conversation agent has no power there (no verdict), but strangers
+    stay out of its context all the same. ReadConversation applies these rules, so that only the comments kept reach
+    the workflow history.
+    """
+    kept: list[ConversationComment] = []
+    for comment in comments:
+        if comment.id == comment_id:
+            kept.append(comment)
+            return [_cut(c) for c in kept[-MAX_CONVERSATION_COMMENTS:]]
+        if comment.author == bot_login or comment.author_association in TRUSTED_ASSOCIATIONS:
+            kept.append(comment)
+    return []
+
+
+def _cut(comment: ConversationComment) -> ConversationComment:
+    if len(comment.body) <= MAX_CONVERSATION_BODY_CHARS:
+        return comment
+    body = comment.body[:MAX_CONVERSATION_BODY_CHARS] + "\n\n… (truncated)"
+    return comment.model_copy(update={"body": body})
 
 
 def is_fix_round(state: PullRequestState, change: ChangeSet) -> bool:

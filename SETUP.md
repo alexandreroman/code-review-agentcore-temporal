@@ -197,10 +197,11 @@ app is named *Code Review AgentCore x Temporal* by default, with the slug
 `GITHUB_APP_NAME` in `.env`; GitHub caps the name at 34 characters). The
 app has the permissions `pull_requests: write`, `checks: write`,
 `contents: write`, `issues: read` and `metadata: read`, listens to
-`pull_request`, `issue_comment` and `pull_request_review_comment` (replies
-to a finding), and sends its webhooks to the router: its Lambda Function
-URL, or the [custom domain](#custom-domain-cloudflare-optional) when one is
-set. Its credentials go straight to Secrets Manager, in a secret that
+`pull_request`, `issue_comment` (commands and questions in the
+Conversation) and `pull_request_review_comment` (replies to a finding),
+and sends its webhooks to the router: its Lambda Function URL, or the
+[custom domain](#custom-domain-cloudflare-optional) when one is set. Its
+credentials go straight to Secrets Manager, in a secret that
 `make destroy` keeps.
 
 `make up` then creates the public repository `agentcore-review-demo-app`
