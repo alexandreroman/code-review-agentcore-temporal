@@ -11,6 +11,10 @@ SIGNAL_FIX_REQUESTED = "fix_requested"
 SIGNAL_COMMENT_POSTED = "comment_posted"
 SIGNAL_PR_CLOSED = "pr_closed"
 PULL_REQUEST_WORKFLOW = "PullRequestWorkflow"
+REVIEWER_WORKFLOW = "ReviewerWorkflow"
+FIXER_WORKFLOW = "FixerWorkflow"
+SYNTHESIS_WORKFLOW = "SynthesisWorkflow"
+DISCUSSION_WORKFLOW = "DiscussionWorkflow"
 
 
 def pr_workflow_id(owner: str, repo: str, number: int) -> str:

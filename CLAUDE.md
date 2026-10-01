@@ -25,7 +25,7 @@ make up        # deploy everything (AWS, worker, GitHub)
 ## Modules
 
 - `shared/` — contract shared by the router and the worker
-- `router/` — GitHub webhook handler (AWS Lambda)
+- `router/` — GitHub webhook handler and public status page (AWS Lambda)
 - `worker/` — Temporal workflows, review agents, activities
 - `tools/` — GitHub App registration tooling called by `scripts/github.sh`
 - `infra/` — OpenTofu stacks (`bootstrap`, `aws`, `github`)

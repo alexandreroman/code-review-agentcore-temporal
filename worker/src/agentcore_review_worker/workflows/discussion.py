@@ -8,11 +8,13 @@ from temporalio import workflow
 from agentcore_review_worker.workflows.agents import AGENT_FAILURES, navigation_tools, run_agent
 
 with workflow.unsafe.imports_passed_through():
+    from agentcore_review_shared.contract import DISCUSSION_WORKFLOW
+
     from agentcore_review_worker import prompts
     from agentcore_review_worker.models import DiscussionInput, DiscussionReply
 
 
-@workflow.defn(name="DiscussionWorkflow", failure_exception_types=AGENT_FAILURES)
+@workflow.defn(name=DISCUSSION_WORKFLOW, failure_exception_types=AGENT_FAILURES)
 class DiscussionWorkflow:
     @workflow.run
     async def run(self, input: DiscussionInput) -> DiscussionReply:

@@ -10,12 +10,14 @@ from agentcore_review_worker.workflows import policies
 from agentcore_review_worker.workflows.agents import AGENT_FAILURES, navigation_tools, run_agent
 
 with workflow.unsafe.imports_passed_through():
+    from agentcore_review_shared.contract import FIXER_WORKFLOW
+
     from agentcore_review_worker import prompts, summaries
     from agentcore_review_worker.limits import FIXER_MODEL_CALLS
     from agentcore_review_worker.models import CommitInput, CommitResult, FixerInput, FixPlan
 
 
-@workflow.defn(name="FixerWorkflow", failure_exception_types=AGENT_FAILURES)
+@workflow.defn(name=FIXER_WORKFLOW, failure_exception_types=AGENT_FAILURES)
 class FixerWorkflow:
     @workflow.run
     async def run(self, input: FixerInput) -> CommitResult:

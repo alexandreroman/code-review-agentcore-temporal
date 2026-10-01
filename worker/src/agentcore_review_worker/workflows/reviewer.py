@@ -6,12 +6,14 @@ from agentcore_review_worker.workflows import policies
 from agentcore_review_worker.workflows.agents import AGENT_FAILURES, navigation_tools, run_agent
 
 with workflow.unsafe.imports_passed_through():
+    from agentcore_review_shared.contract import REVIEWER_WORKFLOW
+
     from agentcore_review_worker import prompts, summaries
     from agentcore_review_worker.lifecycle import clean_report
     from agentcore_review_worker.models import BatchPatches, ReviewerInput, ReviewerReport
 
 
-@workflow.defn(name="ReviewerWorkflow", failure_exception_types=AGENT_FAILURES)
+@workflow.defn(name=REVIEWER_WORKFLOW, failure_exception_types=AGENT_FAILURES)
 class ReviewerWorkflow:
     @workflow.run
     async def run(self, input: ReviewerInput) -> ReviewerReport:

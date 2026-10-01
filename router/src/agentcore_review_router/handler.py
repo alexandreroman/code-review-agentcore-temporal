@@ -1,9 +1,11 @@
-"""Lambda entry point behind the Function URL or API Gateway: verifies, routes and acts on GitHub webhooks.
+"""Lambda entry point behind the Function URL or API Gateway: serves the status page, and verifies, routes and acts on
+GitHub webhooks.
 
-Replies 202 (action taken), 204 (event ignored), 400 (signed body that is not a webhook payload), 401 (invalid
-signature), 500 (Temporal or GitHub error; GitHub never redelivers on its own) or 503 (the GitHub App secret does
-not exist yet). The same function receives its own asynchronous invocations, which finish a /kill that did not
-fit in the webhook's 10 s. Logs are JSON (the function's log format); every line carries the delivery ID.
+pages.py decides which requests the status page serves; every other request is a webhook. Webhooks get 202 (action
+taken), 204 (event ignored), 400 (signed body that is not a webhook payload), 401 (invalid signature), 500 (Temporal or
+GitHub error; GitHub never redelivers on its own) or 503 (the GitHub App secret does not exist yet). The same function
+receives its own asynchronous invocations, which finish a /kill that did not fit in the webhook's 10 s. Logs are JSON
+(the function's log format); every webhook line carries the delivery ID.
 """
 
 import asyncio
@@ -12,7 +14,7 @@ import logging
 import time
 from typing import Any
 
-from . import commands, runtime, temporal_ops
+from . import commands, dashboard, pages, runtime, temporal_ops
 from .routing import ForwardReply, Ignore, RunCommand, SendSignal, StartOrSignal, route
 from .signature import decode_body, verify_signature
 
@@ -29,12 +31,33 @@ def handler(event: dict, context: Any) -> dict:
     if event.get("router_task") == "kill":
         runtime.run(commands.finish_kill(event, deadline))
         return {}
+    page = pages.page_for(event)
+    if page is not None:
+        return runtime.run(_serve(page, event))
     return runtime.run(_handle_webhook(event, deadline))
+
+
+async def _serve(page: pages.Page, event: dict) -> dict:
+    """The status page: no log line per hit, a failed Temporal read is logged by the dashboard."""
+    method = event["requestContext"]["http"]["method"]
+    if page == "not_found":
+        return pages.not_found(method)
+    if_none_match = _headers(event).get("if-none-match")
+    if page == "dashboard":
+        return pages.respond(pages.dashboard_html(), method, if_none_match)
+    current = await dashboard.snapshot()
+    age = time.monotonic() - current.taken_at
+    document = pages.json_document(current.body, current.etag, pages.max_age(age, dashboard.TTL))
+    return pages.respond(document, method, if_none_match)
+
+
+def _headers(event: dict) -> dict[str, str]:
+    return {name.lower(): value for name, value in (event.get("headers") or {}).items()}
 
 
 async def _handle_webhook(event: dict, deadline: float) -> dict:
     started = time.monotonic()
-    headers = {name.lower(): value for name, value in (event.get("headers") or {}).items()}
+    headers = _headers(event)
     fields: dict[str, Any] = {
         "delivery": headers.get("x-github-delivery", ""),
         "event": headers.get("x-github-event", ""),

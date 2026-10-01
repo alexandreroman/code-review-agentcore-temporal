@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full" style="background:#0C0A1B">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Code Review with AgentCore x Temporal</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4.3.3/dist/index.global.js"
+          integrity="sha384-2ql948lIdLcGEE0/qxNiudyTjgauA3RDJERu5xW75kFCvSl5a9odyQYCb6tEjnmB"
+          crossorigin="anonymous"></script>
+  <script>
+    document.addEventListener("alpine:init", () => {
+      Alpine.data("dashboard", () => ({
+        status: null, etag: null, timer: null, reachable: true,
+        init() {
+          this.refresh();
+          document.addEventListener("visibilitychange", () => { if (!document.hidden) this.refresh(); });
+        },
+        async refresh() {
+          clearTimeout(this.timer);
+          let delay = 15000;
+          try {
+            const response = await fetch("dashboard.json");
+            if (!response.ok) throw new Error(response.status);
+            this.reachable = true;
+            const etag = response.headers.get("ETag");
+            if (etag !== this.etag) {
+              const previous = this.figures();
+              this.status = await response.json();
+              this.etag = etag;
+              this.glow(previous);
+            }
+          } catch {
+            this.reachable = false;
+            delay = 60000;
+          }
+          if (!document.hidden) this.timer = setTimeout(() => this.refresh(), delay);
+        },
+        notice() {
+          if (!this.reachable) return "Status unreachable — retrying…";
+          if (!this.status) return null;
+          if (!this.status.deployed) return "Not deployed yet — run make up.";
+          if (!this.status.sessions || !this.status.reviews) return "Temporal unavailable — retrying…";
+          return null;
+        },
+        // A changed figure glows briefly in lime; a figure shown for the first time, or turned to "—", does not.
+        glow(previous) {
+          if (matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+          this.$nextTick(() => {
+            const values = this.$root.querySelectorAll("[data-figure-value]");
+            this.figures().forEach((figure, i) => {
+              const before = previous[i].value;
+              if (before == null || figure.value == null || before === figure.value) return;
+              values[i].animate(
+                [{ color: "#B6F35A", textShadow: "0 0 18px rgba(182, 243, 90, .6)" }, { textShadow: "none" }],
+                { duration: 900, easing: "ease-out" },
+              );
+            });
+          });
+        },
+        figures() {
+          return [
+            { label: "AgentCore sessions", value: this.status?.sessions?.active },
+            { label: "Reviews in progress", value: this.status?.reviews?.running },
+            { label: "Agents at work", value: this.status?.reviews?.agents_running },
+            { label: "Reviews done · 24\u00a0h", value: this.status?.reviews?.completed_24h },
+          ];
+        },
+      }));
+    });
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.17.4/dist/cdn.min.js"
+          integrity="sha384-5/joNqFnRyVWzXp99bHot6RHG+EksGp+USSgZwPar7T9SD9PKKER37n/8bXBAZGd"
+          crossorigin="anonymous"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" />
+  <style type="text/tailwindcss">
+    @theme {
+      --font-display: "Space Grotesk", sans-serif;
+      --font-mono: "IBM Plex Mono", monospace;
+      --color-violet: #8B5CF6;
+      --color-lime: #B6F35A;
+      --color-slateb: #7C8FB1;
+    }
+  </style>
+  <style>
+    body {
+      background:
+        radial-gradient(1200px 500px at 70% -10%, #3B2E8F55, transparent 60%),
+        radial-gradient(900px 600px at 10% 0%, #201457, transparent 55%),
+        #0C0A1B;
+      background-attachment: fixed;
+    }
+    .grid-overlay {
+      position: fixed; inset: 0; pointer-events: none;
+      background-image: linear-gradient(#ffffff0a 1px, transparent 1px),
+        linear-gradient(90deg, #ffffff0a 1px, transparent 1px);
+      background-size: 64px 64px;
+      -webkit-mask-image: linear-gradient(180deg, #000, transparent 55%);
+      mask-image: linear-gradient(180deg, #000, transparent 55%);
+    }
+    .title-gradient {
+      background-image: linear-gradient(90deg, #8B5CF6, #5B7CFA, #B6F35A, #5B7CFA, #8B5CF6);
+      background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent;
+      animation: title-shift 6s linear infinite;
+    }
+    @keyframes title-shift { to { background-position: -200% center; } }
+    @media (prefers-reduced-motion: reduce) { .title-gradient { animation: none; } }
+    .arch text { text-anchor: middle; }
+    .arch .node { fill: #15122B; stroke: rgba(255, 255, 255, .16); stroke-width: 1; }
+    .arch .node-violet { fill: rgba(139, 92, 246, .14); stroke: #8B5CF6; }
+    .arch .node-lime { fill: rgba(182, 243, 90, .07); stroke: rgba(182, 243, 90, .6); }
+    .arch .node-title { font: 600 13px "Space Grotesk", sans-serif; fill: #F5F5F5; }
+    .arch .node-sub { font: 10.5px "IBM Plex Mono", monospace; fill: #7C8FB1; }
+    .arch .zone { fill: none; stroke: rgba(124, 143, 177, .35); stroke-dasharray: 4 4; }
+    .arch .zone-lime { stroke: rgba(182, 243, 90, .35); }
+    .arch .zone-aws { stroke: rgba(255, 153, 0, .55); fill: rgba(255, 153, 0, .03); transition: stroke .3s ease; }
+    /* A dash a tenth of the perimeter long (pathLength 1000) that loops around the AWS account border. */
+    .arch .zone-run {
+      fill: none; stroke: #FFC266; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 100 900;
+      filter: url(#glow-aws); pointer-events: none; opacity: 0; transition: opacity .3s ease;
+      animation: zone-run 3s linear infinite paused;
+    }
+    /* Hovering the AWS account tag (logo and label) runs the light and brightens the border. */
+    .arch:has(.aws-tag:hover) .zone-run { opacity: 1; animation-play-state: running; }
+    .arch:has(.aws-tag:hover) .zone-aws { stroke: rgba(255, 153, 0, .85); }
+    .arch .aws-tag-hit { fill: transparent; }
+    @keyframes zone-run { from { stroke-dashoffset: 1000; } to { stroke-dashoffset: 0; } }
+    @media (prefers-reduced-motion: reduce) { .arch .zone-run { display: none; } }
+    .arch .zone-label {
+      font: 9px "IBM Plex Mono", monospace; letter-spacing: .15em; text-transform: uppercase; fill: #7C8FB1;
+      text-anchor: start;
+    }
+    .arch .zone-label-lime { fill: rgba(182, 243, 90, .75); }
+    .arch .zone-label-aws { fill: #FFB547; }
+    .arch .edge { fill: none; stroke: #7C8FB1; stroke-width: 1.25; }
+    .arch .edge-lime { stroke: #B6F35A; }
+    .arch .edge-violet { stroke: #8B5CF6; stroke-dasharray: 4 4; }
+    /* A stroke in the card colour behind each label keeps crossing lines off the text. */
+    .arch .edge-label {
+      font: 10px "IBM Plex Mono", monospace; fill: #A3AFC6;
+      paint-order: stroke; stroke: #110E22; stroke-width: 5px; stroke-linejoin: round;
+    }
+    .arch .edge-label-lime { fill: #B6F35A; }
+    .arch .edge-label-violet { fill: #A78BFA; }
+    .arch .label-start { text-anchor: start; }
+    .arch .icon { fill: #fff; }
+    .arch .icon-lime { fill: rgba(182, 243, 90, .75); }
+    .arch .icon-aws { fill: #FF9900; }
+    /* Only the components that start a flow are focusable, and react to hover. */
+    .arch .node-g[tabindex] { cursor: pointer; outline: none; }
+    .arch .node-g .node { transition: stroke .2s ease; }
+    .arch .node-g[tabindex]:hover .node, .arch .node-g:focus-visible .node { stroke: rgba(255, 255, 255, .45); }
+    .arch .node-g[tabindex]:hover .node-violet, .arch .node-g:focus-visible .node-violet { stroke: #A78BFA; }
+    .arch .node-g[tabindex]:hover .node-lime, .arch .node-g:focus-visible .node-lime { stroke: #B6F35A; }
+    .arch .edge, .arch .edge-label { transition: stroke .2s ease, stroke-width .2s ease, opacity .25s ease; }
+    /* While a flow plays, the other links and labels step back and the active one comes forward. */
+    .arch.flowing .edge, .arch.flowing .edge-label { opacity: .25; }
+    .arch.flowing .edge.active, .arch.flowing .edge-label.active { opacity: 1; }
+    .arch .edge.active { stroke: #F5F5F5; stroke-width: 2; }
+    .arch .edge-lime.active { stroke: #D9FF9E; }
+    .arch .edge-violet.active { stroke: #C4B5FD; }
+    /* The pulse: a white dash with a lime halo that the script moves along its edge; hidden between runs. */
+    .arch .pulse {
+      fill: none; stroke: #fff; stroke-width: 3.5; stroke-linecap: round; filter: url(#glow); opacity: 0;
+      pointer-events: none;
+    }
+    /* The component the pulse reaches lights up for a moment. */
+    @keyframes node-hit { 0% { stroke: #B6F35A; stroke-width: 2.5; } 100% { stroke-width: 1; } }
+    .arch .node-g.hit .node { animation: node-hit 650ms ease-out; }
+    [x-cloak] { display: none !important; }
+  </style>
+</head>
+<body class="h-full font-display text-neutral-200 antialiased">
+  <div class="grid-overlay"></div>
+  <div x-data="dashboard" class="relative mx-auto max-w-7xl px-6 pb-16 pt-10">
+
+    <header class="mb-8 text-center">
+      <h1 class="title-gradient text-4xl font-semibold leading-tight tracking-tight text-balance">
+        Code Review with AgentCore x Temporal
+      </h1>
+    </header>
+
+    <p x-show="notice()" x-cloak x-text="notice()"
+       class="mb-6 rounded-md border border-amber-400/30 bg-amber-400/10 px-3 py-2 font-mono text-xs text-amber-300">
+    </p>
+
+    <!-- Architecture: the README diagram redrawn in the page's palette. Scrolls sideways on narrow screens. -->
+    <figure class="mb-8 overflow-x-auto rounded-xl border border-white/10 bg-white/[0.03] p-5 backdrop-blur-sm">
+      <svg class="arch w-full min-w-[720px]" viewBox="0 0 885 410" role="img"
+           aria-label="A pull request webhook reaches the Lambda router, which signals Temporal Cloud. Temporal Cloud starts Temporal workers on AgentCore Runtime on demand and dispatches their tasks; the worker reads the source from GitHub, stores a snapshot in S3, calls Claude on Amazon Bedrock and posts the review back to GitHub.">
+        <defs>
+          <marker id="arrow-slate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+                  orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#7C8FB1" /></marker>
+          <marker id="arrow-lime" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+                  orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B6F35A" /></marker>
+          <marker id="arrow-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7"
+                  orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#8B5CF6" /></marker>
+          <!-- Sized on the whole diagram: a straight edge has a flat bounding box that would clip the glow. -->
+          <filter id="glow" filterUnits="userSpaceOnUse" x="-20" y="-20" width="910" height="450">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="3.5" result="blur" />
+            <feFlood flood-color="#B6F35A" flood-opacity="0.95" />
+            <feComposite in2="blur" operator="in" result="halo" />
+            <feMerge><feMergeNode in="halo" /><feMergeNode in="halo" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+          <filter id="glow-aws" filterUnits="userSpaceOnUse" x="-20" y="-20" width="910" height="450">
+            <feGaussianBlur in="SourceAlpha" stdDeviation="3" result="blur" />
+            <feFlood flood-color="#FF9900" flood-opacity="0.9" />
+            <feComposite in2="blur" operator="in" result="halo" />
+            <feMerge><feMergeNode in="halo" /><feMergeNode in="SourceGraphic" /></feMerge>
+          </filter>
+          <!-- White logos: Simple Icons (GitHub, Temporal, Claude), Heroicons (S3) and the AWS Architecture Icons
+               glyphs. -->
+          <symbol id="i-github" viewBox="0 0 24 24"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" /></symbol>
+          <symbol id="i-temporal" viewBox="0 0 24 24"><path d="M16.206 7.794C15.64 3.546 14.204 0 12 0 9.796 0 8.361 3.546 7.794 7.794 3.546 8.36 0 9.796 0 12c0 2.204 3.546 3.639 7.794 4.206C8.36 20.453 9.796 24 12 24c2.204 0 3.639-3.546 4.206-7.794C20.454 15.64 24 14.204 24 12c0-2.204-3.547-3.64-7.794-4.206Zm-8.55 7.174c-4.069-.587-6.44-1.932-6.44-2.969 0-1.036 2.372-2.381 6.44-2.969-.09.98-.137 1.98-.137 2.97 0 .99.047 1.99.137 2.968zM12 1.215c1.036 0 2.381 2.372 2.969 6.44a32.718 32.718 0 0 0-5.938 0c.587-4.068 1.932-6.44 2.969-6.44Zm4.344 13.753c-.2.03-1.022.126-1.23.146-.02.209-.117 1.03-.145 1.23-.588 4.068-1.933 6.44-2.97 6.44-1.036 0-2.38-2.372-2.968-6.44-.03-.2-.126-1.022-.147-1.23a31.833 31.833 0 0 1 0-6.23 31.813 31.813 0 0 1 7.46.146c4.068.587 6.442 1.933 6.442 2.969-.001 1.036-2.374 2.382-6.442 2.97z" /></symbol>
+          <symbol id="i-claude" viewBox="0 0 24 24"><path d="m4.7144 15.9555 4.7174-2.6471.079-.2307-.079-.1275h-.2307l-.7893-.0486-2.6956-.0729-2.3375-.0971-2.2646-.1214-.5707-.1215-.5343-.7042.0546-.3522.4797-.3218.686.0608 1.5179.1032 2.2767.1578 1.6514.0972 2.4468.255h.3886l.0546-.1579-.1336-.0971-.1032-.0972L6.973 9.8356l-2.55-1.6879-1.3356-.9714-.7225-.4918-.3643-.4614-.1578-1.0078.6557-.7225.8803.0607.2246.0607.8925.686 1.9064 1.4754 2.4893 1.8336.3643.3035.1457-.1032.0182-.0728-.164-.2733-1.3539-2.4467-1.445-2.4893-.6435-1.032-.17-.6194c-.0607-.255-.1032-.4674-.1032-.7285L6.287.1335 6.6997 0l.9957.1336.419.3642.6192 1.4147 1.0018 2.2282 1.5543 3.0296.4553.8985.2429.8318.091.255h.1579v-.1457l.1275-1.706.2368-2.0947.2307-2.6957.0789-.7589.3764-.9107.7468-.4918.5828.2793.4797.686-.0668.4433-.2853 1.8517-.5586 2.9021-.3643 1.9429h.2125l.2429-.2429.9835-1.3053 1.6514-2.0643.7286-.8196.85-.9046.5464-.4311h1.0321l.759 1.1293-.34 1.1657-1.0625 1.3478-.8804 1.1414-1.2628 1.7-.7893 1.36.0729.1093.1882-.0183 2.8535-.607 1.5421-.2794 1.8396-.3157.8318.3886.091.3946-.3278.8075-1.967.4857-2.3072.4614-3.4364.8136-.0425.0304.0486.0607 1.5482.1457.6618.0364h1.621l3.0175.2247.7892.522.4736.6376-.079.4857-1.2142.6193-1.6393-.3886-3.825-.9107-1.3113-.3279h-.1822v.1093l1.0929 1.0686 2.0035 1.8092 2.5075 2.3314.1275.5768-.3218.4554-.34-.0486-2.2039-1.6575-.85-.7468-1.9246-1.621h-.1275v.17l.4432.6496 2.3436 3.5214.1214 1.0807-.17.3521-.6071.2125-.6679-.1214-1.3721-1.9246L14.38 17.959l-1.1414-1.9428-.1397.079-.674 7.2552-.3156.3703-.7286.2793-.6071-.4614-.3218-.7468.3218-1.4753.3886-1.9246.3157-1.53.2853-1.9004.17-.6314-.0121-.0425-.1397.0182-1.4328 1.9672-2.1796 2.9446-1.7243 1.8456-.4128.164-.7164-.3704.0667-.6618.4008-.5889 2.386-3.0357 1.4389-1.882.929-1.0868-.0062-.1579h-.0546l-6.3385 4.1164-1.1293.1457-.4857-.4554.0608-.7467.2307-.2429 1.9064-1.3114Z" /></symbol>
+          <symbol id="i-lambda" viewBox="8 8 48 48"><path fill-rule="evenodd" d="M22.68 52h-9.106l10.264-21.59 4.562 9.451zm2.047-24.333a.99.99 0 0 0-.896-.564h-.003a.99.99 0 0 0-.896.569L11.097 52.569c-.147.31-.126.674.057.965.181.29.5.466.842.466H23.31a1 1 0 0 0 .9-.572l6.194-13.144a1 1 0 0 0-.005-.864zM51.008 52h-9.022L26.955 19.578a1 1 0 0 0-.903-.578h-5.924l.007-7h11.68l14.96 32.42c.163.354.516.58.904.58h3.33zm.996-9h-3.69l-14.96-32.42a1 1 0 0 0-.903-.58H19.14a1 1 0 0 0-.996.999l-.008 9A.993.993 0 0 0 19.131 21h6.286l15.03 32.422a1 1 0 0 0 .903.578h10.654c.55 0 .996-.448.996-1v-9c0-.552-.445-1-.996-1" /></symbol>
+          <symbol id="i-s3" viewBox="0 0 24 24"><path d="M21 6.375c0 2.692-4.03 4.875-9 4.875S3 9.067 3 6.375 7.03 1.5 12 1.5s9 2.183 9 4.875Z" /><path d="M12 12.75c2.685 0 5.19-.586 7.078-1.609a8.283 8.283 0 0 0 1.897-1.384c.016.121.025.244.025.368C21 12.817 16.97 15 12 15s-9-2.183-9-4.875c0-.124.009-.247.025-.368a8.285 8.285 0 0 0 1.897 1.384C6.809 12.164 9.315 12.75 12 12.75Z" /><path d="M12 16.5c2.685 0 5.19-.586 7.078-1.609a8.282 8.282 0 0 0 1.897-1.384c.016.121.025.244.025.368 0 2.692-4.03 4.875-9 4.875s-9-2.183-9-4.875c0-.124.009-.247.025-.368a8.284 8.284 0 0 0 1.897 1.384C6.809 15.914 9.315 16.5 12 16.5Z" /><path d="M12 20.25c2.685 0 5.19-.586 7.078-1.609a8.282 8.282 0 0 0 1.897-1.384c.016.121.025.244.025.368 0 2.692-4.03 4.875-9 4.875s-9-2.183-9-4.875c0-.124.009-.247.025-.368a8.284 8.284 0 0 0 1.897 1.384C6.809 19.664 9.315 20.25 12 20.25Z" /></symbol>
+          <symbol id="i-agentcore" viewBox="8 8 48 48"><path fill-rule="evenodd" d="m53.372 21.073-2.475-.993-.964-2.446a1 1 0 0 0-1.862.002l-.973 2.48-2.46.954a1 1 0 0 0 .005 1.866l2.512.961.907 2.451a1 1 0 0 0 .923.653H49a1 1 0 0 0 .928-.626l1.01-2.506 2.422-.935a1.002 1.002 0 0 0 .012-1.861m-3.559 1.086c-.257.1-.463.302-.567.56l-.206.51-.167-.452a1 1 0 0 0-.58-.587l-.51-.195.447-.174a1 1 0 0 0 .569-.567l.205-.522.155.395c.091.31.33.559.634.665l.477.191zm1.402 8.694-7.207-2.89-2.81-7.125a1.24 1.24 0 0 0-1.164-.792c-.517 0-.975.311-1.164.793l-2.839 7.236-3.03 1.176V13.998a1 1 0 0 0-.552-.894l-6.002-2.998a1 1 0 0 0-.932.02l-9 5A1 1 0 0 0 16 16v7.382l-5.447 2.723A1 1 0 0 0 10 27v10a1 1 0 0 0 .485.857L15 40.567V47a1 1 0 0 0 .521.878l11 6a1 1 0 0 0 .994-.02l5-3A1 1 0 0 0 33 50V34.765l3.214 1.228 2.652 7.169c.18.487.633.808 1.153.816h.02c.512 0 .965-.305 1.16-.783l2.94-7.29 7.06-2.725c.483-.186.797-.64.801-1.158a1.24 1.24 0 0 0-.785-1.169M26.977 51.848l-3.203-1.746 3.74-2.245-1.029-1.714-4.747 2.848L17 46.406v-5.84l4.515-2.709-1.03-1.714L16 38.833l-4-2.4v-3.815l5.447-2.724-.894-1.788L12 30.382v-2.764l4.956-2.478L21 27.566v2.816l-3.447 1.723.894 1.79 3.556-1.778 3.554 1.76.886-1.792L23 30.38v-2.814l4.515-2.709A1 1 0 0 0 28 24v-5h-2v4.434l-4 2.4-4-2.4v-6.846l3-1.666V21h2v-7.19l3.024-1.68 4.978 2.486L31 36.45l-10.538 6.706 1.074 1.688 9.464-6.023L31 49.435zm16.038-17.653c-.258.1-.464.303-.568.56l-2.379 5.894-2.136-5.776a1 1 0 0 0-.58-.586L33 32.624v-1.229l4.162-1.615a1 1 0 0 0 .57-.567l2.303-5.87 2.207 5.596c.075.352.342.636.683.745L48.702 32z" /></symbol>
+          <symbol id="i-aws" viewBox="4 8 32 24"><path fill-rule="evenodd" d="M32.698 23.9c.361.47-.4 2.4-.74 3.264-.105.262.117.365.35.168 1.512-1.284 1.904-3.975 1.593-4.363-.307-.386-2.95-.717-4.563.432-.249.177-.206.42.07.389.907-.112 2.93-.357 3.29.11m-.842 2.01c.518-.378.074-.941-.454-.72-3.513 1.464-7.327 2.173-10.8 2.173-5.143 0-10.127-1.39-14.156-3.695-.352-.202-.613.155-.319.414 3.733 3.316 8.67 5.309 14.147 5.309 3.91 0 8.451-1.208 11.582-3.481m-2.144-5.215a6.6 6.6 0 0 1-1.459-.161q-.714-.163-1.093-.373-.233-.128-.29-.258a.7.7 0 0 1-.059-.26v-.47q0-.29.216-.292.083.002.173.033.091.034.241.098.48.21 1.044.324.564.113 1.126.113.895 0 1.384-.308a.97.97 0 0 0 .49-.873.88.88 0 0 0-.258-.65q-.256-.258-.952-.484l-1.375-.421q-1.045-.325-1.517-.938a2.17 2.17 0 0 1-.472-1.347q0-.581.258-1.027.255-.445.676-.761.427-.314.99-.478A4.3 4.3 0 0 1 30.025 12q.315 0 .64.04a6.3 6.3 0 0 1 1.15.252q.248.082.4.162a.9.9 0 0 1 .28.227.5.5 0 0 1 .083.308v.436q0 .291-.217.29-.114.002-.364-.111c-.54-.24-1.15-.356-1.82-.356q-.815 0-1.262.258-.448.26-.448.827 0 .388.283.655.281.267 1.044.51l1.342.423q1.028.322 1.466.888.441.568.441 1.295 0 .6-.25 1.078-.248.477-.689.817a3.1 3.1 0 0 1-1.05.518q-.615.179-1.343.178m-12.165-.244q-.248.002-.365-.087-.117-.09-.199-.365l-2.222-7.157a1.8 1.8 0 0 1-.082-.371q0-.227.233-.227h.927q.265 0 .374.09.106.086.19.364l1.59 6.12 1.477-6.12q.066-.278.181-.364.116-.09.38-.09h.765q.263 0 .38.09.116.086.182.364l1.493 6.2 1.64-6.2q.082-.278.19-.364.109-.09.373-.09h.878q.233 0 .233.227a1 1 0 0 1-.016.144 2 2 0 0 1-.068.227l-2.286 7.157q-.083.275-.2.365-.116.088-.364.087h-.813q-.264.001-.38-.094-.116-.099-.182-.373l-1.476-5.96-1.457 5.96q-.067.274-.183.373-.116.095-.38.094zM9.94 19.449q.465 0 .98-.17.513-.17.893-.592.232-.259.324-.591.09-.33.09-.801v-.388a8 8 0 0 0-1.757-.211q-.945 0-1.408.373-.464.37-.465 1.07 0 .645.35.978.347.332.993.332m3.846-1.408q0 .517.107.825.11.31.307.664a.4.4 0 0 1 .066.209q0 .148-.182.276l-.597.39a.5.5 0 0 1-.248.08.4.4 0 0 1-.282-.128 2 2 0 0 1-.339-.43 6 6 0 0 1-.29-.544q-1.112 1.28-2.785 1.28-1.194.001-1.89-.664-.696-.664-.696-1.78 0-1.182.863-1.903.86-.72 2.32-.721.48 0 1.002.073t1.084.203v-.68q.001-1.052-.446-1.482-.446-.428-1.54-.428a4.5 4.5 0 0 0-1.02.12 7.5 7.5 0 0 0-1.02.315 3 3 0 0 1-.33.122.7.7 0 0 1-.15.024q-.199.001-.2-.292v-.452q.001-.228.068-.323.066-.099.265-.195a6 6 0 0 1 1.192-.421 6 6 0 0 1 1.476-.18c1.126 0 1.952.254 2.477.754q.787.753.788 2.275z" /></symbol>
+        </defs>
+
+        <!-- The AWS account: everything inside runs in the same AWS tenant. -->
+        <rect x="160" y="130" width="717" height="230" rx="14" class="zone zone-aws" />
+        <rect x="160" y="130" width="717" height="230" rx="14" class="zone-run" pathLength="1000" />
+        <!-- The tag is the hover target: a transparent box gives the logo and label a solid hit area. -->
+        <g class="aws-tag">
+          <rect x="168" y="328" width="112" height="26" rx="4" class="aws-tag-hit" />
+          <use href="#i-aws" x="174" y="333" width="21" height="16" class="icon icon-aws" />
+          <text x="202" y="345" class="zone-label zone-label-aws">AWS account</text>
+        </g>
+        <rect x="415" y="182" width="210" height="146" rx="11" class="zone zone-lime" />
+        <use href="#i-agentcore" x="427" y="191" width="14" height="14" class="icon icon-lime" />
+        <text x="447" y="202" class="zone-label zone-label-lime">AgentCore Runtime</text>
+
+        <!-- Edges: each has a pulse overlay that the hover animation moves along it. Labels sit about 10 px off
+             their line. -->
+        <path d="M135,255 H223" class="edge" data-edge="webhook" marker-end="url(#arrow-slate)" />
+        <path d="M135,255 H223" class="pulse" data-pulse="webhook" />
+        <text data-for="webhook" x="192" y="244" class="edge-label">webhook</text>
+        <path d="M300,225 V46 H428" class="edge" data-edge="signal" marker-end="url(#arrow-slate)" />
+        <path d="M300,225 V46 H428" class="pulse" data-pulse="signal" />
+        <text data-for="signal" x="365" y="35" class="edge-label">signal</text>
+        <path d="M590,76 V223" class="edge edge-lime" data-edge="start" marker-end="url(#arrow-lime)" />
+        <path d="M590,76 V223" class="pulse" data-pulse="start" />
+        <text data-for="start" x="600" y="99.7" class="edge-label edge-label-lime label-start"><tspan
+              x="600">starts workers on demand</tspan><tspan x="600" dy="14">dispatches tasks</tspan></text>
+        <path d="M608,243 H645 V198 H718" class="edge" data-edge="llm" marker-end="url(#arrow-slate)" />
+        <path d="M608,243 H645 V198 H718" class="pulse" data-pulse="llm" />
+        <text data-for="llm" x="681" y="187" class="edge-label">model calls</text>
+        <path d="M608,267 H645 V312 H718" class="edge" data-edge="snapshot" marker-end="url(#arrow-slate)" />
+        <path d="M608,267 H645 V312 H718" class="pulse" data-pulse="snapshot" />
+        <text data-for="snapshot" x="681" y="301" class="edge-label">snapshots</text>
+        <path d="M470,285 V392 H67.5 V287" class="edge edge-violet" data-edge="github"
+              marker-end="url(#arrow-violet)" />
+        <path d="M470,285 V392 H67.5 V287" class="pulse" data-pulse="github" />
+        <text data-for="github" x="275" y="382" class="edge-label edge-label-violet">source, review, check, fix</text>
+
+        <g class="node-g" data-node="temporal" tabindex="0" aria-label="Temporal Cloud">
+          <rect x="430" y="16" width="180" height="60" rx="9" class="node node-violet" />
+          <use href="#i-temporal" x="443" y="36" width="20" height="20" class="icon" />
+          <text x="538" y="42" class="node-title">Temporal Cloud</text>
+          <text x="538" y="60" class="node-sub">durable workflows</text>
+        </g>
+        <g class="node-g" data-node="github" tabindex="0" aria-label="GitHub">
+          <rect x="0" y="225" width="135" height="60" rx="9" class="node" />
+          <use href="#i-github" x="13" y="245" width="20" height="20" class="icon" />
+          <text x="85.5" y="251" class="node-title">GitHub</text>
+          <text x="85.5" y="269" class="node-sub">pull requests</text>
+        </g>
+        <g class="node-g" data-node="router" tabindex="0" aria-label="Lambda router">
+          <rect x="225" y="225" width="150" height="60" rx="9" class="node" />
+          <use href="#i-lambda" x="238" y="245" width="20" height="20" class="icon" />
+          <text x="318" y="251" class="node-title">Lambda router</text>
+          <text x="318" y="269" class="node-sub">webhook → signal</text>
+        </g>
+        <g class="node-g" data-node="worker" tabindex="0" aria-label="Temporal worker">
+          <rect x="432" y="225" width="176" height="60" rx="9" class="node node-lime" />
+          <use href="#i-temporal" x="445" y="245" width="20" height="20" class="icon" />
+          <text x="538" y="251" class="node-title">Temporal worker</text>
+          <text x="538" y="269" class="node-sub">Strands agents</text>
+        </g>
+        <g class="node-g" data-node="claude">
+          <rect x="720" y="170" width="145" height="56" rx="9" class="node" />
+          <use href="#i-claude" x="733" y="188" width="20" height="20" class="icon" />
+          <text x="810.5" y="194" class="node-title">Claude</text>
+          <text x="810.5" y="212" class="node-sub">Amazon Bedrock</text>
+        </g>
+        <g class="node-g" data-node="s3">
+          <rect x="720" y="284" width="145" height="56" rx="9" class="node" />
+          <use href="#i-s3" x="733" y="302" width="20" height="20" class="icon" />
+          <text x="810.5" y="308" class="node-title">Amazon S3</text>
+          <text x="810.5" y="326" class="node-sub">repo snapshots</text>
+        </g>
+      </svg>
+    </figure>
+
+    <section class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+      <template x-for="figure in figures()" :key="figure.label">
+        <div class="group cursor-pointer rounded-xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm
+                    transition duration-200 hover:-translate-y-0.5 hover:border-violet/50 hover:bg-white/[0.06]
+                    hover:shadow-[0_0_32px_-10px_#8B5CF6]">
+          <div data-figure-value
+               class="font-mono text-3xl font-semibold text-white transition-colors duration-200 group-hover:text-lime"
+               x-text="figure.value ?? '—'"></div>
+          <div class="mt-2 font-mono text-[10px] uppercase leading-tight tracking-[0.18em] text-slateb
+                      transition-colors duration-200 group-hover:text-neutral-300"
+               x-text="figure.label"></div>
+        </div>
+      </template>
+    </section>
+
+  </div>
+
+  <script type="module">
+    // Hovering a component replays its links in the order of the flow, in a loop until the pointer leaves. Every pulse
+    // follows its arrow. The worker's single GitHub step stands for both calls, the source and the review.
+    const FLOWS = {
+      github: ["webhook"],
+      router: ["signal"],
+      temporal: ["start"],
+      worker: ["github", "snapshot", "llm"],
+    };
+    // The component each edge leads to: it lights up when the pulse reaches it.
+    const TARGETS = {
+      webhook: "router",
+      signal: "temporal",
+      start: "worker",
+      llm: "claude",
+      snapshot: "s3",
+      github: "github",
+    };
+    const PULSE = 44, SPEED = 0.3, PAUSE = 220, LOOP_PAUSE = 800;  // dash length, px per ms, ms between steps and loops
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+    const svg = document.querySelector("svg.arch");
+    let run = 0, running = null, playing = null;
+
+    const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+    const lit = (name) => svg.querySelectorAll(`[data-edge="${name}"], [data-for="${name}"]`);
+
+    function hit(node) {
+      const group = svg.querySelector(`[data-node="${node}"]`);
+      group.classList.remove("hit");
+      void group.getBBox();  // restarts the animation when the same node is hit twice in a row
+      group.classList.add("hit");
+    }
+
+    async function pulse(name, token) {
+      const path = svg.querySelector(`[data-pulse="${name}"]`);
+      const length = path.getTotalLength();
+      lit(name).forEach((el) => el.classList.add("active"));
+      if (reduced.matches) {
+        await sleep(700);
+      } else {
+        // A dash of PULSE px followed by a gap as long as the path: only one dash is ever visible.
+        path.style.strokeDasharray = `${PULSE} ${length}`;
+        const frames = [{ strokeDashoffset: PULSE, opacity: 1 }, { strokeDashoffset: -length, opacity: 1 }];
+        running = path.animate(frames, {
+          duration: Math.max(900, length / SPEED), easing: "ease-in-out",
+        });
+        await running.finished.catch(() => {});
+      }
+      if (token !== run) return;
+      hit(TARGETS[name]);
+      lit(name).forEach((el) => el.classList.remove("active"));
+    }
+
+    // A click fires focus after pointerenter: the flow already playing goes on rather than restarting.
+    async function play(node) {
+      if (node === playing) return;
+      stop();
+      playing = node;
+      const token = ++run;
+      svg.classList.add("flowing");
+      while (token === run) {
+        for (const name of FLOWS[node]) {
+          if (token !== run) return;
+          await pulse(name, token);
+          await sleep(PAUSE);
+        }
+        await sleep(LOOP_PAUSE);
+      }
+    }
+
+    function stop() {
+      run++;
+      playing = null;
+      running?.cancel();
+      svg.classList.remove("flowing");
+      svg.querySelectorAll(".active, .hit").forEach((el) => el.classList.remove("active", "hit"));
+    }
+
+    svg.querySelectorAll(".node-g[tabindex]").forEach((group) => {
+      group.addEventListener("pointerenter", () => play(group.dataset.node));
+      group.addEventListener("pointerleave", stop);
+      group.addEventListener("focus", () => play(group.dataset.node));
+      group.addEventListener("blur", stop);
+    });
+  </script>
+</body>
+</html>

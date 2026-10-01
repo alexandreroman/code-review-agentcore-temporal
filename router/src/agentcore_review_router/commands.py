@@ -136,7 +136,7 @@ async def _kill(command: RunCommand, client: Client, app: GitHubApp, deadline: f
         return "/kill: dev worker"
     targets: list[AgentCoreSession] = []
     if settings.runtime_arn:  # empty until the first make deploy: no AgentCore worker yet
-        targets = kill_targets(await temporal_ops.poller_identities(client, settings.task_queue))
+        targets = kill_targets(poller.identity for poller in await temporal_ops.pollers(client, settings.task_queue))
     if not targets:
         await _best_effort(_reply(app, command.pr, NO_WORKER_REPLY), fields)
         return "/kill: no active worker"

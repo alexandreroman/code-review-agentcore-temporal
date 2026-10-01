@@ -1,7 +1,8 @@
 """Temporal calls made by the router: start or signal the pull request workflow, describe it, list pollers."""
 
 import asyncio
-from datetime import timedelta
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
 from agentcore_review_shared.contract import PULL_REQUEST_WORKFLOW, SIGNAL_PR_UPDATED
 from pydantic import BaseModel
@@ -64,8 +65,14 @@ async def workflow_task_queue(client: Client, workflow_id: str) -> str | None:
     return description.task_queue
 
 
-async def poller_identities(client: Client, task_queue: str) -> list[str]:
-    """Identities polling the queue for workflow or activity tasks (the server keeps ~5 minutes of them)."""
+@dataclass(frozen=True)
+class Poller:
+    identity: str
+    last_access: datetime
+
+
+async def pollers(client: Client, task_queue: str, timeout: timedelta = RPC_TIMEOUT) -> list[Poller]:
+    """Workers polling the queue for workflow or activity tasks (the server keeps ~5 minutes of them)."""
     kinds = (TaskQueueType.TASK_QUEUE_TYPE_WORKFLOW, TaskQueueType.TASK_QUEUE_TYPE_ACTIVITY)
     responses = await asyncio.gather(
         *(
@@ -75,9 +82,13 @@ async def poller_identities(client: Client, task_queue: str) -> list[str]:
                     task_queue=TaskQueue(name=task_queue, kind=TaskQueueKind.TASK_QUEUE_KIND_NORMAL),
                     task_queue_type=kind,
                 ),
-                timeout=RPC_TIMEOUT,
+                timeout=timeout,
             )
             for kind in kinds
         )
     )
-    return [poller.identity for response in responses for poller in response.pollers]
+    return [
+        Poller(poller.identity, poller.last_access_time.ToDatetime(tzinfo=UTC))
+        for response in responses
+        for poller in response.pollers
+    ]

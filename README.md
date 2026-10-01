@@ -201,6 +201,16 @@ Maintain:
 
 `make help` lists every target.
 
+## Status page
+
+Open the webhook URL of the GitHub App (its settings on GitHub show it)
+in a browser to see a status page: the architecture, where hovering a
+component replays its flow (four components react), and four figures
+read from Temporal every 15 seconds: active AgentCore sessions, reviews
+in progress, agents at work and reviews completed in the last 24 hours.
+The page is public and read-only, and it reads the production task queue
+and visibility only, so it never wakes a worker.
+
 ## Observability
 
 Temporal UI shows every workflow with its activities and child workflows.
@@ -230,7 +240,7 @@ in the demo repository and reports each step.
 | Module    | Description                                                   |
 | --------- | ------------------------------------------------------------- |
 | `shared`  | Contract shared by the router and the worker                  |
-| `router`  | GitHub webhook handler that turns events into Temporal calls  |
+| `router`  | GitHub webhook handler that calls Temporal, and status page   |
 | `worker`  | Temporal workflows, review agents and their activities        |
 | `tools`   | GitHub App registration tooling called by the Makefile        |
 | `infra`   | OpenTofu stacks: `bootstrap`, `aws`, `github`                 |

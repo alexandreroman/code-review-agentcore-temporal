@@ -72,6 +72,9 @@ resource "aws_lambda_function" "router" {
   layers           = [aws_lambda_layer_version.router_deps.arn]
   memory_size      = 512
   timeout          = 10
+  # The status page is public and every container reads Temporal every 15 s: the cap bounds the Temporal calls a
+  # burst of page requests can cause. Webhooks and the /kill self-invocation need far fewer.
+  reserved_concurrent_executions = 10
 
   logging_config {
     log_format = "JSON"
