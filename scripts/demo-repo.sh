@@ -1,6 +1,7 @@
 # shellcheck shell=bash
-# Fills and resets the demo repository $GITHUB_OWNER/$DEMO_REPO (sourced by
-# scripts/github.sh after scripts/lib.sh, not executed directly).
+# Fills, rebuilds and resets the demo repository $GITHUB_OWNER/$DEMO_REPO
+# (sourced by scripts/github.sh and scripts/demo-reset.sh after scripts/lib.sh,
+# not executed directly).
 #
 # The demo application lives in demo/, relative to the repository root the
 # scripts run from: demo/baseline holds the starting state of the demo, and
@@ -40,6 +41,17 @@ build_demo_history() {
   )
 }
 
+# push_demo_history DIR [--force]: pushes the history that build_demo_history
+# built in DIR to the demo repository: main at the baseline tag, plus the
+# baseline and scenario/customer-search tags. With --force, it overwrites
+# whatever these refs point to.
+push_demo_history() {
+  local dir="$1"
+  local force="${2:-}"
+  git -C "$dir" push ${force:+"$force"} "https://github.com/$GITHUB_OWNER/$DEMO_REPO.git" \
+    'baseline^{commit}:refs/heads/main' refs/tags/baseline refs/tags/scenario/customer-search
+}
+
 # fill_demo_repo: pushes the demo application from demo/ while the demo
 # repository has no branch: main at the baseline tag, plus the baseline and
 # scenario/customer-search tags. Once the repository has content, this does
@@ -59,11 +71,28 @@ fill_demo_repo() {
   (
     trap 'rm -rf "$repo"' EXIT
     build_demo_history "$repo"
-    git -C "$repo" push "https://github.com/$target.git" 'baseline^{commit}:refs/heads/main' \
-      refs/tags/baseline refs/tags/scenario/customer-search
+    push_demo_history "$repo"
   )
   # shellcheck disable=SC2034 # read by scripts/github.sh
   DEMO_REPO_FILLED=true
+}
+
+# rebuild_demo_repo: builds a new history from demo/ (new commits, even when
+# demo/ is unchanged) and force-pushes it over the demo repository: main at
+# the baseline tag, plus the baseline and scenario/customer-search tags. The
+# scenario branches keep their old commits until reset_demo_repo recreates
+# them. The rulesets on main and the tags let only an admin force-push (git
+# then prints "Bypassed rule violations").
+rebuild_demo_repo() {
+  echo "Force-pushing a new history of the demo application from demo/ into $GITHUB_OWNER/$DEMO_REPO"
+  local repo
+  repo=$(mktemp -d)
+  # A subshell, so that its EXIT trap removes the repository on every exit path.
+  (
+    trap 'rm -rf "$repo"' EXIT
+    build_demo_history "$repo"
+    push_demo_history "$repo" --force
+  )
 }
 
 # latest_reset_run: prints the ID of the latest "Reset demo" run started by

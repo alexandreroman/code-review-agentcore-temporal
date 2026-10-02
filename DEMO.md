@@ -36,11 +36,11 @@ request, comment and reset below happens there, not in this repository.
 > `pyproject.toml` files, `shared/src/`, `worker/src/` and
 > `worker/Dockerfile` untouched, committed or not: the build ID hashes
 > these paths, so any change makes the next `make up` build and push a new
-> image. Docs and tests are safe to edit, and so is `demo/`: it only
-> reaches a demo repository that is still empty. The deployment is done:
-> no `make up` before the demo. After a new build anyway, demo on a fresh
-> PR only: an open PR moves to the new build only after its next action
-> or idle timer (see
+> image. Docs and tests are safe to edit, and so is `demo/`: it reaches a
+> filled demo repository only through `make demo-reset`, which builds no
+> image. The deployment is done: no `make up` before the demo. After a new
+> build anyway, demo on a fresh PR only: an open PR moves to the new build
+> only after its next action or idle timer (see
 > [Updating and tearing down](SETUP.md#updating-and-tearing-down)).
 
 ## Pre-demo checklist (30 minutes before)
@@ -52,7 +52,9 @@ request, comment and reset below happens there, not in this repository.
 3. **Reset** the demo repository: its **Actions** tab, **Reset demo**,
    **Run workflow**, or
    `gh workflow run reset-demo.yml --repo <owner>/agentcore-review-demo-app`.
-   Wait for the green run.
+   Wait for the green run. For a **New pull request** page that shows no
+   earlier PR, run `make demo-reset` instead: it rebuilds the repository
+   from `demo/` with new commits, then runs the same workflow.
 4. **Back to zero**: `make kill-sessions`, so no worker runs when the demo
    starts.
 5. **Tabs**, in this order:

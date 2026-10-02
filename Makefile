@@ -172,6 +172,11 @@ prune: namespace router-build infra-init ## Remove the endpoints and versions of
 delete-workflows: namespace ## Delete every closed workflow execution of the namespace (running ones are kept)
 	scripts/delete-workflows.sh
 
+.PHONY: demo-reset
+demo-reset: ## Rebuild the demo repository from demo/ (new commits) and reset it (force-push, asks first; YES=1 skips)
+	$(call require,GITHUB_OWNER,log in with gh or set GITHUB_OWNER in .env)
+	@GITHUB_OWNER=$(GITHUB_OWNER) scripts/demo-reset.sh
+
 .PHONY: destroy
 destroy: namespace router-build infra-init ## Destroy the AWS resources (asks first; GitHub and the state bucket stay)
 	scripts/destroy.sh

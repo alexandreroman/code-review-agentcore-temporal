@@ -22,10 +22,18 @@ from this folder: a commit of the content of `baseline/`, tagged
 The **Reset demo** workflow then creates the `feature/customer-search` and
 `dev/customer-search` branches from the scenario tag.
 
+`make up` does this only while the demo repository is empty.
+`make demo-reset` does it over a filled one: it force-pushes a new
+history, with new commits, then runs **Reset demo**.
+
 ## Changing the demo
 
 - `make up` pushes the demo only into an empty demo repository; it never
   overwrites one that already has content.
+- `make demo-reset` ships a change of `demo/` into a filled demo
+  repository. It rebuilds the history with new commits, so GitHub presents
+  no earlier pull request on the "new pull request" page. It closes the
+  open pull requests, and `main` loses any merge made since the last reset.
 - The patch must apply cleanly on `baseline/` (`git apply`).
 - The line numbers of `expected-findings.yaml` refer to the files at the
   scenario tag: update them whenever the patch changes.

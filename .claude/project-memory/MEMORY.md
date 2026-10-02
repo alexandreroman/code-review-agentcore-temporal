@@ -39,3 +39,4 @@
 - [Timeout layering rule](references/project_timeout_layering.md) — inner layers give up first; every activity heartbeats (5 s / 10 s)
 - [Web pages carry no decorative status indicators](references/feedback_ui_no_decorative_status.md) — no live badge or pulsing dot; state only on error
 - [Conversation answers policy](references/project_conversation_answers.md) — mention rule, code-only scope, collaborator-only context
+- [Demo repository rebuild](references/project_demo_repo_rebuild.md) — make demo-reset: new commits from demo/, PRs start from a clean slate

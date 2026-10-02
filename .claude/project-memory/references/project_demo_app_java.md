@@ -17,5 +17,5 @@ the reviewed code speaks to the people in the room.
 **How to apply:** planted defects, `expected-findings.yaml` line ranges and
 example paths in tool descriptions target Java files. The single flat
 package keeps navigation within the agents' model call budget. A scenario
-change reaches GitHub only through an empty demo repository (see
-`demo/README.md`).
+change reaches GitHub through an empty demo repository (see
+`demo/README.md`) or a [rebuild of its history](project_demo_repo_rebuild.md).

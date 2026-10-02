@@ -197,6 +197,9 @@ Maintain:
 - `make prune`: after an update, remove the AgentCore endpoints and worker
   versions no workflow uses any more.
 - `make delete-workflows`: delete the closed workflows of the namespace.
+- `make demo-reset`: rebuild the demo repository from `demo/` with new
+  commits and reset it, after a confirmation: ships a change of `demo/`
+  and clears earlier pull requests from the "new pull request" page.
 - `make destroy`: remove the AWS resources, after a confirmation. The
   OpenTofu state bucket, the GitHub App, its credentials and the demo
   repository stay for the next `make up`.
