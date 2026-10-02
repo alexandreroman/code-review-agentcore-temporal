@@ -1,9 +1,9 @@
 diff --git a/src/main/java/com/example/orders/CustomerController.java b/src/main/java/com/example/orders/CustomerController.java
 new file mode 100644
-index 0000000..516f75f
+index 0000000..5d24f81
 --- /dev/null
 +++ b/src/main/java/com/example/orders/CustomerController.java
-@@ -0,0 +1,67 @@
+@@ -0,0 +1,70 @@
 +package com.example.orders;
 +
 +import java.util.ArrayList;
@@ -13,6 +13,7 @@ index 0000000..516f75f
 +import org.springframework.data.domain.Sort;
 +import org.springframework.http.HttpStatus;
 +import org.springframework.jdbc.core.simple.JdbcClient;
++import org.springframework.transaction.annotation.Transactional;
 +import org.springframework.web.bind.annotation.GetMapping;
 +import org.springframework.web.bind.annotation.PathVariable;
 +import org.springframework.web.bind.annotation.RequestMapping;
@@ -36,6 +37,7 @@ index 0000000..516f75f
 +    }
 +
 +    @GetMapping("/search")
++    @Transactional(readOnly = true)
 +    List<CustomerSummary> searchCustomers(@RequestParam String q, @RequestParam(defaultValue = "0") int page,
 +            @RequestParam(defaultValue = "20") int size) {
 +        if (size < 1 || size > 100) {
@@ -53,6 +55,7 @@ index 0000000..516f75f
 +    }
 +
 +    @GetMapping("/{customerId}/orders")
++    @Transactional(readOnly = true)
 +    List<OrderSummary> customerOrders(@PathVariable long customerId, @RequestParam(defaultValue = "0") int page,
 +            @RequestParam(defaultValue = "20") int size) {
 +        if (size < 1 || size > 100) {

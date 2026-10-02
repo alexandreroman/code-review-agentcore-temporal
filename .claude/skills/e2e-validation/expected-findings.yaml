@@ -13,15 +13,15 @@ defects:
   - id: sql-injection
     category: security
     file: src/main/java/com/example/orders/CustomerController.java
-    line_ranges: [[41, 46]]
+    line_ranges: [[43, 48]]
     summary: Customer search SQL built by string concatenation and run through JdbcClient
   - id: n-plus-one
     category: performance
     file: src/main/java/com/example/orders/CustomerController.java
-    line_ranges: [[61, 64]]
+    line_ranges: [[64, 67]]
     summary: Order history loads each order's lines with one findByOrderId query per order
   - id: duplicated-validation
     category: maintainability
     file: src/main/java/com/example/orders/CustomerController.java
-    line_ranges: [[35, 40], [52, 57]]
+    line_ranges: [[37, 42], [55, 60]]
     summary: Identical page/size checks in both endpoints, and no tests

@@ -3,6 +3,7 @@ package com.example.orders;
 import jakarta.validation.Valid;
 
 import org.springframework.http.HttpStatus;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -25,6 +26,7 @@ class OrderController {
     }
 
     @GetMapping("/{orderId}")
+    @Transactional(readOnly = true)
     OrderResponse getOrder(@PathVariable long orderId) {
         var order = orderRepository.findWithCustomerAndLinesById(orderId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "order not found"));
