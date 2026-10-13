@@ -13,6 +13,8 @@ diff and search the repository; a fourth one merges their findings into a
 single GitHub review, with comments on the affected lines and an
 `AI Review` check.
 
+https://github.com/user-attachments/assets/183f2476-ae9c-4524-aba4-6d406dcff893
+
 [Temporal Cloud](https://temporal.io/cloud) runs this agent loop as a
 durable workflow, and the integration with
 [Amazon Bedrock AgentCore](https://aws.amazon.com/bedrock/agentcore/)
